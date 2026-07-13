@@ -1,0 +1,90 @@
+# Workflow: subagent-code-review
+# ──────────────────────────────────────────────────────────────────────────────
+# End-to-end demonstration of the WorkflowEngine + SubAgentRunner integration.
+# Run with::
+#
+#     python -c "
+#     from lilith_orchestrator.subagents import SubAgentRunner, register_defaults
+#     from lilith_orchestrator.workflow import WorkflowEngine, load_workflow_file
+#     register_defaults()
+#     engine = WorkflowEngine(
+#         subagent_runner=SubAgentRunner(full_tool_pool=[
+#             'read_file', 'search_files', 'write_file', 'patch',
+#             'terminal', 'web_search',
+#         ]),
+#     )
+#     wf = load_workflow_file('Asgard/lilith-orchestrator/workflows/subagent_code_review.yaml')
+#     print(engine.run(wf).status)
+#     "
+#
+# The flow:
+#   1. planner     →  decomposes the task (no I/O)
+#   2. researcher  →  gathers context + web references (read-only)
+#   3. coder       →  implements the change (read+write+patch+terminal)
+#   4. security    →  audits the change for injection/CVE (read-only + web)
+#   5. reviewer    →  leaves detailed review comments (strict read-only)
+#
+# Every step's `subagent_type` routes through WorkflowEngine._dispatch_subagent_step
+# which calls SubAgentRunner.make_spawn_fn(parent_depth=0) and stores the
+# SubAgentResult on the context as `last_subagent_result`.
+name: subagent-code-review
+description: >
+  Multi-persona code review pipeline. Each step is routed through a
+  SubAgentRunner so the agent's allowed_tools are filtered, depth is
+  tracked, and the spawned SubAgentResult is observable on the workflow
+  context. Demonstrates the full WorkflowEngine + SubAgentRunner contract.
+version: "1.0.0"
+on_failure: abort
+variables:
+  topic: "Asgard orchestrator"
+
+steps:
+  - name: plan
+    intent: planning
+    description: "Decompose the change request into ordered sub-tasks."
+    subagent_type: planner
+    subagent_depth: 0
+    gate:
+      type: min_length
+      min_chars: 80
+    timeout: 30
+
+  - name: research
+    intent: research
+    description: "Gather related code references and external docs."
+    subagent_type: researcher
+    subagent_depth: 0
+    gate:
+      type: min_length
+      min_chars: 100
+    timeout: 60
+
+  - name: implement
+    intent: code
+    description: "Apply the change with write_file or patch."
+    subagent_type: coder
+    subagent_depth: 0
+    gate:
+      type: regex_match
+      pattern: "(implemented|patched|added|updated)"
+    timeout: 120
+
+  - name: audit
+    intent: security
+    description: "Security audit: injection, secrets, CVEs."
+    subagent_type: security
+    subagent_depth: 0
+    gate:
+      type: min_length
+      min_chars: 50
+    timeout: 60
+
+  - name: review
+    intent: review
+    description: "Code review: correctness, style, comments."
+    subagent_type: reviewer
+    subagent_depth: 0
+    gate:
+      type: min_length
+      min_chars: 60
+    timeout: 30

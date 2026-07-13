@@ -1,0 +1,102 @@
+/* Yggdrasil Dark Fantasy Theme */
+/* Inspired by the nine realms of Norse mythology */
+
+Screen {
+    background: $surface;
+    color: $text;
+}
+
+Header {
+    background: $primary;
+    color: $text-muted;
+    dock: top;
+}
+
+Header .header--title {
+    text-style: bold;
+    color: $gold;
+}
+
+Header .header--icon {
+    color: $gold;
+}
+
+Footer {
+    background: $primary-background;
+    color: $text-muted;
+    dock: bottom;
+}
+
+Footer .footer--key {
+    background: $primary;
+    color: $gold;
+}
+
+Footer .footer--description {
+    color: $text-muted;
+}
+
+TabbedContainer {
+    height: 1fr;
+}
+
+TabbedContainer > Tabs {
+    background: $primary-background;
+}
+
+TabbedContainer > Tabs > Tab {
+    color: $text-muted;
+    background: $primary-background;
+}
+
+TabbedContainer > Tabs > Tab.-active {
+    color: $gold;
+    background: $primary;
+    text-style: bold;
+}
+
+TabbedContainer > ContentSwitcher {
+    background: $surface;
+}
+
+.realm-view {
+    height: auto;
+    padding: 1 2;
+}
+
+.realm-table {
+    height: auto;
+    padding: 1 0;
+}
+
+.agent-view {
+    height: auto;
+    padding: 1 2;
+}
+
+.agent-table {
+    height: auto;
+    padding: 1 0;
+}
+
+.log-view {
+    height: 1fr;
+    padding: 0 1;
+}
+
+RichLog {
+    background: $surface;
+    border: round $primary;
+    color: $text;
+    scrollbar-color: $gold;
+    scrollbar-corner-color: $primary;
+    height: 1fr;
+}
+
+Label.realm-label {
+    text-style: bold;
+}
+
+Static {
+    height: auto;
+}

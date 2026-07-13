@@ -1,0 +1,1 @@
+"""LSP integration package (placeholder)."""

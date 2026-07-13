@@ -1,0 +1,56 @@
+# Example policy test scenarios — checked-in reference for
+# `lilith_core.policy_harness.PolicyHarness`.
+#
+# Run with:
+#   python -c "from lilith_core import PolicyEngine, PolicyHarness; \
+#              e = PolicyEngine.from_yaml('policies.yaml'); \
+#              print(PolicyHarness.from_yaml(e, 'policy_scenarios.example.yaml').run().summary())"
+#
+# Add new scenarios here when adding/changing policies; CI fails on
+# regressions because `harness.run().exit_code != 0`.
+
+scenarios:
+  # ── Deny dangerous shell access ──────────────────────────────────────
+  - name: dangerous-shell-blocked
+    description: "shell_exec with rm-rf must be denied"
+    agent: Odin
+    session: prod-001
+    hook_type: pre_tool_call
+    tool: shell_exec
+    data:
+      cmd: "rm -rf /"
+    expect:
+      decision: deny
+      matched_policies: [deny-dangerous-shell]
+
+  - name: safe-shell-allowed
+    description: "shell_exec with ls is logged but allowed"
+    agent: Odin
+    hook_type: pre_tool_call
+    tool: shell_exec
+    data:
+      cmd: "ls -la"
+    expect:
+      decision: any
+
+  # ── Token budget ───────────────────────────────────────────────────
+  - name: short-message-allowed
+    description: "Under-budget messages pass"
+    agent: Mimir
+    hook_type: pre_llm_call
+    data:
+      message: "Hi"
+    expect:
+      decision: any
+
+  # ── Always-rule audit ──────────────────────────────────────────────
+  - name: block-pii-flagged
+    description: "PII in agent message must be flagged at minimum"
+    agent: Adan
+    hook_type: post_tool_call
+    tool: read_email
+    data:
+      message: "contains SSN 123-45-6789"
+    expect:
+      decision: any
+      matched_policies: [audit-pii]

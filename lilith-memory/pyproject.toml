@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lilith-memory"
+version = "1.4.0"
+description = "Vector memory store with SQLite backend + semantic chunker + vector recall (hashed-embedding RAG) + ontology graph"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = ["lilith-core"]
+
+[project.urls]
+Repository = "https://github.com/BrierAinz/lilith-cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["lilith_memory"]
+
+[tool.uv.sources]
+lilith-core = { workspace = true }

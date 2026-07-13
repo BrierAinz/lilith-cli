@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lilith-cli"
+version = "4.4.0"
+description = "Terminal interface for Lilith ecosystem"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "lilith-core",
+    "lilith-skills",
+    "lilith-orchestrator",
+    "lilith-memory",
+    "pydantic>=2",
+    "httpx",
+    "rich",
+    "cyclopts",
+    "prompt-toolkit>=3.0",
+    "pygments>=2.16",
+    "textual>=0.70",
+    "pywinpty>=2.0; sys_platform == 'win32'",
+    "qrcode>=8.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-textual-snapshot",
+]
+
+[project.scripts]
+lilith = "lilith_cli.main:main"
+
+[project.urls]
+Repository = "https://github.com/BrierAinz/lilith-cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["lilith_cli"]
+
+[tool.uv.sources]
+lilith-core = { workspace = true }
+lilith-skills = { workspace = true }
+lilith-orchestrator = { workspace = true }
+lilith-memory = { workspace = true }

@@ -65,20 +65,28 @@ class ProcessManager:
 
     def _is_alive(self, pid: int) -> bool:
         """Return True if *pid* is a running process."""
+        if pid <= 0:
+            return False
         if sys.platform == "win32":
+            # NUNCA usar os.kill(pid, 0) en Windows: cualquier señal que no
+            # sea CTRL_C/CTRL_BREAK llama a TerminateProcess y MATA el proceso.
             import ctypes
 
             kernel = ctypes.windll.kernel32
-            handle = kernel.OpenProcess(1, False, pid)  # PROCESS_TERMINATE
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            STILL_ACTIVE = 259
+            handle = kernel.OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+            )
             if not handle:
                 return False
-            kernel.CloseHandle(handle)
-            # A more robust check is needed; use the subprocess check below.
             try:
-                os.kill(pid, 0)
-                return True
-            except OSError:
-                return False
+                exit_code = ctypes.c_ulong()
+                if not kernel.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                    return False
+                return exit_code.value == STILL_ACTIVE
+            finally:
+                kernel.CloseHandle(handle)
         try:
             os.kill(pid, 0)
             return True

@@ -4023,11 +4023,230 @@ def _set_test_last_failed_path(path: Path) -> None:
     _TEST_LAST_FAILED_PATH = path
 
 
-async def run_test_command(session: AgentSession, args: str) -> None:
-    """Quick test runner (/test [path|pattern|last])."""
-    from lilith_tools.coding_tools import RunTestTool
+# ── /test (subprocess pytest runner) ────────────────────────────────────────
+# Defaults to the Lilith test suite. Pure subprocess wrapper — does NOT mutate
+# the repo. Adds a -k keyword filter and parses the pytest summary line into
+# a small dict so the REPL can render a clean overview.
 
-    text = args.strip()
+_DEFAULT_TEST_SUITE = "lilith-stack/lilith-cli/tests/"
+_PYTEST_SUMMARY_RE = re.compile(
+    r"(?P<passed>\d+)\s+passed|"
+    r"(?P<failed>\d+)\s+failed|"
+    r"(?P<error>\d+)\s+error",
+    re.IGNORECASE,
+)
+_DURATION_RE = re.compile(r"in\s+(?P<seconds>[0-9]+(?:\.[0-9]+)?)s", re.IGNORECASE)
+
+
+def _parse_pytest_summary(text: str) -> dict[str, Any]:
+    """Parse a pytest output blob into a small summary dict.
+
+    Recognises both the canonical ``475 passed in 28.13s`` line and
+    per-segment lines like ``3 failed, 1 passed``. Always returns a dict
+    with the four numeric keys plus ``duration`` (float seconds) and
+    ``last_failure`` (str | None — last ``FAILED`` line if any).
+
+    Args:
+        text: Captured stdout/stderr from a pytest subprocess run.
+
+    Returns:
+        ``{"passed": int, "failed": int, "error": int, "duration": float,
+           "last_failure": str | None}``.
+    """
+    passed = failed = error = 0
+    duration = 0.0
+    last_failure: str | None = None
+
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        # last failure line is more useful than the count itself
+        if line.startswith("FAILED "):
+            last_failure = line
+        for match in _PYTEST_SUMMARY_RE.finditer(line):
+            kind = match.lastgroup
+            if not kind:
+                continue
+            value = int(match.group(kind))
+            if kind == "passed":
+                passed += value
+            elif kind == "failed":
+                failed += value
+            elif kind == "error":
+                error += value
+        dur = _DURATION_RE.search(line)
+        if dur and "=" not in line.split("in", 1)[0][-1:]:
+            # only take the duration when the line looks like a summary,
+            # not e.g. ``passed in 0.01s = setup`` (defensive)
+            try:
+                duration = float(dur.group("seconds"))
+            except ValueError:
+                pass
+
+    return {
+        "passed": passed,
+        "failed": failed,
+        "error": error,
+        "duration": duration,
+        "last_failure": last_failure,
+    }
+
+
+def _render_test_summary(summary: dict[str, Any], returncode: int) -> str:
+    """Format a parsed pytest summary into a one-line Spanish status."""
+    passed = summary.get("passed", 0)
+    failed = summary.get("failed", 0)
+    error = summary.get("error", 0)
+    duration = summary.get("duration", 0.0)
+    bits: list[str] = []
+    if passed:
+        bits.append(f"[success]{passed} passed[/success]")
+    if failed:
+        bits.append(f"[error]{failed} failed[/error]")
+    if error:
+        bits.append(f"[error]{error} error[/error]")
+    if not bits:
+        bits.append("[dim]sin resultados[/dim]")
+    bits.append(f"[dim]{duration:.2f}s[/dim]")
+    if returncode != 0:
+        bits.append(f"[warning]exit={returncode}[/warning]")
+    line = " · ".join(bits)
+    if summary.get("last_failure"):
+        line += f"\n  [error]{summary['last_failure']}[/error]"
+    return line
+
+
+def _run_pytest_subprocess(
+    target: str,
+    *,
+    keyword: str | None = None,
+    extra_args: list[str] | None = None,
+    cwd: Path | None = None,
+) -> dict[str, Any]:
+    """Run pytest via subprocess and return a parsed summary dict.
+
+    Args:
+        target: Path or node-id passed to pytest (e.g. ``tests/`` or
+            ``tests/test_plan.py::test_x``).
+        keyword: Optional ``-k`` expression. ``None`` means no filter.
+        extra_args: Extra pytest flags (e.g. ``["--maxfail=1"]``).
+        cwd: Working directory for the subprocess. ``None`` falls back to
+            the Asgard repo root (parent of the ``lilith-stack`` suite).
+
+    Returns:
+        ``{"passed": int, "failed": int, "error": int, "duration": float,
+           "last_failure": str | None, "returncode": int, "command": list[str]}``.
+    """
+    if cwd is None:
+        # Asgard root sits two levels above lilith-stack/lilith-cli
+        cwd = Path(__file__).resolve().parents[3]
+
+    venv_py = cwd / ".venv" / "Scripts" / "python.exe"
+    if sys.platform != "win32":
+        venv_py = cwd / ".venv" / "bin" / "python"
+
+    cmd: list[str] = [str(venv_py), "-m", "pytest", target, "-q", "--no-header", "--tb=line"]
+    if keyword:
+        cmd.extend(["-k", keyword])
+    if extra_args:
+        cmd.extend(extra_args)
+
+    start = time.monotonic()
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+    except FileNotFoundError as exc:
+        return {
+            "passed": 0,
+            "failed": 0,
+            "error": 0,
+            "duration": time.monotonic() - start,
+            "last_failure": None,
+            "returncode": -1,
+            "command": cmd,
+            "error": f"pytest no disponible: {exc}",
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "passed": 0,
+            "failed": 0,
+            "error": 0,
+            "duration": time.monotonic() - start,
+            "last_failure": None,
+            "returncode": -1,
+            "command": cmd,
+            "error": "pytest excedió el timeout (600s)",
+        }
+
+    output = (proc.stdout or "") + "\n" + (proc.stderr or "")
+    summary = _parse_pytest_summary(output)
+    # If pytest didn't print a duration, fall back to our own clock.
+    if not summary.get("duration"):
+        summary["duration"] = time.monotonic() - start
+    summary["returncode"] = proc.returncode
+    summary["command"] = cmd
+    return summary
+
+
+def _render_test_usage() -> None:
+    """Muestra la ayuda de /test."""
+    console.print("\n[bold realm]᛭ Uso de /test[/]")
+    console.print(
+        "  [cyan]/test[/]                              — corre la suite por defecto "
+        f"({_DEFAULT_TEST_SUITE})"
+    )
+    console.print(
+        "  [cyan]/test <ruta>[/]                       — corre pytest sobre la ruta dada"
+    )
+    console.print(
+        "  [cyan]/test -k <expresión>[/]               — filtra por nombre de test"
+    )
+    console.print(
+        "  [cyan]/test <ruta> -k <expresión>[/]        — ruta + filtro combinados"
+    )
+    console.print(
+        "  [cyan]/test last[/]                         — re-corre los tests que fallaron antes"
+    )
+    console.print("  [cyan]/test --help[/]                       — muestra esta ayuda")
+    console.print()
+
+
+async def run_test_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+    """Ejecuta /test como wrapper directo de pytest.
+
+    Descripción:
+        Lanza pytest en un subproceso desde la raíz de Asgard usando el
+        intérprete ``.venv/Scripts/python.exe``. Por defecto corre la suite
+        de Lilith (``lilith-stack/lilith-cli/tests/``). Imprime un resumen
+        corto: passed/failed/error, duración y la última línea ``FAILED``
+        si hubo fallos. Nunca modifica archivos del repo.
+
+    Uso:
+        /test
+        /test <ruta>
+        /test -k <expresión>
+        /test <ruta> -k <expresión>
+        /test last
+        /test --help
+
+    Ejemplos:
+        /test
+        /test lilith-stack/lilith-cli/tests/test_plan.py
+        /test -k hello
+        /test lilith-stack/lilith-cli/tests/ -k smoke
+        /test last
+    """
+    text = (args or "").strip()
+
+    if text in ("--help", "-h", "help"):
+        _render_test_usage()
+        return
+
+    # /test last  — re-corre los tests fallidos previos
     if text == "last":
         last_file = _test_last_failed_path()
         if not last_file.exists():
@@ -4035,24 +4254,55 @@ async def run_test_command(session: AgentSession, args: str) -> None:
             return
         try:
             import json as _json
+
             data = _json.loads(last_file.read_text(encoding="utf-8"))
             failed = data.get("failed", [])
-            console.print(f"[info]Re-corriendo {len(failed)} tests fallidos...[/info]")
-            pattern = " or ".join(failed)
-            text = pattern
         except Exception as exc:
             console.print(f"[error]Error leyendo historial: {exc}[/error]")
             return
+        if not failed:
+            console.print("[dim]No hay tests fallidos previos.[/dim]")
+            return
+        console.print(f"[info]Re-corriendo {len(failed)} tests fallidos...[/info]")
+        # convert last-failed list into a single -k expression
+        pattern = " or ".join(failed)
+        summary = _run_pytest_subprocess(
+            _DEFAULT_TEST_SUITE, keyword=pattern
+        )
+        console.print(_render_test_summary(summary, summary["returncode"]))
+        console.print()
+        return
 
-    # Use RunTestTool
-    tool = RunTestTool()
-    if not text:
-        text = "."  # cwd
-    result = tool.execute(path=text)
-    print_result = getattr(result, "data", None) or getattr(result, "stdout", None)
-    console.print(str(print_result) if print_result else "[success]✓ Tests OK[/success]")
-    if getattr(result, "returncode", 0) != 0:
-        console.print(f"[warning]Exit code: {result.returncode}[/warning]")
+    # Split args into a target path and an optional -k keyword.
+    target: str = _DEFAULT_TEST_SUITE
+    keyword: str | None = None
+    tokens = text.split()
+    i = 0
+    path_tokens: list[str] = []
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == "-k" and i + 1 < len(tokens):
+            keyword = tokens[i + 1]
+            i += 2
+            continue
+        if tok.startswith("-k="):
+            keyword = tok.split("=", 1)[1]
+            i += 1
+            continue
+        path_tokens.append(tok)
+        i += 1
+    if path_tokens:
+        target = " ".join(path_tokens)
+
+    summary = _run_pytest_subprocess(target, keyword=keyword)
+    if summary.get("error"):
+        console.print(f"[error]{summary['error']}[/error]")
+        console.print(
+            "[dim]tip: verifica que .venv exista y pytest esté instalado[/dim]"
+        )
+        console.print()
+        return
+    console.print(_render_test_summary(summary, summary["returncode"]))
     console.print()
 
 

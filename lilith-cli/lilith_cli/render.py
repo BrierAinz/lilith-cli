@@ -91,47 +91,38 @@ class CLITheme:
 # ── Banner art ────────────────────────────────────────────────────
 
 _NORSE_BANNER = r"""
-           ᛭              ᛟ              ᛭
-    ╔═══════════════════════════════════╗
-    ║          YGGDRASIL  CLI          ║
-    ║             v6.5                  ║
-    ║     Where Ancient Meets Digital  ║
-    ╚═══════════════════════════════════╝
-               ┃      ┃      ┃
-        ───────┸──────┸──────┸──────
-          Asgard  Midgard  Muspelheim
+        ᛭          ᛟ          ᛭
+  ╔═════════════════════════════════╗
+  ║        Y G G D R A S I L        ║
+  ║          C L I · v6.5           ║
+  ║   Where Ancient Meets Digital   ║
+  ╚═════════════════════════════════╝
+        ┃        ┃       ┃
+   ─────┸────────┸───────┸──────
+     Asgard  Midgard  Muspelheim
 """
 
 _CYBERPUNK_BANNER = r"""
-          ▄▄▄▄▄ ▄▄   ▄▄▄▄▄ ▄▄   ▄▄▄
-          █▄▄▄▄ █▄▄  █▄▄▄▄ █▄▄  █▄▄▄
-          █▄▄▄▄ █▄▄▄ █▄▄▄▄ █▄▄▄ █▄▄▄
-    ╔═══════════════════════════════════╗
-    ║       ⟐ YGGDRASIL  CLI ⟐       ║
-    ║             v6.5                  ║
-    ║    Signals From The Edge Nodes   ║
-    ╚═══════════════════════════════════╝
-        ╠══╬══╬══╬══╬══╬══╣
-        ║NE█║▓▓▓║▒▒▒║░░░║DA║
-        ╚══╩══╩══╩══╩══╩══╝
+  ╔═════════════════════════════════╗
+  ║     ⟐  Y G G D R A S I L  ⟐     ║
+  ║          C L I · v6.5           ║
+  ║   Signals From The Edge Nodes   ║
+  ╚═════════════════════════════════╝
+          ╠══╦══╦══╦══╦══╣
+          ║▓▓║▒▒║░░║▒▒║▓▓║
+          ╚══╩══╩══╩══╩══╝
 """
 
 _MINIMAL_BANNER = r"""
-    yggdrasil v6.5
-    ─────────────────
+yggdrasil cli · v6.5
+────────────────────
 """
 
 _LILITH_BANNER = r"""
-                    .          .                            
-                  *    .-””””””-    .-””””””-   *
-             .      ’ .    .’    *    ’ .    . ’      .
-         .-”””””-.’      ’.   *    .’      ’. .-”””””-.
-        ’ .    . ’  L I L I T H  *   L I L I T H  ’ .    . ’
-       .’      ’-.   C L I    *     C L I  .-’      ’.
-       ’.    .’  ’  v4.3.0   *    v4.3.0  ’  ’.    .’
-         ‘-..-’                 *          ‘-..-’
-
-             Demon of Information — assistant terminal
+             ☾  ✦  ☽
+     L I L I T H  ·  C L I
+             v6.5
+  Demon of Information terminal
 """
 
 
@@ -377,18 +368,6 @@ class Timer:
 
 # ── Welcome banner ──────────────────────────────────────────────────
 
-_WELCOME_TREE = r"""
-           ᛭              ᛟ              ᛭
-    ╔═══════════════════════════════════╗
-    ║          YGGDRASIL  CLI          ║
-    ║             v6.5                  ║
-    ║     Where Ancient Meets Digital  ║
-    ╚═══════════════════════════════════╝
-               ┃      ┃      ┃
-        ───────┸──────┸──────┸──────
-          Asgard  Midgard  Muspelheim
-"""
-
 
 def render_welcome(
     model: str = "",
@@ -398,9 +377,10 @@ def render_welcome(
 ) -> None:
     """Show the welcome banner using the active theme."""
     theme = get_theme()
-    banner_text = Text()
-    for line in theme.banner.strip().splitlines():
-        banner_text.append(line + "\n", style=f"bold {theme.border_style}")
+    # strip("\n") — a bare strip() would eat the first line's leading
+    # spaces and break the ASCII-art alignment.
+    lines = [line.rstrip() for line in theme.banner.strip("\n").splitlines()]
+    banner_text = Text("\n".join(lines), style=f"bold {theme.border_style}")
 
     console.print()
     console.print(

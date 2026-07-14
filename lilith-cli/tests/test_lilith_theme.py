@@ -9,9 +9,8 @@ def test_lilith_banner_defined():
 
     assert _LILITH_BANNER is not None
     assert len(_LILITH_BANNER) > 50
-    # Mentions Lilith (allow smart quotes)
     assert "L I L I T H" in _LILITH_BANNER
-    assert "v4.3.0" in _LILITH_BANNER
+    assert "v6.5" in _LILITH_BANNER
 
 
 def test_lilith_theme_registered():

@@ -27,6 +27,8 @@ from typing import TYPE_CHECKING, Any
 
 from lilith_tools.coding_tools import RunLinterTool, RunTestTool
 from lilith_tools.git_tools import GitOperationTool
+from lilith_tools.registry import ToolRegistry
+from lilith_tools.base import BaseTool, ToolResult
 from lilith_tools.search import (
     SearchAcrossFilesTool,
     SearchHistoryTool,
@@ -2820,59 +2822,72 @@ async def run_pin_command(session: AgentSession, args: str) -> None:  # noqa: AR
     Examples:
         /pin                 — fija el último mensaje del asistente
         /pin <n>             — fija el n-ésimo mensaje del historial (1-based)
-        /pin --list          — lista los mensajes fijados
-        /pin --unpin <n>     — elimina el fijado en el índice n
-        /pin --clear         — elimina todos los fijados
+        /pin list | --list   — lista los mensajes fijados
+        /pin remove <n>      — elimina el fijado en el índice n
+        /pin clear | --clear — elimina todos los fijados
     """
     from lilith_tools import ToolRegistry
 
     text = args.strip()
     pins = _load_pin_entries(session)
 
-    # Parse simple flag-style arguments.
+    # Parse simple flag-style arguments. Accept both --flag and bare subcommand
+    # forms (``list``/``clear``/``remove N``) so the REPL UX stays simple.
     parts = text.split()
+
+    def _persist() -> None:
+        """Mirror pins into session attribute and persist to disk."""
+        # Keep the in-memory mirror (used by session serialization / fork / QR).
+        session._pinned_messages = list(pins)
+        _save_pin_entries(session, pins)
+
     if not parts:
         result = _pin_default_message(session, pins)
+        if not result.get("ok"):
+            render_error(result.get("error", "Error fijando mensaje"))
+            return
+        _persist()
         _print_pin_result(result, pins)
-        # Register the tool lazily on first use (best-effort, idempotent).
         _register_pin_tool()
         ToolRegistry.get("pin_message")  # ensure import side-effect only
         return
 
-    if parts[0] in ("--list", "-l"):
+    head = parts[0].lower()
+    if head in ("--list", "-l", "list", "ls"):
         _print_pinned_messages(pins)
         _register_pin_tool()
         return
 
-    if parts[0] in ("--clear",):
+    if head in ("--clear", "clear", "reset"):
         count = len(pins)
-        _save_pin_entries(session, [])
-        console.print(f"[success]✓ {count} mensaje(s) fijado(s) eliminado(s).[/]")
+        pins.clear()
+        _persist()
+        console.print(f"[success]✓ {count} mensaje(s) pineado(s) eliminado(s).[/]")
         _register_pin_tool()
         return
 
-    if parts[0] in ("--unpin", "-u"):
+    if head in ("--unpin", "-u", "remove", "rm", "unpin"):
         if len(parts) < 2:
-            render_error("Uso: /pin --unpin <índice>")
+            render_error("Uso: /pin remove <índice>")
             return
         try:
             index = int(parts[1])
         except ValueError:
-            render_error("--unpin requiere un índice entero")
+            render_error("remove requiere un índice entero")
             return
         if not pins:
-            render_error("No hay mensajes fijados.")
+            render_error("No hay mensajes pineados.")
             return
         if index < 1 or index > len(pins):
-            render_error(f"Índice fuera de rango: {index} (hay {len(pins)} fijados)")
+            render_error(f"Índice fuera de rango: {index} (hay {len(pins)} pineados)")
             return
         removed = pins.pop(index - 1)
-        _save_pin_entries(session, pins)
+        _persist()
         role = removed.get("role", "?")
-        content_preview = str(removed.get("text", ""))[:40]
+        content_preview = str(removed.get("content") or removed.get("text", ""))[:40]
         if len(content_preview) == 40:
             content_preview += "…"
-        console.print(f"[warning]✗ Desfijado [#{index}] {role}: {content_preview}[/]")
+        console.print(f"[warning]✗ Despineado [#{index}] {role}: {content_preview}[/]")
         _register_pin_tool()
         return
 
@@ -2881,7 +2896,7 @@ async def run_pin_command(session: AgentSession, args: str) -> None:  # noqa: AR
         index = int(parts[0])
     except ValueError:
         render_error(
-            "Uso: /pin | /pin <n> | /pin --list | /pin --unpin <n> | /pin --clear"
+            "Uso: /pin | /pin <n> | /pin list | /pin remove <n> | /pin clear"
         )
         return
 
@@ -2889,30 +2904,324 @@ async def run_pin_command(session: AgentSession, args: str) -> None:  # noqa: AR
     if not result.get("ok"):
         render_error(result.get("error", "Error fijando mensaje"))
         return
-    _save_pin_entries(session, pins)
+    _persist()
     msg = result["entry"]
-    preview = msg["text"][:80]
+    preview = str(msg.get("content") or msg.get("text", ""))[:80]
     if len(preview) == 80:
         preview += "…"
-    console.print(f"📌 Mensaje fijado en el índice {index}: {preview}")
-        _register_pin_tool()
+    console.print(f"📌 Mensaje pineado en el índice {index}: {preview}")
+    _register_pin_tool()
 
 
-    def _print_pinned_messages(pinned: list[dict[str, Any]]) -> None:
-        """Renderiza los mensajes fijados con su índice."""
-        if not pinned:
-            console.print("[dim]No hay mensajes fijados.[/]")
-            return
+def _print_pinned_messages(pinned: list[dict[str, Any]]) -> None:
+    """Renderiza los mensajes pineados con su índice."""
+    if not pinned:
+        console.print("[dim]No hay mensajes pineados.[/]")
+        return
 
-        console.print("\n[bold realm]᛭ Mensajes fijados[/]")
-        for i, msg in enumerate(pinned, start=1):
-            role = msg.get("role", "?")
-            content = str(msg.get("text", ""))
-            preview = content[:80]
-            if len(preview) == 80:
-                preview += "…"
-            console.print(f"  [bold cyan]{i}.[/] [{role}] {preview}")
-        console.print()
+    console.print("\n[bold realm]᛭ Mensajes pineados[/]")
+    for i, msg in enumerate(pinned, start=1):
+        role = msg.get("role", "?")
+        content = str(msg.get("content") or msg.get("text", ""))
+        preview = content[:80]
+        if len(preview) == 80:
+            preview += "…"
+        console.print(f"  [bold cyan]{i}.[/] [{role}] {preview}")
+    console.print()
+
+
+
+# ---------------------------------------------------------------------------
+# /pin storage + helpers + tool (pin_message)
+# ---------------------------------------------------------------------------
+import uuid as _uuid
+
+
+def _pin_storage_path() -> Path:
+    """Return the path to ``~/.lilith/pins.json`` (created lazily)."""
+    base = Path.home() / ".lilith"
+    base.mkdir(parents=True, exist_ok=True)
+    return base / "pins.json"
+
+
+def _get_session_id(session: AgentSession) -> str:
+    """Return a stable session id, generating a uuid if missing."""
+    sid = getattr(session, "session_id", None)
+    if not sid:
+        sid = getattr(session, "_session_id", None)
+    if not sid:
+        sid = str(_uuid.uuid4())
+        try:
+            session._session_id = sid
+        except Exception:
+            pass
+    return sid
+
+
+def _load_pin_entries(session: AgentSession) -> list[dict[str, Any]]:
+    """Load pinned-message entries for the current session.
+
+    Prefers the in-memory ``session._pinned_messages`` mirror (used by session
+    serialization / fork / QR) and falls back to the on-disk JSON store
+    when no in-memory copy exists yet.
+    """
+    mirror = getattr(session, "_pinned_messages", None)
+    if isinstance(mirror, list) and mirror:
+        return [dict(e) for e in mirror if isinstance(e, dict)]
+    path = _pin_storage_path()
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8") or "{}")
+    except (json.JSONDecodeError, OSError):
+        return []
+    sid = _get_session_id(session)
+    entries = payload.get(sid) or []
+    if not isinstance(entries, list):
+        return []
+    return [e for e in entries if isinstance(e, dict)]
+
+
+def _save_pin_entries(session: AgentSession, entries: list[dict[str, Any]]) -> None:
+    """Persist pinned-message entries for the current session to disk."""
+    path = _pin_storage_path()
+    payload: dict[str, Any] = {}
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8") or "{}")
+            if isinstance(existing, dict):
+                payload = existing
+        except (json.JSONDecodeError, OSError):
+            payload = {}
+    sid = _get_session_id(session)
+    payload[sid] = list(entries)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _make_pin_entry(message: dict[str, Any], index: int) -> dict[str, Any]:
+    """Build a pin entry dict from a session message and its 1-based index."""
+    text = str(message.get("content", message.get("text", "")))
+    role = str(message.get("role", "assistant"))
+    return {
+        "index": int(index),
+        "content": text,
+        "text": text,  # backward-compat alias for older readers
+        "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "role": role,
+    }
+
+
+def _resolve_message_by_index(session: AgentSession, index: int) -> dict[str, Any] | None:
+    """Resolve a 1-based index against the session history (most recent = 1)."""
+    history = getattr(session, "history", None) or []
+    if not history:
+        return None
+    if index < 1 or index > len(history):
+        return None
+    return history[-index]
+
+
+def _resolve_last_assistant_message(session: AgentSession) -> dict[str, Any] | None:
+    """Return the most recent assistant message in the history, if any."""
+    history = getattr(session, "history", None) or []
+    for msg in reversed(history):
+        if isinstance(msg, dict) and msg.get("role") == "assistant":
+            return msg
+    return None
+
+
+def _pin_message_at_index(
+    session: AgentSession,
+    pins: list[dict[str, Any]],
+    index: int,
+) -> dict[str, Any]:
+    """Pin the n-th most recent message and append it to *pins* (in-memory)."""
+    msg = _resolve_message_by_index(session, index)
+    if msg is None:
+        return {"ok": False, "error": f"Índice fuera de rango: {index}"}
+    entry = _make_pin_entry(msg, index)
+    pins.append(entry)
+    return {"ok": True, "entry": entry}
+
+
+def _pin_default_message(
+    session: AgentSession, pins: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Pin the most recent assistant message (or last history message)."""
+    msg = _resolve_last_assistant_message(session)
+    history = getattr(session, "history", None) or []
+    if msg is None:
+        if not history:
+            return {"ok": False, "error": "No hay mensajes en el historial para fijar."}
+        msg = history[-1]
+    index = len(history) if history else 1
+    entry = _make_pin_entry(msg, index)
+    pins.append(entry)
+    return {"ok": True, "entry": entry, "index": index}
+
+
+def _print_pin_result(result: dict[str, Any], pins: list[dict[str, Any]]) -> None:
+    """Render the result of a default ``/pin`` invocation."""
+    if not result.get("ok"):
+        render_error(result.get("error", "Error fijando mensaje"))
+        return
+    entry = result["entry"]
+    index = result.get("index", entry.get("index", len(pins)))
+    text = str(entry.get("text", ""))
+    preview = text[:80]
+    if len(preview) == 80:
+        preview += "…"
+    _save_pin_entries(session, pins)
+    console.print(
+        f"📌 Mensaje fijado en el índice {index}: {preview}"
+    )
+
+
+@ToolRegistry.register
+class PinMessageTool(BaseTool):
+    """Fija (pin) un mensaje de la conversación para tenerlo siempre a mano.
+
+    Esta herramienta es el equivalente invocable por el agente del comando
+    ``/pin`` del REPL. Permite fijar el último mensaje del asistente
+    (sin argumentos), un mensaje concreto por índice 1-based, listar
+    los mensajes fijados, desfijar uno por índice o limpiar todos.
+    """
+
+    name = "pin_message"
+    description = (
+        "Fija un mensaje importante de la conversación para consultarlo "
+        "después. Por defecto fija el último mensaje del asistente."
+    )
+    parameters = {
+        "index": {
+            "type": "integer",
+            "required": False,
+            "default": 0,
+            "description": (
+                "Índice 1-based del mensaje a fijar (0 = último del asistente)"
+            ),
+        },
+        "list": {
+            "type": "boolean",
+            "required": False,
+            "default": False,
+            "description": "Si es True, lista los mensajes fijados.",
+        },
+        "unpin": {
+            "type": "integer",
+            "required": False,
+            "default": -1,
+            "description": "Índice 1-based del mensaje a desfijar (-1 = ninguno).",
+        },
+        "clear": {
+            "type": "boolean",
+            "required": False,
+            "default": False,
+            "description": "Si es True, elimina todos los mensajes fijados.",
+        },
+    }
+
+    def execute(
+        self,
+        session: AgentSession,
+        index: int = 0,
+        list: bool = False,
+        unpin: int = -1,
+        clear: bool = False,
+        **_: Any,
+    ) -> ToolResult:
+        """Ejecuta la operación de pin solicitada."""
+        try:
+            pins = _load_pin_entries(session)
+        except Exception as exc:
+            return ToolResult(success=False, data=None, error=str(exc))
+
+        if clear:
+            count = len(pins)
+            try:
+                _save_pin_entries(session, [])
+            except Exception as exc:
+                return ToolResult(success=False, data=None, error=str(exc))
+            return ToolResult(
+                success=True,
+                data={"action": "clear", "removed": count},
+            )
+
+        if list:
+            return ToolResult(success=True, data={"action": "list", "pins": pins})
+
+        if unpin and unpin > 0:
+            if unpin < 1 or unpin > len(pins):
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    error=f"Índice fuera de rango: {unpin}",
+                )
+            removed = pins.pop(unpin - 1)
+            try:
+                _save_pin_entries(session, pins)
+            except Exception as exc:
+                return ToolResult(success=False, data=None, error=str(exc))
+            return ToolResult(
+                success=True,
+                data={"action": "unpin", "removed": removed, "index": unpin},
+            )
+
+        if index and index > 0:
+            result = _pin_message_at_index(session, pins, index)
+            if not result.get("ok"):
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    error=str(result.get("error", "Error fijando mensaje")),
+                )
+            try:
+                _save_pin_entries(session, pins)
+            except Exception as exc:
+                return ToolResult(success=False, data=None, error=str(exc))
+            return ToolResult(
+                success=True,
+                data={"action": "pin", "entry": result["entry"]},
+            )
+
+        # Default: pin the most recent assistant message.
+        result = _pin_default_message(session, pins)
+        if not result.get("ok"):
+            return ToolResult(
+                success=False,
+                data=None,
+                error=str(result.get("error", "Error fijando mensaje")),
+            )
+        try:
+            _save_pin_entries(session, pins)
+        except Exception as exc:
+            return ToolResult(success=False, data=None, error=str(exc))
+        return ToolResult(
+            success=True,
+            data={"action": "pin", "entry": result["entry"]},
+        )
+
+
+_PIN_TOOL_REGISTERED = False
+
+
+def _register_pin_tool() -> None:
+    """Idempotently register :class:`PinMessageTool` in the global registry."""
+    global _PIN_TOOL_REGISTERED
+    if _PIN_TOOL_REGISTERED:
+        return
+    if ToolRegistry.get("pin_message") is not None:
+        _PIN_TOOL_REGISTERED = True
+        return
+    _PIN_TOOL_REGISTERED = True
+
+
+# Ensure the tool is registered when this module is imported.
+_register_pin_tool()
+
 
 
 # ── /model-info command ──────────────────────────────────────────────────

@@ -20,7 +20,10 @@ class TestLanguageServerCommands:
     def test_python_command_present(self):
         cmd = language_server_command("python")
         assert cmd is not None
-        assert "python" in cmd
+        # Either pyright-langserver (``pyright-langserver --stdio``) or the
+        # pylsp fallback (``python -m pylsp``) must resolve.
+        joined = " ".join(cmd)
+        assert "pyright-langserver" in joined or "pylsp" in joined
 
     def test_unknown_language_returns_none(self):
         assert language_server_command("fortran") is None
@@ -29,7 +32,8 @@ class TestLanguageServerCommands:
         path = tmp_path / "main.py"
         cmd = detect_language_server(path)
         assert cmd is not None
-        assert "python" in cmd
+        joined = " ".join(cmd)
+        assert "pyright-langserver" in joined or "pylsp" in joined
 
     def test_detect_language_server_unknown_extension(self, tmp_path):
         path = tmp_path / "data.xyz"

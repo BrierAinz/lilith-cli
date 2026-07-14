@@ -48,6 +48,10 @@ def test_resolve_yggdrasil_root(tmp_path, monkeypatch):
     """_resolve_yggdrasil_root should return a Path pointing to the workspace."""
     from lilith_cli import main as cli_main
 
+    # The host (or cron runner) may export YGGDRASIL_ROOT; blank it so the
+    # function falls through to its file-walk logic and respects our fake.
+    monkeypatch.delenv("YGGDRASIL_ROOT", raising=False)
+
     fake_root = tmp_path / "Yggdrasil"
     fake_module = fake_root / "Asgard" / "lilith-cli" / "lilith_cli" / "main.py"
     fake_module.parent.mkdir(parents=True)

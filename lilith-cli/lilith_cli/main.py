@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import os
 import platform
 import subprocess
 import sys
@@ -88,7 +89,19 @@ def _is_wsl() -> bool:
 
 
 def _resolve_yggdrasil_root() -> Path:
-    """Find the Yggdrasil workspace root."""
+    """Find the Yggdrasil workspace root.
+
+    Order: ``YGGDRASIL_ROOT`` env var, then the nearest ancestor that
+    contains the hub's ``ygg.py``. The fixed-depth fallback only holds for
+    the historical ``Asgard/lilith-cli`` layout, not for standalone
+    checkouts of lilith-stack.
+    """
+    env_root = os.environ.get("YGGDRASIL_ROOT")
+    if env_root:
+        return Path(env_root)
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "ygg.py").is_file():
+            return parent
     return Path(__file__).resolve().parents[3]
 
 

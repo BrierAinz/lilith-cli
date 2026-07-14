@@ -160,6 +160,8 @@ def test_load_mimir_cli_missing_file(monkeypatch, tmp_path: Path, capsys):
     fake_main.parent.mkdir(parents=True)
     fake_main.write_text("", encoding="utf-8")
     monkeypatch.setattr(cli_main, "__file__", str(fake_main))
+    # YGGDRASIL_ROOT would short-circuit the file-walk resolution.
+    monkeypatch.delenv("YGGDRASIL_ROOT", raising=False)
     # Intentionally do NOT create Vanaheim/Agents/Mimir/cli.py.
 
     with pytest.raises(FileNotFoundError):

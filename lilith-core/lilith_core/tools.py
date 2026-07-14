@@ -52,13 +52,17 @@ from typing import Iterable
 #: BaseTool is added in lilith-tools without updating this catalog,
 #: ``test_tool_catalog_contract`` fails.
 TOOL_NAMES: frozenset[str] = frozenset({
+    "batch_edit",
     "browser",
     "chunk_ingest",
     "chunk_recall",
     "chunk_store_stats",
     "coding",
     "directory_list",
+    "file_edit",
     "file_read",
+    "file_write",
+    "grep_files",
     "local_disk_usage",
     "local_docker_ps",
     "local_env",

@@ -1091,7 +1091,9 @@ class StatusCommand(BaseCommand):
         # Try importing from ygg (hub CLI) for realm status.
         try:
             # Add root to sys.path if needed.
-            root = str(Path(__file__).resolve().parents[3])  # /mnt/d/Proyectos/Yggdrasil
+            from lilith_cli.main import _resolve_yggdrasil_root
+
+            root = str(_resolve_yggdrasil_root())
             if root not in sys.path:
                 sys.path.insert(0, root)
             from ygg import (
@@ -1149,7 +1151,9 @@ class BifrostCommand(BaseCommand):
     async def execute(self, args: str) -> None:
         """Show Bifrost IPC status and optionally send a message."""
         try:
-            root = Path(__file__).resolve().parents[3]
+            from lilith_cli.main import _resolve_yggdrasil_root
+
+            root = _resolve_yggdrasil_root()
             bifrost_path = root / "Vanaheim" / "bifrost" / "bifrost" / "ipc.py"
             if not bifrost_path.exists():
                 render_error("Bifrost IPC no encontrado en Vanaheim/bifrost/bifrost/ipc.py")

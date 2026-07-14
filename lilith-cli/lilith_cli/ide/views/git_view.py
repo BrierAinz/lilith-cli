@@ -245,6 +245,13 @@ class GitMixin:
         tab_id = self._current_tab_id()  # type: ignore[attr-defined]
         modified = " ●" if tab_id in self._modified else ""  # type: ignore[attr-defined]
         parts = [f"{rel}{modified}{status_str}"]
+        # Preserve the LSP diagnostics summary written by _update_editor_info;
+        # without it this late rewrite erases the counts from the info bar.
+        diagnostics = self._current_diagnostics.get(path.resolve(), [])  # type: ignore[attr-defined]
+        if diagnostics:
+            errors = sum(1 for d in diagnostics if d.get("severity", 1) == 1)
+            warnings = sum(1 for d in diagnostics if d.get("severity", 1) == 2)
+            parts.append(f"{errors} errores / {warnings} warnings")
         if blame:
             parts.append(f"Runa: {blame}")
         self._update_editor_info_text("  |  ".join(parts))  # type: ignore[attr-defined]

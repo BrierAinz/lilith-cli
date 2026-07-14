@@ -3,6 +3,8 @@
 Tests the wiring of WorkflowEngine → TaskDispatcher → LilithEngine,
 including hook lifecycle, error handling, and agent dispatch.
 """
+import os
+
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -227,7 +229,11 @@ class TestProcessWorkflowDispatch:
     def test_dispatch_creates_dispatcher(self):
         """_create_dispatcher returns None when Vanaheim not found."""
         engine = _make_engine()
-        with patch("os.path.isdir", return_value=False):
+        # Blank out YGGDRASIL_ROOT: en esta máquina es una env var de
+        # usuario persistente y haría corto-circuito en la búsqueda.
+        with patch.dict(os.environ, {"YGGDRASIL_ROOT": ""}), patch(
+            "os.path.isdir", return_value=False
+        ):
             dispatcher = engine._create_dispatcher()
         # Should return None gracefully when Vanaheim dir not found
         assert dispatcher is None

@@ -101,6 +101,9 @@ def test_default_bus_db_path_uses_resolved_root(monkeypatch, tmp_path: Path):
     fake_module.parent.mkdir(parents=True)
     fake_module.write_text("", encoding="utf-8")
     monkeypatch.setattr(cli_main, "__file__", str(fake_module))
+    # _resolve_yggdrasil_root prefers YGGDRASIL_ROOT over __file__, so unset
+    # it during tests so the relocated tmp_path root is authoritative.
+    monkeypatch.delenv("YGGDRASIL_ROOT", raising=False)
 
     path = ops.default_bus_db_path()
     assert path == fake_root / ".ygg" / "lilith_bus.db"

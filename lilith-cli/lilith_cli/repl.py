@@ -25,7 +25,6 @@ from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 from prompt_toolkit.lexers import PygmentsLexer
 from prompt_toolkit.styles import Style as PtStyle
 from pygments.lexers import MarkdownLexer as PygmentsMarkdownLexer
-from rich.rule import Rule
 
 
 if TYPE_CHECKING:
@@ -863,7 +862,7 @@ async def _process_with_streaming(
                     if trace is not None:
                         trace.handle(event)
 
-                    # ── Reasoning (GLM-5.1 thinking) ────────────────────
+                    # ── Reasoning (Kimi / GLM-5.1 / DeepSeek thinking) ──
                     if event_type == "reasoning":
                         chunk = event.get("content", "")
                         if chunk:
@@ -871,17 +870,15 @@ async def _process_with_streaming(
                             if not _assistant_sep_shown:
                                 _assistant_sep_shown = True
                                 render_assistant_separator()
-                            # Stop spinner on first token (reasoning counts).
-                            if not first_token_received:
-                                first_token_received = True
-                                spinner_status.__exit__(None, None, None)
-
                             reasoning_text += chunk
                             if not in_reasoning:
                                 in_reasoning = True
-                                # Open the thinking panel header.
-                                console.print()
-                                console.print(Rule("💭 Pensando...", style="dim magenta", characters="─"))
+                                # Keep the spinner alive while reasoning
+                                # streams; the accumulated text renders as a
+                                # single thinking panel once real output (or
+                                # a tool call) arrives.
+                                if not first_token_received:
+                                    spinner_info["set_label"]("Pensando")
 
                     # ── Normal text ──────────────────────────────────────
                     elif event_type == "text":
@@ -913,6 +910,13 @@ async def _process_with_streaming(
                         if not first_token_received:
                             first_token_received = True
                             spinner_status.__exit__(None, None, None)
+
+                        # Close reasoning panel before showing tool progress.
+                        if in_reasoning:
+                            in_reasoning = False
+                            render_thinking(reasoning_text)
+                            reasoning_text = ""
+                            console.print()
 
                         tool_progress.start(event["name"])
 

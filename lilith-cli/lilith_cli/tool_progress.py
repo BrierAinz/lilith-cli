@@ -50,13 +50,18 @@ def _build_tool_progress_renderable(
     now = time.perf_counter()
     lines: list[Any] = []
 
-    # Header with spinner and running count.
-    spinner = Spinner("dots", style="cyan")
+    # Header: spinner + running count while active, plain summary when done.
     header_text = Text()
-    header_text.append(f"Ejecutando {len(running)} herramienta(s) en paralelo", style="bold cyan")
     if running:
+        header_text.append(
+            f"Ejecutando {len(running)} herramienta(s) en paralelo", style="bold cyan"
+        )
         header_text.append(f": {', '.join(running)}", style="italic")
-    lines.append(Group(spinner, header_text))
+        lines.append(Group(Spinner("dots", style="cyan"), header_text))
+    else:
+        done = len(completed) + len(failed)
+        header_text.append(f"{done} herramienta(s) ejecutada(s)", style="bold cyan")
+        lines.append(header_text)
 
     # Running tools with elapsed time.
     if running:
@@ -123,6 +128,7 @@ class ToolProgressTracker:
         if not self.running:
             self._start_time = now
         self.running[name] = now
+        self._ensure_live()
         self._refresh()
 
     def complete(self, name: str, *, error: str | None = None) -> None:
@@ -168,14 +174,25 @@ class ToolProgressTracker:
             f"[status.ok]{status} {total} herramienta(s) ejecutada(s) en {_format_duration(duration)}[/]"
         )
 
+    def _ensure_live(self) -> None:
+        """Create and start the Live panel on first use."""
+        if self._live is live_none:
+            self._live = Live(
+                _build_tool_progress_renderable(
+                    list(self.running.keys()),
+                    self.completed,
+                    self.failed,
+                    self._start_time,
+                ),
+                console=console,
+                refresh_per_second=12,
+                vertical_overflow="visible",
+            )
+            self._live.__enter__()
+
     def __enter__(self) -> "ToolProgressTracker":
-        self._live = Live(
-            _build_tool_progress_renderable([], [], [], self._start_time),
-            console=console,
-            refresh_per_second=12,
-            vertical_overflow="visible",
-        )
-        self._live.__enter__()
+        # Lazy: the Live panel is only created when the first tool starts,
+        # so turns without tool calls render no empty progress box.
         return self
 
     def __exit__(self, *args: object) -> None:

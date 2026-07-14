@@ -347,7 +347,38 @@ class LLMProviderWrapper:
           content (str), finish_reason (str|None), tool_calls (list|None)
         """
         model = model or self._resolve_model()
+
+        # ── Anthropic-compat / Sakana-Responses profiles don't speak the
+        # OpenAI SSE protocol this method implements; fall back to the
+        # non-streaming path and emit the result as a single chunk.
+        if self._is_anthropic() or self._is_sakana_responses():
+            result = await self._do_complete(model, messages, tools=tools, **kwargs)
+            reasoning = result.get("reasoning_content")
+            if reasoning:
+                yield {
+                    "type": "reasoning",
+                    "content": reasoning,
+                    "finish_reason": None,
+                    "tool_calls": None,
+                }
+            tcs = [
+                tc if isinstance(tc, dict) else {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
+                for tc in (result.get("tool_calls") or [])
+            ]
+            yield {
+                "content": result.get("content", ""),
+                "finish_reason": result.get("finish_reason", "stop"),
+                "tool_calls": tcs or None,
+            }
+            return
+
         client = await self._get_client()
+
+        # ── Kimi quirk: temperature=1 is the only value this model accepts ──
+        # Same guard as _do_complete; kimi-for-coding 400s on anything else.
+        if "kimi.com" in (self._resolve_base_url() or "").lower():
+            kwargs = dict(kwargs)
+            kwargs["temperature"] = 1.0
 
         payload: dict[str, Any] = {
             "model": model,

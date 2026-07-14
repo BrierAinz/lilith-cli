@@ -2815,103 +2815,104 @@ def _render_tour_step(step: int) -> None:
 
 
 async def run_pin_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
-    """Pin and manage important messages in the conversation.
+    """Fija un mensaje importante en la conversación actual.
 
     Examples:
-        /pin                 — pinear el mensaje más reciente
-        /pin <n>             — pinear el n-ésimo mensaje más reciente (1 = más reciente)
-        /pin list            — listar mensajes pineados
-        /pin remove <n>      — despin n-ésimo mensaje pinear (1 = más reciente)
-        /pin clear           — limpiar todos los pines
+        /pin                 — fija el último mensaje del asistente
+        /pin <n>             — fija el n-ésimo mensaje del historial (1-based)
+        /pin --list          — lista los mensajes fijados
+        /pin --unpin <n>     — elimina el fijado en el índice n
+        /pin --clear         — elimina todos los fijados
     """
+    from lilith_tools import ToolRegistry
+
     text = args.strip()
+    pins = _load_pin_entries(session)
 
-    pinned: list[dict[str, Any]] = getattr(session, "_pinned_messages", None)
-    if pinned is None:
-        session._pinned_messages = []
-        pinned = session._pinned_messages
-
-    # /pin list
-    if not text or text.lower() in ("list", "ls", "all"):
-        _print_pinned_messages(pinned)
+    # Parse simple flag-style arguments.
+    parts = text.split()
+    if not parts:
+        result = _pin_default_message(session, pins)
+        _print_pin_result(result, pins)
+        # Register the tool lazily on first use (best-effort, idempotent).
+        _register_pin_tool()
+        ToolRegistry.get("pin_message")  # ensure import side-effect only
         return
 
-    # /pin clear
-    if text.lower() == "clear":
-        count = len(pinned)
-        pinned.clear()
-        console.print(f"[success]✓ {count} mensaje(s) pineado(s) eliminado(s).[/]")
+    if parts[0] in ("--list", "-l"):
+        _print_pinned_messages(pins)
+        _register_pin_tool()
         return
 
-    parts = text.split(maxsplit=1)
-    subcmd = parts[0].lower()
-    rest = parts[1].strip() if len(parts) > 1 else ""
+    if parts[0] in ("--clear",):
+        count = len(pins)
+        _save_pin_entries(session, [])
+        console.print(f"[success]✓ {count} mensaje(s) fijado(s) eliminado(s).[/]")
+        _register_pin_tool()
+        return
 
-    # /pin remove <n>
-    if subcmd in ("remove", "rm", "delete"):
+    if parts[0] in ("--unpin", "-u"):
+        if len(parts) < 2:
+            render_error("Uso: /pin --unpin <índice>")
+            return
         try:
-            index = int(rest) if rest else 1
+            index = int(parts[1])
         except ValueError:
-            render_error("Uso: /pin remove <n>")
+            render_error("--unpin requiere un índice entero")
             return
-        if not pinned:
-            render_error("No hay mensajes pineados.")
+        if not pins:
+            render_error("No hay mensajes fijados.")
             return
-        if index < 1 or index > len(pinned):
-            render_error(f"Índice fuera de rango: {index} (hay {len(pinned)} pineados)")
+        if index < 1 or index > len(pins):
+            render_error(f"Índice fuera de rango: {index} (hay {len(pins)} fijados)")
             return
-        removed = pinned.pop(index - 1)
+        removed = pins.pop(index - 1)
+        _save_pin_entries(session, pins)
         role = removed.get("role", "?")
-        content_preview = str(removed.get("content", ""))[:40]
+        content_preview = str(removed.get("text", ""))[:40]
         if len(content_preview) == 40:
             content_preview += "…"
-        console.print(f"[warning]✗ Despineado [#{index}] {role}: {content_preview}[/]")
+        console.print(f"[warning]✗ Desfijado [#{index}] {role}: {content_preview}[/]")
+        _register_pin_tool()
         return
 
-    # /pin <n>  (default: pin n-th most recent message)
+    # Optional positional <index>: pin that 1-based message in history.
     try:
-        index = int(text)
+        index = int(parts[0])
     except ValueError:
-        render_error("Uso: /pin | /pin <n> | /pin list | /pin remove <n> | /pin clear")
+        render_error(
+            "Uso: /pin | /pin <n> | /pin --list | /pin --unpin <n> | /pin --clear"
+        )
         return
 
-    history = session.history or []
-    if not history:
-        render_error("No hay mensajes en el historial para pinear.")
+    result = _pin_message_at_index(session, pins, index)
+    if not result.get("ok"):
+        render_error(result.get("error", "Error fijando mensaje"))
         return
-
-    if index < 1 or index > len(history):
-        render_error(f"Índice fuera de rango: {index} (hay {len(history)} mensajes)")
-        return
-
-    msg = history[-index]
-    if msg in pinned:
-        render_error("El mensaje ya está pineado.")
-        return
-
-    pinned.append(msg)
-    role = msg.get("role", "?")
-    content_preview = str(msg.get("content", ""))[:40]
-    if len(content_preview) == 40:
-        content_preview += "…"
-    console.print(f"[success]✓ Pineado [#{index}] {role}: {content_preview}[/]")
+    _save_pin_entries(session, pins)
+    msg = result["entry"]
+    preview = msg["text"][:80]
+    if len(preview) == 80:
+        preview += "…"
+    console.print(f"📌 Mensaje fijado en el índice {index}: {preview}")
+        _register_pin_tool()
 
 
-def _print_pinned_messages(pinned: list[dict[str, Any]]) -> None:
-    """Renderiza los mensajes pineados."""
-    if not pinned:
-        console.print("[dim]No hay mensajes pineados.[/]")
-        return
+    def _print_pinned_messages(pinned: list[dict[str, Any]]) -> None:
+        """Renderiza los mensajes fijados con su índice."""
+        if not pinned:
+            console.print("[dim]No hay mensajes fijados.[/]")
+            return
 
-    console.print("\n[bold realm]᛭ Mensajes pineados[/]")
-    for i, msg in enumerate(pinned, start=1):
-        role = msg.get("role", "?")
-        content = str(msg.get("content", ""))
-        preview = content[:80]
-        if len(preview) == 80:
-            preview += "…"
-        console.print(f"  [bold cyan]{i}.[/] [{role}] {preview}")
-    console.print()
+        console.print("\n[bold realm]᛭ Mensajes fijados[/]")
+        for i, msg in enumerate(pinned, start=1):
+            role = msg.get("role", "?")
+            content = str(msg.get("text", ""))
+            preview = content[:80]
+            if len(preview) == 80:
+                preview += "…"
+            console.print(f"  [bold cyan]{i}.[/] [{role}] {preview}")
+        console.print()
 
 
 # ── /model-info command ──────────────────────────────────────────────────

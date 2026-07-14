@@ -25,6 +25,8 @@ from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 from prompt_toolkit.lexers import PygmentsLexer
 from prompt_toolkit.styles import Style as PtStyle
 from pygments.lexers import MarkdownLexer as PygmentsMarkdownLexer
+from rich.live import Live
+from rich.markdown import Markdown
 
 
 if TYPE_CHECKING:
@@ -95,6 +97,7 @@ from .extra_commands import (
 
 from .render import (
     Timer,
+    build_thinking_panel,
     console,
     get_theme,
     list_themes,
@@ -841,8 +844,32 @@ async def _process_with_streaming(
     in_reasoning = False
     first_token_received = False
     _assistant_sep_shown = False
+    text_streamed_live = False
 
     timer.__enter__()
+
+    # ── Live streaming display (reasoning panel / markdown response) ──
+    # Rich allows a single active Live; this one alternates with the
+    # tool-progress tracker (paused via tool_progress.pause_live()).
+    stream_live: Live | None = None
+
+    def _open_stream_live() -> Live:
+        nonlocal stream_live
+        if stream_live is None:
+            tool_progress.pause_live()
+            stream_live = Live(
+                console=console,
+                refresh_per_second=12,
+                vertical_overflow="visible",
+            )
+            stream_live.__enter__()
+        return stream_live
+
+    def _close_stream_live() -> None:
+        nonlocal stream_live
+        if stream_live is not None:
+            stream_live.__exit__(None, None, None)
+            stream_live = None
 
     # ── Live tool progress tracker for parallel tool execution ────
     tool_progress = ToolProgressTracker()
@@ -870,15 +897,19 @@ async def _process_with_streaming(
                             if not _assistant_sep_shown:
                                 _assistant_sep_shown = True
                                 render_assistant_separator()
+                            # Stop spinner: the live panel takes over.
+                            if not first_token_received:
+                                first_token_received = True
+                                spinner_status.__exit__(None, None, None)
+
                             reasoning_text += chunk
-                            if not in_reasoning:
-                                in_reasoning = True
-                                # Keep the spinner alive while reasoning
-                                # streams; the accumulated text renders as a
-                                # single thinking panel once real output (or
-                                # a tool call) arrives.
-                                if not first_token_received:
-                                    spinner_info["set_label"]("Pensando")
+                            in_reasoning = True
+                            # Stream the thinking into a live panel (tail
+                            # only, so long reasoning doesn't flood the
+                            # screen).
+                            _open_stream_live().update(
+                                build_thinking_panel(reasoning_text, tail_lines=8)
+                            )
 
                     # ── Normal text ──────────────────────────────────────
                     elif event_type == "text":
@@ -896,11 +927,18 @@ async def _process_with_streaming(
                             # Close reasoning panel if transitioning to content.
                             if in_reasoning:
                                 in_reasoning = False
-                                render_thinking(reasoning_text)
+                                if stream_live is not None:
+                                    stream_live.update(build_thinking_panel(reasoning_text))
+                                    _close_stream_live()
+                                else:
+                                    render_thinking(reasoning_text)
                                 reasoning_text = ""
                                 console.print()  # blank line before response
 
                             accumulated += chunk
+                            # Stream the response live as Markdown.
+                            text_streamed_live = True
+                            _open_stream_live().update(Markdown(accumulated))
 
                     # ── Tool call start ───────────────────────────────────
                     elif event_type == "tool_call":
@@ -914,9 +952,18 @@ async def _process_with_streaming(
                         # Close reasoning panel before showing tool progress.
                         if in_reasoning:
                             in_reasoning = False
-                            render_thinking(reasoning_text)
+                            if stream_live is not None:
+                                stream_live.update(build_thinking_panel(reasoning_text))
+                            else:
+                                render_thinking(reasoning_text)
                             reasoning_text = ""
+                        # Persist any partially streamed text and free the
+                        # Live slot for the tool tracker; the next iteration
+                        # streams into a fresh display.
+                        _close_stream_live()
+                        if accumulated.strip():
                             console.print()
+                        accumulated = ""
 
                         tool_progress.start(event["name"])
 
@@ -952,7 +999,10 @@ async def _process_with_streaming(
 
         except StopAsyncIteration:
             pass
-        except (KeyboardInterrupt, asyncio.CancelledError):
+        except BaseException:
+            # Free the Live slot before propagating (Ctrl+C, provider
+            # errors, cancellation) so the terminal isn't left in live mode.
+            _close_stream_live()
             raise
         finally:
             # If spinner is still active, stop it.
@@ -969,14 +1019,22 @@ async def _process_with_streaming(
     # ── Final rendering ─────────────────────────────────────────────
     # Close any remaining reasoning block.
     if in_reasoning and reasoning_text:
-        render_thinking(reasoning_text)
+        if stream_live is not None:
+            stream_live.update(build_thinking_panel(reasoning_text))
+        else:
+            render_thinking(reasoning_text)
         console.print()
+
+    # Close the streaming display — its last frame (the fully rendered
+    # Markdown response) persists in the terminal.
+    _close_stream_live()
 
     # Final newline.
     console.print()
 
-    # If we have accumulated text, render as nicely formatted Markdown.
-    if accumulated.strip():
+    # Fallback for non-streamed text (e.g. single-chunk providers whose
+    # content arrived without opening the live display).
+    if accumulated.strip() and not text_streamed_live:
         render_markdown(accumulated)
 
     # Show tool execution summary when tools were used this turn.

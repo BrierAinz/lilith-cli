@@ -174,6 +174,16 @@ class ToolProgressTracker:
             f"[status.ok]{status} {total} herramienta(s) ejecutada(s) en {_format_duration(duration)}[/]"
         )
 
+    def pause_live(self) -> None:
+        """Close the Live panel (persisting its last frame) without resetting
+        counters.  Rich allows only one active Live at a time, so the REPL
+        pauses the tracker before opening its streaming display; the panel
+        reopens automatically on the next ``start()``.
+        """
+        if self._live is not live_none:
+            self._live.__exit__(None, None, None)
+            self._live = None
+
     def _ensure_live(self) -> None:
         """Create and start the Live panel on first use."""
         if self._live is live_none:

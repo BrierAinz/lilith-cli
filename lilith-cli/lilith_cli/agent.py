@@ -596,6 +596,11 @@ class AgentSession:
             tool_timeout = getattr(tools_config, "tool_timeout", 30) or 30
         if tool_timeout is None or not isinstance(tool_timeout, (int, float)) or tool_timeout <= 0:
             tool_timeout = 30
+        # Tool classes may declare a longer floor via ``timeout_seconds``
+        # (e.g. delegate_subagent waits on a full sub-agent run).
+        cls_timeout = getattr(tool_cls, "timeout_seconds", None)
+        if isinstance(cls_timeout, (int, float)) and cls_timeout > tool_timeout:
+            tool_timeout = cls_timeout
 
         last_error = ""
         for attempt in range(retry_count + 1):

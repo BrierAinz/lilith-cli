@@ -481,20 +481,31 @@ def render_error(text: str) -> None:
 # ── Thinking / reasoning ────────────────────────────────────────────
 
 
-def render_thinking(text: str) -> None:
-    """Show a thinking / reasoning panel using the active theme."""
+def build_thinking_panel(text: str, *, tail_lines: int | None = None) -> Panel:
+    """Build the thinking/reasoning panel renderable for the active theme.
+
+    With *tail_lines*, only the last N lines are shown — used by the live
+    streaming view so a long reasoning block doesn't fill the screen.
+    """
     theme = get_theme()
     # Truncate very long thinking blocks.
     display = text if len(text) <= 1000 else text[:1000] + "…"
-    console.print(
-        Panel(
-            Text(display, style="thinking"),
-            title=theme.thinking_label,
-            border_style=theme.border_style,
-            expand=False,
-            padding=(0, 1),
-        ),
+    if tail_lines is not None:
+        lines = display.splitlines()
+        if len(lines) > tail_lines:
+            display = "…\n" + "\n".join(lines[-tail_lines:])
+    return Panel(
+        Text(display, style="thinking"),
+        title=theme.thinking_label,
+        border_style=theme.border_style,
+        expand=False,
+        padding=(0, 1),
     )
+
+
+def render_thinking(text: str) -> None:
+    """Show a thinking / reasoning panel using the active theme."""
+    console.print(build_thinking_panel(text))
 
 
 # ── Tool call cards ─────────────────────────────────────────────────

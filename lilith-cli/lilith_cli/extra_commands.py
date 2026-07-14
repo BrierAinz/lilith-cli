@@ -7452,3 +7452,119 @@ def _save_snippets(snippets: dict[str, dict]) -> None:
         json.dumps(snippets, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+
+
+# ── Feedback command ─────────────────────────────────────────────────
+
+
+async def run_feedback_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+    """Gestiona feedback local con ``/feedback [add|clear|help]``."""
+    feedback_path = CONFIG_DIR / "feedback.json"
+    text = args.strip()
+    parts = text.split(maxsplit=1)
+    subcmd = parts[0].lower() if parts else ""
+
+    if subcmd == "help":
+        console.print(
+            "[bold realm]Uso de /feedback[/]\n"
+            "  [bold cyan]/feedback[/] — muestra las últimas 5 entradas\n"
+            "  [bold cyan]/feedback add <mensaje>[/] — guarda feedback\n"
+            "  [bold cyan]/feedback clear[/] — borra todas las entradas\n"
+            "  [bold cyan]/feedback help[/] — muestra esta ayuda"
+        )
+        return
+
+    try:
+        if feedback_path.exists():
+            entries = json.loads(feedback_path.read_text(encoding="utf-8"))
+            if not isinstance(entries, list):
+                render_error("El archivo de feedback tiene un formato inválido.")
+                return
+        else:
+            entries = []
+    except (OSError, json.JSONDecodeError) as exc:
+        render_error(f"No se pudo leer el feedback: {exc}")
+        return
+
+    if not text:
+        if not entries:
+            console.print("[dim]No hay feedback guardado.[/]")
+            return
+
+        from rich.table import Table
+
+        table = Table(title="Feedback reciente")
+        table.add_column("Fecha", style="cyan", no_wrap=True)
+        table.add_column("Mensaje")
+        for entry in entries[-5:]:
+            if isinstance(entry, dict):
+                timestamp = str(entry.get("ts", ""))
+                message = str(entry.get("message", ""))
+            else:
+                timestamp = ""
+                message = str(entry)
+            table.add_row(timestamp, message)
+        console.print(table)
+        return
+
+    if subcmd == "add":
+        message = parts[1].strip() if len(parts) > 1 else ""
+        if not message:
+            render_error("Uso: /feedback add <mensaje>")
+            return
+        entries.append({"ts": datetime.now(UTC).isoformat(), "message": message})
+        try:
+            feedback_path.parent.mkdir(parents=True, exist_ok=True)
+            feedback_path.write_text(
+                json.dumps(entries, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            render_error(f"No se pudo guardar el feedback: {exc}")
+            return
+        console.print("[success]✓ Feedback guardado.[/]")
+        return
+
+    if subcmd == "clear":
+        count = len(entries)
+        if not count:
+            console.print("[dim]No hay feedback para borrar.[/]")
+            return
+
+        try:
+            from rich.prompt import Confirm
+        except ImportError:  # pragma: no cover - Rich incluye Confirm normalmente
+            confirmed = False
+            while True:
+                console.print(f"¿Borrar {count} entries? (s/n)")
+                try:
+                    answer = input().strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    answer = "n"
+                if answer in ("s", "sí", "si"):
+                    confirmed = True
+                    break
+                if answer in ("n", "no"):
+                    break
+        else:
+            try:
+                confirmed = Confirm.ask(
+                    f"¿Borrar {count} entradas de feedback?",
+                    default=False,
+                )
+            except (EOFError, KeyboardInterrupt):
+                confirmed = False
+
+        if not confirmed:
+            console.print("[dim]Operación cancelada.[/]")
+            return
+
+        try:
+            feedback_path.write_text("[]\n", encoding="utf-8")
+        except OSError as exc:
+            render_error(f"No se pudo borrar el feedback: {exc}")
+            return
+        console.print(f"[success]✓ {count} entradas de feedback borradas.[/]")
+        return
+
+    render_error("Uso: /feedback [add <mensaje>|clear|help]")

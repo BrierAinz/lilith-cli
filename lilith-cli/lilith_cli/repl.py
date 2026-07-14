@@ -48,6 +48,7 @@ from .extra_commands import (
     run_editor_command,
     run_env_command,
     run_explain_command,
+    run_feedback_command,
     run_fork_command,
     run_git_command,
     run_hash_command,

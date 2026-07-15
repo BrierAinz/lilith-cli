@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -95,8 +95,19 @@ class YggdrasilConfig(BaseModel):
     providers: dict[str, ProviderProfile] = Field(default_factory=dict)
     # Safety: require diff preview before destructive file_write/file_edit.
     confirm_write: bool = True
+    # Maximum tool-calling loop iterations per user message. Guards against
+    # runaway loops; the last iteration receives a soft-warning system
+    # message asking the model to wrap up.
+    max_iterations: int = 10
     # Agent operating mode (default, plan-first, review-only, auto-edit).
     agent_mode: str = "default"
+
+    @field_validator("max_iterations")
+    @classmethod
+    def _validate_max_iterations(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("max_iterations must be >= 1")
+        return value
 
     model_config = {"extra": "ignore"}  # Allow extra keys for forward-compatibility
 
@@ -176,6 +187,9 @@ history:
 
 # Safety: require diff preview before destructive file_write/file_edit.
 confirm_write: true
+
+# Maximum tool-calling loop iterations per user message (>=1).
+max_iterations: 10
 
 # Agent operating mode (default, plan-first, review-only, auto-edit).
 agent_mode: default

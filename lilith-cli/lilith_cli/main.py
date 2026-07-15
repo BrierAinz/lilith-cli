@@ -213,10 +213,32 @@ def prompt(
     local: Annotated[bool, Parameter(name="--local", help="Use local LM Studio")] = False,
     no_tools: Annotated[bool, Parameter(name="--no-tools", help="Disable tools")] = False,
     config_path: Annotated[str | None, Parameter(name="--config", help="Config file path")] = None,
+    yes: Annotated[
+        bool,
+        Parameter(
+            name="--yes",
+            help="Skip destructive-write confirmation for the duration of this run",
+        ),
+    ] = False,
+    max_iterations: Annotated[
+        int | None,
+        Parameter(
+            name="--max-iterations",
+            help="Override the tool-calling loop cap for this run",
+        ),
+    ] = None,
 ) -> None:
     """Modo one-shot: enviar un prompt y mostrar la respuesta."""
     cfg = load_config(config_path)
     _apply_overrides(cfg, model=model, provider=provider, local=local, no_tools=no_tools)
+    if yes:
+        cfg.confirm_write = False
+    if max_iterations is not None:
+        if max_iterations < 1:
+            from .render import console
+            console.print("[error]--max-iterations debe ser >= 1[/]")
+            raise SystemExit(2)
+        cfg.max_iterations = max_iterations
 
     from .agent import AgentSession
     from .repl import run_oneshot

@@ -980,8 +980,13 @@ class AgentSession:
             else None
         )
 
-        # Tool-calling loop.
-        max_iterations = 10  # safety limit
+        # Tool-calling loop. ``max_iterations`` is configurable via
+        # ``YggdrasilConfig.max_iterations`` (default 10); the last
+        # iteration receives a soft-warning system message asking
+        # the model to wrap up so we can fall back to a no-tools
+        # closing summary if the loop still has pending tool calls.
+        max_iterations = getattr(self.config, "max_iterations", 10) or 10
+        _iter_idx = 0
         for _ in range(max_iterations):
             response_format = {"type": "json_object"} if getattr(self, "_json_mode", False) else None
             response = await self.provider.complete(messages, tools=tools, response_format=response_format)
@@ -1059,6 +1064,16 @@ class AgentSession:
 
             # Rebuild messages for the next iteration.
             messages = self._build_messages()
+            _iter_idx += 1
+
+            # Soft-warning on the final iteration: tell the model this
+            # is its last allowed tool-calling round so it can wrap up.
+            if _iter_idx >= max_iterations - 1:
+                messages = [*messages, Message.system(
+                    "AVISO: última iteración disponible. "
+                    "No llames más herramientas salvo lo imprescindible; "
+                    "cerrá reportando qué completaste y qué quedó pendiente."
+                )]
 
             # Check for cancellation between tool iterations. If the
             # caller set the event, stop the loop without appending the
@@ -1066,7 +1081,32 @@ class AgentSession:
             if self._cancel_event is not None and self._cancel_event.is_set():
                 return ""
 
-        return content  # fallback
+        # Loop exhausted while tool calls are still pending. Ask the
+        # model for a closing summary (no tools, no further calls)
+        # so the user still gets a readable answer instead of a hard
+        # truncation at ``max_iterations``.
+        try:
+            closing = await self.provider.complete(
+                [*messages,
+                Message.system(
+                    "Iteraciones agotadas. Emití un resumen final: "
+                    "qué completaste y qué quedó pendiente."
+                ),
+                ],
+                tools=None,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Closing summary failed: %s", exc)
+            return content or ""
+        closing_content = closing.get("content", "") if isinstance(closing, dict) else ""
+        if closing_content:
+            self.history.append(Message.assistant(closing_content))
+            self._track_usage(
+                closing.get("usage", {}) if isinstance(closing, dict) else {},
+                (closing.get("model") if isinstance(closing, dict) else None) or self.config.model,
+            )
+            return closing_content
+        return content or ""
 
     async def process_message_stream(
         self,
@@ -1104,7 +1144,11 @@ class AgentSession:
         # We need messages for the streaming loop.
         messages = self._build_messages()
 
-        max_iterations = 10
+        # Configurable tool-call loop cap (default 10). The final
+        # iteration gets a soft-warning system message; if the loop
+        # is still exhausting with pending tool calls we fall back to
+        # a no-tools closing summary streamed as text before done.
+        max_iterations = getattr(self.config, "max_iterations", 10) or 10
         for iteration in range(max_iterations):
             accumulated_text = ""
             accumulated_tool_calls: list[dict[str, Any]] = []
@@ -1236,10 +1280,47 @@ class AgentSession:
             # Rebuild messages for next iteration.
             messages = self._build_messages()
 
+            # Soft-warning on the final iteration: nudge the model to
+            # wrap up so we can transition to the closing summary.
+            if iteration >= max_iterations - 1:
+                messages = [*messages, Message.system(
+                    "AVISO: última iteración disponible. "
+                    "No llames más herramientas salvo lo imprescindible; "
+                    "cerrá reportando qué completaste y qué quedó pendiente."
+                )]
+
             # Check for cancellation between tool iterations.
             if self._cancel_event is not None and self._cancel_event.is_set():
                 yield {"type": "cancelled"}
                 return
+
+        # Loop exhausted while tool calls are still pending. Stream a
+        # closing summary as text (no tools), then done. If the
+        # provider.complete call itself fails, we still emit a final
+        # done so the REPL/IDE doesn't hang.
+        try:
+            closing = await self.provider.complete(
+                [*messages,
+                Message.system(
+                    "Iteraciones agotadas. Emití un resumen final: "
+                    "qué completaste y qué quedó pendiente."
+                ),
+                ],
+                tools=None,
+            )
+            closing_content = (
+                closing.get("content", "") if isinstance(closing, dict) else ""
+            )
+            if closing_content:
+                self.history.append(Message.assistant(closing_content))
+                self._track_usage(
+                    closing.get("usage", {}) if isinstance(closing, dict) else {},
+                    (closing.get("model") if isinstance(closing, dict) else None) or self.config.model,
+                )
+                accumulated_text = (accumulated_text + closing_content) if accumulated_text else closing_content
+                yield {"type": "text", "content": closing_content}
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Stream closing summary failed: %s", exc)
 
         yield {"type": "done", "content": accumulated_text, "usage": self._total_usage}
 

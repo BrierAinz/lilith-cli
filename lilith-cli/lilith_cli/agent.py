@@ -899,6 +899,13 @@ class AgentSession:
                     "\n\nAUTO-EDIT: file_write and file_edit apply changes "
                     "directly without requiring a diff preview first."
                 )
+
+            extras += (
+                "\n\nVERIFICATION: a task is only DONE when its tool result "
+                "confirms success. If a tool returned an error, the task "
+                "FAILED — do not mark its todo as done and do not report it "
+                "as completed; state the exact error instead."
+            )
             if hasattr(self, "current_plan") and self.current_plan is not None:
                 plan = self.current_plan
                 pending = plan.next_pending()

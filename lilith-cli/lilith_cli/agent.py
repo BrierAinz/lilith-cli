@@ -879,7 +879,13 @@ class AgentSession:
             if mode is not None and mode.system_prompt_extra:
                 extras += mode.system_prompt_extra
 
-            if not mode or mode.confirm_write:
+            # The prompt must describe the SAME knob the executor enforces:
+            # execute_tool() gates the diff-preview on config.confirm_write
+            # (agent modes sync their confirm_write into the config), so a
+            # config with confirm_write=false must NOT advertise the
+            # two-step preview protocol — models stall deliberating over a
+            # policy that is not actually in effect.
+            if getattr(self.config, "confirm_write", True):
                 extras += (
                     "\n\nSAFETY: file_write and file_edit are guarded by a "
                     "diff-preview policy. Your FIRST call to these tools "
@@ -888,7 +894,7 @@ class AgentSession:
                     "`show_diff=False` to actually apply the change. "
                     "This two-step pattern is how the user previews edits."
                 )
-            elif mode and not mode.confirm_write:
+            else:
                 extras += (
                     "\n\nAUTO-EDIT: file_write and file_edit apply changes "
                     "directly without requiring a diff preview first."

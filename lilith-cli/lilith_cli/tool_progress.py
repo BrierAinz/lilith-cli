@@ -175,10 +175,13 @@ class ToolProgressTracker:
         )
 
     def pause_live(self) -> None:
-        """Close the Live panel (persisting its last frame) without resetting
-        counters.  Rich allows only one active Live at a time, so the REPL
-        pauses the tracker before opening its streaming display; the panel
-        reopens automatically on the next ``start()``.
+        """Close the Live panel without resetting counters.  Rich allows
+        only one active Live at a time, so the REPL pauses the tracker
+        before opening its streaming display; the panel reopens
+        automatically on the next ``start()``.  The panel is transient, so
+        pausing erases it instead of stacking a cumulative copy in the
+        scrollback on every stream/tool alternation; ``render_summary()``
+        prints the one persistent line at end of turn.
         """
         if self._live is not live_none:
             self._live.__exit__(None, None, None)
@@ -196,7 +199,7 @@ class ToolProgressTracker:
                 ),
                 console=console,
                 refresh_per_second=12,
-                vertical_overflow="visible",
+                transient=True,
             )
             self._live.__enter__()
 

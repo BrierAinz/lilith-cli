@@ -1094,7 +1094,7 @@ class AgentSession:
         max_iterations = 10
         for iteration in range(max_iterations):
             accumulated_text = ""
-            accumulated_tool_calls: dict[int, dict[str, Any]] = {}
+            accumulated_tool_calls: list[dict[str, Any]] = []
 
             # Check cancellation before starting a new LLM stream.
             if self._cancel_event is not None and self._cancel_event.is_set():
@@ -1121,27 +1121,21 @@ class AgentSession:
                     accumulated_text += content
                     yield {"type": "text", "content": content}
 
-                # Accumulate tool call deltas.
+                # Collect tool calls. The provider layer already accumulates
+                # the SSE deltas per index and emits each call fully formed
+                # ({id, name, arguments}); merging them here by a nonexistent
+                # "index" key used to collapse parallel calls into one slot,
+                # concatenating names and leaving every call but the first
+                # without arguments.
                 if tc_deltas:
-                    for tc_delta in tc_deltas:
-                        idx = tc_delta.get("index", 0)
-                        if idx not in accumulated_tool_calls:
-                            accumulated_tool_calls[idx] = {
-                                "id": "",
-                                "name": "",
-                                "arguments": "",
+                    for tc_data in tc_deltas:
+                        accumulated_tool_calls.append(
+                            {
+                                "id": tc_data.get("id", ""),
+                                "name": tc_data.get("name", ""),
+                                "arguments": tc_data.get("arguments", ""),
                             }
-                        if tc_delta.get("id"):
-                            accumulated_tool_calls[idx]["id"] = tc_delta["id"]
-                        if tc_delta.get("name"):
-                            accumulated_tool_calls[idx]["name"] += tc_delta["name"]
-                        if tc_delta.get("arguments"):
-                            arg_delta = tc_delta["arguments"]
-                            # Some providers (e.g. opencode/glm) return arguments
-                            # as a parsed dict instead of a JSON string.
-                            if isinstance(arg_delta, dict):
-                                arg_delta = json.dumps(arg_delta, ensure_ascii=False)
-                            accumulated_tool_calls[idx]["arguments"] += arg_delta
+                        )
 
                 if finish_reason == "stop":
                     break
@@ -1154,12 +1148,16 @@ class AgentSession:
 
             # Resolve tool calls — with auto-repair for concatenated names.
             resolved_tool_calls: list[ToolCall] = []
-            for idx in sorted(accumulated_tool_calls):
-                tc_data = accumulated_tool_calls[idx]
-                try:
-                    args = json.loads(tc_data["arguments"]) if tc_data["arguments"] else {}
-                except json.JSONDecodeError:
-                    args = {"raw": tc_data["arguments"]}
+            for tc_data in accumulated_tool_calls:
+                raw_args = tc_data["arguments"]
+                if isinstance(raw_args, dict):
+                    # Already parsed by the provider layer.
+                    args = raw_args
+                else:
+                    try:
+                        args = json.loads(raw_args) if raw_args else {}
+                    except json.JSONDecodeError:
+                        args = {"raw": raw_args}
 
                 tc_name = tc_data["name"]
                 tc_id = tc_data["id"]

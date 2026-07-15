@@ -26,7 +26,6 @@ from prompt_toolkit.lexers import PygmentsLexer
 from prompt_toolkit.styles import Style as PtStyle
 from pygments.lexers import MarkdownLexer as PygmentsMarkdownLexer
 from rich.live import Live
-from rich.markdown import Markdown
 
 
 if TYPE_CHECKING:
@@ -97,6 +96,7 @@ from .extra_commands import (
 
 from .render import (
     Timer,
+    build_stream_tail,
     build_thinking_panel,
     console,
     get_theme,
@@ -844,7 +844,6 @@ async def _process_with_streaming(
     in_reasoning = False
     first_token_received = False
     _assistant_sep_shown = False
-    text_streamed_live = False
 
     timer.__enter__()
 
@@ -857,10 +856,13 @@ async def _process_with_streaming(
         nonlocal stream_live
         if stream_live is None:
             tool_progress.pause_live()
+            # transient: the live frame (a bounded tail of the content) is
+            # erased on close and the full content printed once. A frame
+            # taller than the terminal would duplicate on every refresh.
             stream_live = Live(
                 console=console,
                 refresh_per_second=12,
-                vertical_overflow="visible",
+                transient=True,
             )
             stream_live.__enter__()
         return stream_live
@@ -927,18 +929,15 @@ async def _process_with_streaming(
                             # Close reasoning panel if transitioning to content.
                             if in_reasoning:
                                 in_reasoning = False
-                                if stream_live is not None:
-                                    stream_live.update(build_thinking_panel(reasoning_text))
-                                    _close_stream_live()
-                                else:
-                                    render_thinking(reasoning_text)
+                                _close_stream_live()
+                                render_thinking(reasoning_text)
                                 reasoning_text = ""
                                 console.print()  # blank line before response
 
                             accumulated += chunk
-                            # Stream the response live as Markdown.
-                            text_streamed_live = True
-                            _open_stream_live().update(Markdown(accumulated))
+                            # Stream the response live as Markdown (bounded
+                            # tail; the full text prints once at the end).
+                            _open_stream_live().update(build_stream_tail(accumulated))
 
                     # ── Tool call start ───────────────────────────────────
                     elif event_type == "tool_call":
@@ -952,16 +951,16 @@ async def _process_with_streaming(
                         # Close reasoning panel before showing tool progress.
                         if in_reasoning:
                             in_reasoning = False
-                            if stream_live is not None:
-                                stream_live.update(build_thinking_panel(reasoning_text))
-                            else:
-                                render_thinking(reasoning_text)
+                            _close_stream_live()
+                            render_thinking(reasoning_text)
                             reasoning_text = ""
-                        # Persist any partially streamed text and free the
-                        # Live slot for the tool tracker; the next iteration
-                        # streams into a fresh display.
+                        # Print any partially streamed text (the transient
+                        # live erased its frame) and free the Live slot for
+                        # the tool tracker; the next iteration streams into
+                        # a fresh display.
                         _close_stream_live()
                         if accumulated.strip():
+                            render_markdown(accumulated)
                             console.print()
                         accumulated = ""
 
@@ -1001,8 +1000,12 @@ async def _process_with_streaming(
             pass
         except BaseException:
             # Free the Live slot before propagating (Ctrl+C, provider
-            # errors, cancellation) so the terminal isn't left in live mode.
+            # errors, cancellation) so the terminal isn't left in live
+            # mode, and print whatever partial text streamed so it isn't
+            # lost with the transient frame.
             _close_stream_live()
+            if accumulated.strip():
+                render_markdown(accumulated)
             raise
         finally:
             # If spinner is still active, stop it.
@@ -1019,23 +1022,18 @@ async def _process_with_streaming(
     # ── Final rendering ─────────────────────────────────────────────
     # Close any remaining reasoning block.
     if in_reasoning and reasoning_text:
-        if stream_live is not None:
-            stream_live.update(build_thinking_panel(reasoning_text))
-        else:
-            render_thinking(reasoning_text)
+        _close_stream_live()
+        render_thinking(reasoning_text)
         console.print()
 
-    # Close the streaming display — its last frame (the fully rendered
-    # Markdown response) persists in the terminal.
+    # Close the streaming display (transient — erases its tail frame)
+    # and print the full Markdown response exactly once.
     _close_stream_live()
+    if accumulated.strip():
+        render_markdown(accumulated)
 
     # Final newline.
     console.print()
-
-    # Fallback for non-streamed text (e.g. single-chunk providers whose
-    # content arrived without opening the live display).
-    if accumulated.strip() and not text_streamed_live:
-        render_markdown(accumulated)
 
     # Show tool execution summary when tools were used this turn.
     if tool_progress.is_active():

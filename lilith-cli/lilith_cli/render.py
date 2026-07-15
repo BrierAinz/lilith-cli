@@ -470,6 +470,39 @@ def render_markdown(text: str) -> None:
     console.print(Markdown(text))
 
 
+class TailView:
+    """Renderable that shows only the last *tail_lines* lines of another
+    renderable.
+
+    Keeps a ``Live`` frame bounded: if a live frame grows taller than the
+    terminal, Rich re-prints the overflow on every refresh and the output
+    duplicates (the "texto repetido" bug in cmd.exe). Streaming views wrap
+    their content in this so the frame never exceeds the screen; the full
+    content gets printed once when the stream closes.
+    """
+
+    def __init__(self, renderable: Any, tail_lines: int = 12) -> None:
+        self.renderable = renderable
+        self.tail_lines = tail_lines
+
+    def __rich_console__(self, console_: Any, options: Any) -> Any:
+        from rich.segment import Segment
+
+        lines = console_.render_lines(self.renderable, options, pad=False)
+        if len(lines) > self.tail_lines:
+            yield Text("…", style="dim")
+            lines = lines[-self.tail_lines :]
+        for line in lines:
+            yield from line
+            yield Segment.line()
+
+
+def build_stream_tail(text: str, tail_lines: int = 12) -> TailView:
+    """Live view of a streaming Markdown response, bounded to the last
+    *tail_lines* rendered lines."""
+    return TailView(Markdown(text), tail_lines=tail_lines)
+
+
 # ── Error ───────────────────────────────────────────────────────────
 
 

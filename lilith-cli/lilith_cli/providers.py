@@ -302,7 +302,15 @@ class LLMProviderWrapper:
             return profile.model
         return self.config.model
 
-    # ── Core interface: complete ─────────────────────────────────────
+    def _resolve_max_tokens(self, kwargs: dict[str, Any] | None = None) -> int | None:
+        """Resolve output-token limit: explicit call > provider > global."""
+        if kwargs and kwargs.get("max_tokens") is not None:
+            return int(kwargs["max_tokens"])
+        profile = self.config.providers.get(self.config.provider.lower())
+        if profile and profile.max_tokens is not None:
+            return profile.max_tokens
+        return self.config.max_tokens
+
 
     async def complete(
         self,
@@ -386,8 +394,9 @@ class LLMProviderWrapper:
             "stream": True,
             "temperature": kwargs.get("temperature", self.config.temperature),
         }
-        if self.config.max_tokens:
-            payload["max_tokens"] = self.config.max_tokens
+        max_tokens = self._resolve_max_tokens(kwargs)
+        if max_tokens:
+            payload["max_tokens"] = max_tokens
         if tools:
             payload["tools"] = tools
         response_format = kwargs.get("response_format")
@@ -505,7 +514,7 @@ class LLMProviderWrapper:
         client = await self._get_client()
 
         # Anthropic-compat profiles: minimum max_tokens is 16.
-        max_tokens = max(self.config.max_tokens or 1024, 16)
+        max_tokens = max(self._resolve_max_tokens(kwargs) or 1024, 16)
 
         if self._is_anthropic():
             # Anthropic Messages API: max_tokens is REQUIRED.
@@ -572,8 +581,9 @@ class LLMProviderWrapper:
             "messages": messages,
             "temperature": kwargs.get("temperature", self.config.temperature),
         }
-        if self.config.max_tokens:
-            payload["max_tokens"] = self.config.max_tokens
+        max_tokens = self._resolve_max_tokens(kwargs)
+        if max_tokens:
+            payload["max_tokens"] = max_tokens
         if tools:
             payload["tools"] = tools
         response_format = kwargs.get("response_format")

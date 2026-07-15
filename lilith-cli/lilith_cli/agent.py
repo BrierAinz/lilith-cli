@@ -1205,6 +1205,7 @@ class AgentSession:
 
             # Resolve tool calls — with auto-repair for concatenated names.
             resolved_tool_calls: list[ToolCall] = []
+            invalid_tool_results: list[ToolResult] = []
             for tc_data in accumulated_tool_calls:
                 raw_args = tc_data["arguments"]
                 if isinstance(raw_args, dict):
@@ -1214,7 +1215,17 @@ class AgentSession:
                     try:
                         args = json.loads(raw_args) if raw_args else {}
                     except json.JSONDecodeError:
-                        args = {"raw": raw_args}
+                        finish_hint = " El turno terminó por finish_reason='length'." if finish_reason == "length" else ""
+                        invalid_tool_results.append(ToolResult(
+                            tool_call_id=tc_data["id"],
+                            name=tc_data["name"],
+                            content=(
+                                f"Los argumentos de {tc_data['name']} no fueron JSON válido "
+                                f"(probable truncamiento por límite de tokens de salida).{finish_hint} "
+                                "Divide el contenido en partes más pequeñas o usa varias llamadas consecutivas."
+                            ),
+                        ))
+                        continue
 
                 tc_name = tc_data["name"]
                 tc_id = tc_data["id"]
@@ -1252,6 +1263,14 @@ class AgentSession:
                 return
 
             self.history.append(Message.assistant(accumulated_text, tool_calls=resolved_tool_calls))
+
+            for invalid in invalid_tool_results:
+                yield {"type": "tool_result", "name": invalid.name, "content": invalid.content}
+                self.history.append(invalid.to_openai_message())
+
+            if not resolved_tool_calls:
+                messages = self._build_messages()
+                continue
 
             # Execute and yield tool results. Independent tools run in
             # parallel via asyncio.gather — yields remain in original order

@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 from rich.console import Console, Group
 from rich.live import Live
+from rich.markup import escape
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.rule import Rule
@@ -663,7 +664,7 @@ def render_tool_result(name: str, content: str) -> Any:
             parts.append(Text(content))
         return Group(*parts)
 
-    return content
+    return escape(content)
 
 
 # ── Status panel ─────────────────────────────────────────────────────

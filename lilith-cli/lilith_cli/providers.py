@@ -518,20 +518,77 @@ class LLMProviderWrapper:
 
         if self._is_anthropic():
             # Anthropic Messages API: max_tokens is REQUIRED.
-            # Convert OpenAI-style messages → Anthropic format.
+            # Convert OpenAI-style messages and tool history to Anthropic format.
+            anthropic_messages: list[dict[str, Any]] = []
+            for message in messages:
+                role = message.get("role", "user")
+                if role == "system":
+                    continue
+                if role == "assistant" and message.get("tool_calls"):
+                    blocks: list[dict[str, Any]] = []
+                    if message.get("content"):
+                        blocks.append({"type": "text", "text": message["content"]})
+                    for tool_call in message.get("tool_calls", []):
+                        function = tool_call.get("function", {})
+                        raw_arguments = function.get("arguments", "{}")
+                        if isinstance(raw_arguments, str):
+                            try:
+                                arguments = json.loads(raw_arguments)
+                            except json.JSONDecodeError:
+                                arguments = {"raw": raw_arguments}
+                        else:
+                            arguments = raw_arguments or {}
+                        blocks.append(
+                            {
+                                "type": "tool_use",
+                                "id": tool_call.get("id", ""),
+                                "name": function.get("name", ""),
+                                "input": arguments,
+                            }
+                        )
+                    anthropic_messages.append({"role": "assistant", "content": blocks})
+                elif role == "tool":
+                    anthropic_messages.append(
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": message.get("tool_call_id", ""),
+                                    "content": message.get("content", ""),
+                                }
+                            ],
+                        }
+                    )
+                else:
+                    anthropic_messages.append(
+                        {"role": role, "content": message.get("content", "")}
+                    )
+
             payload = {
                 "model": model,
                 "max_tokens": max_tokens,
-                "messages": [{"role": m["role"], "content": m["content"]} for m in messages],
+                "messages": anthropic_messages,
                 "temperature": kwargs.get("temperature", self.config.temperature),
             }
+            if tools:
+                anthropic_tools: list[dict[str, Any]] = []
+                for tool in tools:
+                    function = tool.get("function", tool)
+                    anthropic_tools.append(
+                        {
+                            "name": function.get("name", ""),
+                            "description": function.get("description", ""),
+                            "input_schema": function.get(
+                                "parameters", function.get("input_schema", {"type": "object"})
+                            ),
+                        }
+                    )
+                payload["tools"] = anthropic_tools
             # Optional system prepended as top-level system field.
             sys_msg = next((m for m in messages if m.get("role") == "system"), None)
             if sys_msg and sys_msg.get("content"):
                 payload["system"] = sys_msg["content"]
-                payload["messages"] = [
-                    m for m in payload["messages"] if m["role"] != "system"
-                ]
 
             response = await client.post("/v1/messages", json=payload)
             response.raise_for_status()

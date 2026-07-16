@@ -14,7 +14,7 @@ from lilith_cli import __version__
 
 def test_version_constant():
     """Module-level __version__ should be '4.4.0' (aliases + wiring fixes)."""
-    assert __version__ == "4.4.0"
+    assert __version__ == "4.5.0"
 
 
 def test_app_instance():
@@ -24,7 +24,7 @@ def test_app_instance():
     # Cyclopts name can be a tuple or string
     name = app.name if isinstance(app.name, str) else app.name[0]
     assert name == "yggdrasil"
-    assert app.version == "4.4.0"
+    assert app.version == "4.5.0"
 
 
 def test_config_loads():

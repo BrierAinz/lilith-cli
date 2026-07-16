@@ -256,15 +256,15 @@ def test_version_bumped_to_4_4_0() -> None:
     from lilith_cli.main import __version__
 
     # Site 1: lilith_cli/__init__.py
-    assert lilith_cli.__version__ == "4.4.0"
+    assert lilith_cli.__version__ == "4.5.0"
     # Site 2: lilith_cli/main.py
-    assert __version__ == "4.4.0"
+    assert __version__ == "4.5.0"
     # Site 3: pyproject.toml (hatch pulls this for wheel metadata).
     # __file__ is .../Asgard/lilith-cli/tests/test_ops_pantheon.py;
     # parents[1] lands on lilith-cli/, which owns the pyproject.toml.
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
     text = pyproject.read_text(encoding="utf-8")
-    assert 'version = "4.4.0"' in text
+    assert 'version = "4.5.0"' in text
 
 
 def test_app_registers_goals_and_policy() -> None:

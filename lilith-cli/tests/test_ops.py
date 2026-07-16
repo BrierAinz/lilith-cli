@@ -116,8 +116,8 @@ def test_version_bumped_to_4_4_0():
     import lilith_cli
     from lilith_cli.main import __version__
 
-    assert lilith_cli.__version__ == "4.4.0"
-    assert __version__ == "4.4.0"
+    assert lilith_cli.__version__ == "4.5.0"
+    assert __version__ == "4.5.0"
 
 
 # ── agents ──────────────────────────────────────────────────────────

@@ -195,7 +195,7 @@ def test_version_bumped_to_4_4_0() -> None:
     """lilith-cli version must be 4.4.0 after the A4 pantheon passthrough slice."""
     from lilith_cli.main import __version__
 
-    assert __version__ == "4.4.0"
+    assert __version__ == "4.5.0"
 
 
 def test_app_registers_queue_and_work() -> None:

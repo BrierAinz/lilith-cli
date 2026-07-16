@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import copy
 import os
 import platform
 import subprocess
@@ -375,6 +376,448 @@ def delegate(
 
     session = AgentSession(cfg)
     asyncio.run(run_oneshot(session, text))
+
+
+# ── Doctor (healthcheck) ────────────────────────────────────────────
+
+
+# Default cost ceiling for the per-provider 1-token ping. Same rationale
+# as ``/subagents test``: small enough to be cheap on every provider,
+# large enough to leave room for reasoning_content on Kimi / DeepSeek /
+# GLM-5.1 (which burn the budget on chain-of-thought).
+_DOCTOR_PING_MAX_TOKENS = 64
+
+# Hard wall-clock cap on the whole ping. Even though the provider may
+# have its own per-call timeout, the doctor never blocks longer than
+# this so a single bad provider cannot stall the CLI.
+_DOCTOR_PING_TIMEOUT_SECONDS = 15.0
+
+
+def _check_config_parses() -> dict[str, str]:
+    """Return one ``{check, status, message}`` row for config.yaml."""
+    from .config import load_config
+
+    try:
+        load_config()
+    except Exception as exc:
+        return {
+            "check": "config.yaml",
+            "status": "error",
+            "message": f"no se pudo parsear: {exc}",
+        }
+    return {
+        "check": "config.yaml",
+        "status": "ok",
+        "message": "config.yaml parsea correctamente",
+    }
+
+
+def _check_provider_keys(cfg: Any) -> list[dict[str, str]]:
+    """For each provider profile, check that an API key is resolvable.
+
+    "Resoluble" means the value is non-empty AFTER substitution — we
+    never print the value itself, only its presence. Profiles that
+    don't declare an API key (e.g. a local-only setup) are reported
+    as ``warn`` so the operator can see them but the doctor doesn't
+    fail.
+    """
+    rows: list[dict[str, str]] = []
+    providers = (cfg.providers or {}) if cfg else {}
+    if not providers:
+        return [{
+            "check": "API keys",
+            "status": "warn",
+            "message": "no hay providers declarados en config.yaml",
+        }]
+    for name, profile in providers.items():
+        # ``profile`` may be a Pydantic model or a SimpleNamespace in
+        # tests; ``getattr`` keeps us agnostic.
+        raw = getattr(profile, "api_key", None)
+        if raw is None or not str(raw).strip():
+            rows.append({
+                "check": f"api_key:{name}",
+                "status": "warn",
+                "message": f"provider '{name}' sin api_key declarada",
+            })
+            continue
+        # We never echo the key value. We only confirm it is non-empty
+        # AND that, if it's a ${VAR} reference, the env var is set.
+        # ``load_config`` performs the substitution; if the result is
+        # the literal "${VAR}" string, the env var is missing.
+        if str(raw).startswith("${") and str(raw).endswith("}"):
+            var = str(raw)[2:-1]
+            present = bool(os.environ.get(var))
+            rows.append({
+                "check": f"api_key:{name}",
+                "status": "ok" if present else "error",
+                "message": (
+                    f"provider '{name}' -> env {var} presente"
+                    if present
+                    else f"provider '{name}' -> env {var} NO esta definida"
+                ),
+            })
+            continue
+        # Key is a literal non-empty value.
+        rows.append({
+            "check": f"api_key:{name}",
+            "status": "ok",
+            "message": f"provider '{name}' tiene api_key configurada",
+        })
+    return rows
+
+
+async def _ping_one_provider(
+    name: str, profile: Any, *, parent_cfg: Any
+) -> dict[str, Any]:
+    """Run a single tiny ``complete()`` against one provider profile.
+
+    Returns a row dict (``check``, ``status``, ``message``, ``latency_ms``)
+    so the doctor can surface a uniform table; reuses the per-call
+    config-building idiom from ``/subagents test`` so behaviour matches
+    production.
+    """
+    import time as _time
+
+    from .providers import LLMProviderWrapper
+
+    row: dict[str, Any] = {
+        "check": f"ping:{name}",
+        "status": "error",
+        "message": "",
+        "latency_ms": 0,
+    }
+    try:
+        # Pydantic v2 models expose ``model_copy(deep=True)``; test
+        # fixtures (and any non-Pydantic config in the wild) only need a
+        # shallow ``copy.copy`` because we only mutate top-level
+        # ``provider`` / ``model`` / ``max_tokens`` attributes before
+        # handing the object to the wrapper.
+        copier = getattr(parent_cfg, "model_copy", None)
+        if callable(copier):
+            local_cfg = copier(deep=True)
+        else:
+            local_cfg = copy.copy(parent_cfg)
+        local_cfg.provider = name
+        local_cfg.model = (
+            getattr(profile, "model", None) or parent_cfg.model
+        )
+        if getattr(profile, "max_tokens", None) is not None:
+            local_cfg.max_tokens = profile.max_tokens
+        wrapper = LLMProviderWrapper(local_cfg)
+    except Exception as exc:
+        row["message"] = f"init: {type(exc).__name__}: {exc}"
+        return row
+    t0 = _time.perf_counter()
+    try:
+        response = await wrapper.complete(
+            [{"role": "user", "content": "PONG"}],
+            tools=None,
+            max_tokens=_DOCTOR_PING_MAX_TOKENS,
+        )
+    except Exception as exc:
+        row["message"] = f"{type(exc).__name__}: {exc}"
+        return row
+    finally:
+        try:
+            await wrapper.close()
+        except Exception:
+            pass
+
+    elapsed_ms = int((_time.perf_counter() - t0) * 1000)
+    row["latency_ms"] = elapsed_ms
+    content = response.get("content") or ""
+    reasoning = response.get("reasoning_content") or ""
+    if content or reasoning:
+        row["status"] = "ok"
+        row["message"] = (
+            f"responde en {elapsed_ms}ms "
+            f"({len(content)}c visibles, {len(reasoning)}c reasoning)"
+        )
+    else:
+        row["status"] = "warn"
+        row["message"] = f"respondio en {elapsed_ms}ms pero sin contenido"
+    return row
+
+
+async def _run_provider_pings(cfg: Any) -> list[dict[str, str]]:
+    """Ping every provider profile in parallel with a hard ceiling."""
+    providers = (cfg.providers or {}) if cfg else {}
+    if not providers:
+        return [{
+            "check": "ping",
+            "status": "warn",
+            "message": "no hay providers para pinguear",
+        }]
+
+    async def _guarded(name: str) -> dict[str, Any]:
+        try:
+            return await asyncio.wait_for(
+                _ping_one_provider(name, providers[name], parent_cfg=cfg),
+                timeout=_DOCTOR_PING_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            return {
+                "check": f"ping:{name}",
+                "status": "error",
+                "message": f"timeout {_DOCTOR_PING_TIMEOUT_SECONDS:.0f}s",
+                "latency_ms": int(_DOCTOR_PING_TIMEOUT_SECONDS * 1000),
+            }
+        except Exception as exc:
+            return {
+                "check": f"ping:{name}",
+                "status": "error",
+                "message": f"{type(exc).__name__}: {exc}",
+                "latency_ms": 0,
+            }
+
+    rows = await asyncio.gather(*(_guarded(n) for n in providers))
+    out: list[dict[str, str]] = []
+    for r in rows:
+        out.append({
+            "check": r["check"],
+            "status": r["status"],
+            "message": r["message"],
+        })
+    return out
+
+
+def _check_mcp_servers(cfg: Any) -> list[dict[str, str]]:
+    """Try to start every declared MCP server.
+
+    Mirrors the boot-time path: hand the configs to
+    :class:`MCPClientManager` and let ``start_all`` decide which
+    subprocesses it can launch. A broken server is reported as ``error``
+    on its own row; servers in ``disabled`` state are reported as
+    ``ok`` (the operator opted out).
+    """
+    rows: list[dict[str, str]] = []
+    # Accept both the real Pydantic ``YggdrasilConfig`` (which exposes
+    # ``effective_mcp_servers()``) and test fixtures that only carry the
+    # raw ``mcp_servers`` attribute as a dict. ``getattr`` keeps the
+    # helper agnostic without forcing every test to spin up the full
+    # config model.
+    if cfg is None:
+        servers: dict[str, Any] = {}
+    else:
+        getter = getattr(cfg, "effective_mcp_servers", None)
+        if callable(getter):
+            servers = getter() or {}
+        else:
+            servers = getattr(cfg, "mcp_servers", None) or {}
+    if not servers:
+        rows.append({
+            "check": "mcp_servers",
+            "status": "ok",
+            "message": "sin servidores declarados",
+        })
+        return rows
+    try:
+        from lilith_tools.mcp_client import MCPClientManager
+    except Exception as exc:
+        rows.append({
+            "check": "mcp_servers",
+            "status": "error",
+            "message": f"MCPClientManager no disponible: {exc}",
+        })
+        return rows
+    try:
+        def _server_payload(c: Any) -> dict[str, Any]:
+            """Best-effort serialisation of an ``MCPServerConfig``-like object.
+
+            Pydantic v2 models expose ``model_dump()``; test fixtures (and
+            any non-Pydantic config in the wild) fall back to ``dict(c)``
+            or ``vars(c)``.
+            """
+            dumper = getattr(c, "model_dump", None)
+            if callable(dumper):
+                return dumper()
+            if isinstance(c, dict):
+                return dict(c)
+            return dict(vars(c))
+        manager = MCPClientManager(
+            {n: _server_payload(c) for n, c in servers.items()}
+        )
+        statuses = manager.start_all()
+    except Exception as exc:
+        rows.append({
+            "check": "mcp_servers",
+            "status": "error",
+            "message": f"start_all fallo: {exc}",
+        })
+        return rows
+    for name, status in statuses.items():
+        if status == "ok":
+            rows.append({
+                "check": f"mcp:{name}",
+                "status": "ok",
+                "message": "arrancado",
+            })
+        elif status == "disabled":
+            rows.append({
+                "check": f"mcp:{name}",
+                "status": "ok",
+                "message": "deshabilitado (enabled=false)",
+            })
+        else:
+            rows.append({
+                "check": f"mcp:{name}",
+                "status": "error",
+                "message": str(status),
+            })
+    return rows
+
+
+def _check_memory_db(cfg: Any) -> dict[str, str]:
+    """Open the memory DB (creating the parent dir if needed) and run
+    a trivial SELECT to confirm it's a real SQLite file.
+    """
+    import sqlite3
+
+    try:
+        db_path = Path(getattr(cfg.memory, "db_path", "~/.yggdrasil/memory.db"))
+        db_path = db_path.expanduser()
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        return {
+            "check": "memory.db",
+            "status": "error",
+            "message": f"no se pudo preparar ruta: {exc}",
+        }
+    try:
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.execute("SELECT 1").fetchone()
+        finally:
+            conn.close()
+    except Exception as exc:
+        return {
+            "check": "memory.db",
+            "status": "error",
+            "message": f"sqlite error: {exc}",
+        }
+    return {
+        "check": "memory.db",
+        "status": "ok",
+        "message": f"accesible en {db_path}",
+    }
+
+
+def _check_package_versions() -> list[dict[str, str]]:
+    """Report the installed version of every lilith-* package."""
+    import importlib.metadata as md
+
+    rows: list[dict[str, str]] = []
+    for dist in sorted(md.distributions(), key=lambda d: d.metadata["Name"] or ""):
+        name = dist.metadata["Name"] or ""
+        if not name.startswith("lilith-"):
+            continue
+        try:
+            version = dist.version
+        except Exception as exc:
+            rows.append({
+                "check": f"pkg:{name}",
+                "status": "warn",
+                "message": f"version no resoluble: {exc}",
+            })
+            continue
+        rows.append({
+            "check": f"pkg:{name}",
+            "status": "ok",
+            "message": version,
+        })
+    if not rows:
+        rows.append({
+            "check": "pkg",
+            "status": "warn",
+            "message": "ningun paquete lilith-* instalado",
+        })
+    return rows
+
+
+def run_doctor_checks() -> list[dict[str, str]]:
+    """Run every diagnostic check and return the flat row list.
+
+    Public entry point for tests; the ``doctor`` command below is a
+    thin wrapper that renders these rows as a Rich table and chooses an
+    exit code.
+    """
+    rows: list[dict[str, str]] = []
+    rows.append(_check_config_parses())
+
+    # All other checks need a parsed config; if config.yaml is broken
+    # we still report the rest, but mark each as ``error`` since the
+    # config is required to know what to check.
+    cfg: Any = None
+    try:
+        from .config import load_config
+
+        cfg = load_config()
+    except Exception:
+        cfg = None
+
+    if cfg is None:
+        rows.append({
+            "check": "providers",
+            "status": "error",
+            "message": "config invalida; resto de chequeos no aplicables",
+        })
+        return rows
+
+    rows.extend(_check_provider_keys(cfg))
+
+    # Pings are async; the sync ``run_doctor_checks`` runs them in a
+    # fresh event loop. Tests that need finer control can call
+    # ``_run_provider_pings`` directly.
+    try:
+        ping_rows = asyncio.run(_run_provider_pings(cfg))
+    except Exception as exc:
+        ping_rows = [{
+            "check": "ping",
+            "status": "error",
+            "message": f"asyncio fallo: {exc}",
+        }]
+    rows.extend(ping_rows)
+
+    rows.extend(_check_mcp_servers(cfg))
+    rows.append(_check_memory_db(cfg))
+    rows.extend(_check_package_versions())
+    return rows
+
+
+@app.command
+def doctor() -> None:
+    """Chequeo de salud: config, providers, MCP, memory, paquetes.
+
+    Imprime una tabla con una fila por chequeo (estado: ok/warn/error)
+    y sale con codigo 0 si todo esta bien, 1 si algun chequeo reporta
+    error. Las API keys nunca se imprimen: solo se confirma su
+    presencia o el nombre de la variable de entorno esperada.
+    """
+    from rich.table import Table
+
+    from .render import console
+
+    rows = run_doctor_checks()
+    table = Table(show_header=True, header_style="bold cyan")
+    table.add_column("Check", style="bold")
+    table.add_column("Status")
+    table.add_column("Message")
+    for r in rows:
+        status = r.get("status", "?")
+        if status == "ok":
+            status_cell = "[status.ok]ok[/]"
+        elif status == "warn":
+            status_cell = "[warning]warn[/]"
+        else:
+            status_cell = "[error]error[/]"
+        table.add_row(
+            str(r.get("check", "?")),
+            status_cell,
+            str(r.get("message", "")),
+        )
+    console.print(table)
+    if any(r.get("status") == "error" for r in rows):
+        raise SystemExit(1)
 
 
 @app.command

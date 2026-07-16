@@ -60,6 +60,7 @@ TOOL_NAMES: frozenset[str] = frozenset({
     "coding",
     "directory_list",
     "file_edit",
+    "file_append",
     "file_read",
     "file_write",
     "grep_files",

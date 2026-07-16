@@ -297,13 +297,13 @@ class TestCatalogCounts:
     """Lock the count so accidental deletions/duplications fail loudly."""
 
     def test_tool_names_count(self) -> None:
-        # Lock-in: 26 BaseTool subclasses shipped today in lilith-tools
+        # Lock-in: 27 BaseTool subclasses shipped today in lilith-tools
         # (batch_edit + browser + chunk_recall/ingest/store_stats + coding +
         # 4 fs + grep_files + 8 local_context + package_guard +
         # security_scan + 2 system + 2 vision + web_search). If this
         # changes, the spec also changes intentionally -- update both
         # this number and TOOL_NAMES.
-        assert len(TOOL_NAMES) == 26
+        assert len(TOOL_NAMES) == 27
 
     def test_card_vocab_count(self) -> None:
         # 7 card-level tool names declared in the spec

@@ -5814,6 +5814,8 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
                     ("state", "Plan de orquestación persistente [show|clear]"),
                     ("costs", "Telemetría de delegaciones por preset [reset]"),
                     ("skills", "Catálogo de skills de delegación [show|save|delete <name>]"),
+                    ("conclave", "Fan-out de pregunta a 2-4 presets en paralelo [--presets a,b,c]"),
+                    ("learn", "Minar post-mortems de delegación y sugerir skills [save N]"),
                 ],
         "Files & Git": [
             ("git", "Operaciones git"),

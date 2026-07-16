@@ -177,8 +177,12 @@ class QuickstartCommand(BaseCommand):
         sections.append("  [bold cyan]/state[/]     — ver o limpiar el plan de orquestación persistente")
         sections.append("  [bold cyan]/skills[/]    — listar, mostrar o guardar skills de delegación")
         sections.append("  [bold cyan]/costs[/]     — telemetría acumulada de delegaciones por preset")
+        sections.append("  [bold cyan]/conclave[/]  — fan-out paralelo a 2-4 presets (--presets a,b,c)")
+        sections.append("  [bold cyan]/learn[/]     — minar post-mortems en skills sugeridas (save N)")
         sections.append("  [bold cyan]/subagents test[/] — healthcheck de un preset (latencia, modelo, límite)")
         sections.append("  [bold cyan]/mcp list[/]  — servidores MCP montados en el REPL")
+        sections.append("  [bold cyan]lilith doctor[/] — diagnóstico de config, providers, MCP, memoria")
+        sections.append("  [bold cyan]lilith delegate --preset/--agentic/--structured/--max-tokens/--max-turns[/]")
 
         sections.append("\n[bold cyan]Seguridad[/]")
         sections.append("  [status.ok]✓[/] [bold]diff-preview[/] — revisa cambios antes de aplicarlos")

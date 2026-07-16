@@ -295,3 +295,97 @@ def _profile(
         max_tokens=None,
         use_responses=None,
     )
+
+
+# ── ITEM 1 (tanda 6): reasoning_content handling ─────────────────────
+
+
+def test_subagents_test_accepts_reasoning_only(fake_session, monkeypatch, capsys):
+    """A response with empty ``content`` but non-empty
+    ``reasoning_content`` (Kimi / DeepSeek / GLM-5.1 pattern) must
+    count as ok and surface the "solo reasoning" tag in the table."""
+    from lilith_cli.commands import SubagentsCommand
+
+    presets = {"kimi": {"provider": "sakana", "model": "kimi-k2"}}
+    cfg = _make_cfg({"sakana": _profile(model="kimi-k2")})
+    _install_fake_main(monkeypatch, presets, cfg)
+
+    # Empty content, non-empty reasoning — exactly the failure mode
+    # that drove the fix. Two responses per provider (ping + probe).
+    reasoning_only = {
+        "content": "",
+        "reasoning_content": "thinking about PONG...",
+        "usage": {"prompt_tokens": 5, "completion_tokens": 64, "total_tokens": 69},
+    }
+    _install_fake_providers(
+        monkeypatch,
+        {"sakana": [reasoning_only, _ok_response("probe ok")]},
+    )
+
+    _run(SubagentsCommand(fake_session).execute("test kimi"))
+
+    out = capsys.readouterr().out
+    assert "kimi" in out
+    assert "ok (raz)" in out
+    # The previous false-positive label must be gone for this row.
+    assert "respuesta vacía" not in out
+
+
+def test_subagents_test_max_tokens_is_64(fake_session, monkeypatch, capsys):
+    """The PONG ping must request >= 64 tokens so reasoning_content
+    does not consume the entire budget."""
+    from lilith_cli.commands import SubagentsCommand
+
+    presets = {"p": {"provider": "sakana", "model": "m"}}
+    cfg = _make_cfg({"sakana": _profile(model="m")})
+    _install_fake_main(monkeypatch, presets, cfg)
+
+    captured_max_tokens: list[int] = []
+
+    from lilith_cli import providers as prov_mod
+
+    class _CapturingWrapper:
+        def __init__(self, cfg):
+            pass
+
+        async def complete(self, messages, *, tools=None, **kwargs):
+            captured_max_tokens.append(int(kwargs.get("max_tokens", -1)))
+            return _ok_response("ok")
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(prov_mod, "LLMProviderWrapper", _CapturingWrapper)
+
+    _run(SubagentsCommand(fake_session).execute("test p"))
+
+    # First call is the ping (>= 64); second is the 65536 probe.
+    assert captured_max_tokens, "wrapper.complete was never called"
+    assert captured_max_tokens[0] >= 64
+
+
+def test_subagents_test_real_empty_is_still_error(fake_session, monkeypatch, capsys):
+    """A response with neither ``content`` nor ``reasoning_content``
+    must still render as an empty/error row — the fix only changed
+    the reasoning-only case."""
+    from lilith_cli.commands import SubagentsCommand
+
+    presets = {"silent": {"provider": "sakana", "model": "m"}}
+    cfg = _make_cfg({"sakana": _profile(model="m")})
+    _install_fake_main(monkeypatch, presets, cfg)
+
+    truly_empty = {
+        "content": "",
+        "reasoning_content": "",
+        "usage": {"prompt_tokens": 5, "completion_tokens": 0, "total_tokens": 5},
+    }
+    _install_fake_providers(
+        monkeypatch,
+        {"sakana": [truly_empty, _ok_response("probe ok")]},
+    )
+
+    _run(SubagentsCommand(fake_session).execute("test silent"))
+
+    out = capsys.readouterr().out
+    assert "silent" in out
+    assert "respuesta vacía" in out

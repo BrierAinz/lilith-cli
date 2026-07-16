@@ -3649,9 +3649,13 @@ class SubagentsCommand(BaseCommand):
     # tool-level 180s of ``delegate_subagent`` because the healthcheck
     # should fail fast on bad credentials.
     _TEST_TIMEOUT_SECONDS = 20.0
-    # Probe size: tiny enough to be cheap on every provider, big enough
-    # for the provider to actually respond with content.
-    _TEST_MAX_TOKENS = 8
+    # Probe size: small enough to be cheap on every provider, large
+    # enough to leave room for reasoning_content before the visible
+    # content. Models with chain-of-thought reasoning (Kimi, DeepSeek,
+    # GLM-5.1) burn the budget on reasoning_content; with max_tokens=8
+    # the visible ``content`` came back empty even though the call
+    # succeeded, producing a false "respuesta vacía".
+    _TEST_MAX_TOKENS = 64
     # Bonus probe: ask the provider for this many tokens and see what
     # happens. If the API rejects the request, the error message often
     # reports the actual ceiling.
@@ -3819,10 +3823,28 @@ class SubagentsCommand(BaseCommand):
             elapsed = (time.perf_counter() - t0) * 1000
             row["latency_ms"] = int(elapsed)
             content = response.get("content") or ""
+            # Kimi / DeepSeek / GLM-5.1 may burn the whole budget on
+            # ``reasoning_content`` (chain-of-thought) and leave the
+            # visible ``content`` empty. Treat that as "ok" but tag it
+            # so the table can show "vacio (solo reasoning)" instead of
+            # the previous false-positive "respuesta vacía".
+            reasoning_content = response.get("reasoning_content") or ""
             usage = response.get("usage") or {}
-            row["ok"] = bool(content)
-            row["tokens_out"] = usage.get("completion_tokens") or len(content)
-            row["error"] = "" if row["ok"] else "respuesta vacía"
+            has_visible = bool(content)
+            has_reasoning = bool(reasoning_content)
+            row["ok"] = has_visible or has_reasoning
+            row["content_kind"] = (
+                "visible" if has_visible
+                else "reasoning_only" if has_reasoning
+                else "empty"
+            )
+            row["tokens_out"] = usage.get("completion_tokens") or len(content) or len(reasoning_content)
+            if row["ok"]:
+                row["error"] = ""
+            elif has_reasoning is False and has_visible is False:
+                row["error"] = "respuesta vacía"
+            else:
+                row["error"] = ""  # has_reasoning path; not actually an error
 
             # Bonus: probe max_tokens by asking for a huge value and
             # capturing the error. Providers that accept the request
@@ -3921,8 +3943,15 @@ class SubagentsCommand(BaseCommand):
                     probe_text = f"{probe_text} (~{probe['ceiling_hint']})"
             else:
                 probe_text = str(probe) if probe else "—"
+            # Distinguish the three terminal states surfaced by the
+            # ping: ok with visible content, ok with reasoning_content
+            # only, and truly empty (the previous failure mode).
+            kind = row.get("content_kind")
             if row["ok"]:
-                state = "[status.ok]ok[/]"
+                if kind == "reasoning_only":
+                    state = "[status.ok]ok (raz)[/]"
+                else:
+                    state = "[status.ok]ok[/]"
             else:
                 state = f"[error]{row.get('error', '?')}[/]"
             table.add_row(

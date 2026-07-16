@@ -168,6 +168,11 @@ class AgentSession:
         # JSON mode: when True, the LLM is asked to emit structured JSON output.
         self._json_mode: bool = False
 
+        # Autonomy safeguards: repeated failed calls and text continuations.
+        self._last_failed_tool_signature: str | None = None
+        self._identical_tool_failures: int = 0
+        self._last_auto_continuations: int = 0
+
     # ── Cancellation ────────────────────────────────────────────────
 
     def cancel(self) -> None:
@@ -479,6 +484,22 @@ class AgentSession:
 
         tool_name = tool_call.name
         tool_args = tool_call.arguments
+        signature = json.dumps(
+            {"name": tool_name, "arguments": tool_args},
+            sort_keys=True, ensure_ascii=False, default=str,
+        )
+        if (
+            signature == self._last_failed_tool_signature
+            and self._identical_tool_failures >= 2
+        ):
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                name=tool_name,
+                content=(
+                    "Error: misma llamada fallo 2 veces; cambia de estrategia "
+                    "o pregunta al usuario"
+                ),
+            )
 
         # Pre-tool-call hook
         try:
@@ -495,6 +516,17 @@ class AgentSession:
         start = _time.perf_counter()
         result = await self._execute_tool_impl(tool_call)
         duration = _time.perf_counter() - start
+
+        failed = result.content.startswith("Error:")
+        if failed:
+            if signature == self._last_failed_tool_signature:
+                self._identical_tool_failures += 1
+            else:
+                self._last_failed_tool_signature = signature
+                self._identical_tool_failures = 1
+        else:
+            self._last_failed_tool_signature = None
+            self._identical_tool_failures = 0
 
         self._tool_call_history.append(
             {
@@ -1000,7 +1032,28 @@ class AgentSession:
             tool_calls: list[ToolCall] = response.get("tool_calls", [])
 
             if not tool_calls:
-                # No more tool calls — we're done.
+                # Text-only length truncation: continue up to twice and stitch.
+                continuations = 0
+                while response.get("finish_reason") == "length" and continuations < 2:
+                    continuations += 1
+                    continuation = await self.provider.complete(
+                        [
+                            *messages,
+                            Message.assistant(content),
+                            Message.user("continua exactamente donde quedaste"),
+                        ],
+                        tools=None,
+                        response_format=response_format,
+                    )
+                    self._track_usage(
+                        continuation.get("usage", {}),
+                        continuation.get("model") or self.config.model,
+                    )
+                    content += continuation.get("content", "")
+                    response = continuation
+                self._last_auto_continuations = continuations
+                if continuations:
+                    content += f"\n\n[continuación automática: {continuations}]"
                 self.history.append(Message.assistant(content))
                 return content
 

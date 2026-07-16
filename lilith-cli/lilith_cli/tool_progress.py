@@ -251,3 +251,258 @@ def render_tool_progress(
     live = Live(panel, console=console, refresh_per_second=12, vertical_overflow="visible")
     live.__enter__()
     return live
+
+
+
+# ── Delegation streaming panel (tanda 6, ITEM 3) ──────────────────────
+
+
+class DelegationStreamBuffer:
+    """Thread-safe buffer of streaming chunks emitted by a delegate run.
+
+    ``delegate_subagent`` runs on a worker thread via
+    ``asyncio.to_thread``. To display live output in the REPL without
+    invasively coupling to the tool execution flow, the tool may push
+    chunks here (from the worker thread) and the REPL loop polls the
+    buffer on its own cadence.
+
+    The buffer is intentionally simple — a deque of recent lines plus a
+    few fields the panel needs (preset, model, current turn, last tool,
+    state). Pushes are O(1); reads are O(1) on the latest snapshot.
+    """
+
+    __slots__ = (
+        "preset",
+        "model",
+        "agentic",
+        "lines",
+        "current_turn",
+        "last_tool",
+        "last_status",
+        "started_at",
+        "finished_at",
+        "final_error",
+    )
+
+    def __init__(self, preset: str, model: str, agentic: bool) -> None:
+        self.preset = preset
+        self.model = model
+        self.agentic = agentic
+        # Bounded tail — keep the last 12 lines so a long delegation
+        # does not flood the live frame (Rich would duplicate overflow
+        # on every refresh).
+        from collections import deque
+
+        self.lines: deque[str] = deque(maxlen=12)
+        self.current_turn: int = 0
+        self.last_tool: str | None = None
+        self.last_status: str | None = None
+        import time
+
+        self.started_at: float = time.perf_counter()
+        self.finished_at: float | None = None
+        self.final_error: str | None = None
+
+    def push_line(self, line: str) -> None:
+        """Append a streaming chunk (caller is the worker thread)."""
+        if not line:
+            return
+        self.lines.append(line)
+
+    def push_turn(self, turn: int, tool: str | None, status: str | None) -> None:
+        """Record the latest agentic turn state (tool name + ok/error)."""
+        self.current_turn = int(turn)
+        if tool is not None:
+            self.last_tool = tool
+        if status is not None:
+            self.last_status = status
+
+    def finish(self, error: str | None = None) -> None:
+        """Mark the delegation as finished. Idempotent on the timestamp:
+        the first call wins; subsequent calls only update ``final_error``
+        when one was not already recorded, so a late cleanup cannot
+        overwrite the result that arrived via ``tool_result``.
+        """
+        import time
+
+        if self.finished_at is None:
+            self.finished_at = time.perf_counter()
+        if error and self.final_error is None:
+            self.final_error = error
+
+    def is_finished(self) -> bool:
+        return self.finished_at is not None
+
+    def elapsed(self) -> float:
+        import time
+
+        end = self.finished_at if self.finished_at is not None else time.perf_counter()
+        return end - self.started_at
+
+    def snapshot(self) -> dict[str, object]:
+        """Return a JSON-serializable snapshot the panel can render."""
+        return {
+            "preset": self.preset,
+            "model": self.model,
+            "agentic": self.agentic,
+            "lines": list(self.lines),
+            "current_turn": self.current_turn,
+            "last_tool": self.last_tool,
+            "last_status": self.last_status,
+            "elapsed": self.elapsed(),
+            "finished": self.is_finished(),
+            "error": self.final_error,
+        }
+
+
+class DelegationLive:
+    """Live panel that tails a ``DelegationStreamBuffer``.
+
+    Why a separate class instead of reusing ``ToolProgressTracker``:
+    the tool progress tracker is keyed on tool names and fires on
+    start/complete pairs; the delegation needs a *tail* of streamed
+    content plus a longer-lived status line. Trying to overload
+    ToolProgressTracker would entangle two concerns.
+
+    Lifecycle::
+
+        buf = DelegationStreamBuffer(preset, model, agentic)
+        with DelegationLive(buf) as live:
+            ... tool runs in a thread, pushing into buf ...
+            live.refresh()  # pull latest from buf into the frame
+        # final frame erased (transient=True); summary printed on close
+
+    Falls back to no-op when stdout is not a TTY (CI, redirected
+    output, tests) — the buffer still updates, but nothing is
+    rendered, so tests don't need to mock Rich.
+    """
+
+    def __init__(self, buffer: DelegationStreamBuffer) -> None:
+        self._buffer = buffer
+        self._live: "Live | None" = None
+        self._enabled = self._should_enable()
+
+    @staticmethod
+    def _should_enable() -> bool:
+        try:
+            import sys
+
+            return bool(sys.stdout.isatty())
+        except Exception:  # pragma: no cover - defensive
+            return False
+
+    def _build_renderable(self) -> "object":
+        from rich.console import Group
+        from rich.panel import Panel
+        from rich.spinner import Spinner
+        from rich.text import Text
+
+        snap = self._buffer.snapshot()
+        lines: list[object] = []
+        if snap["finished"]:
+            err = snap.get("error")
+            if err:
+                header_text = Text()
+                header_text.append("✗ ", style="red")
+                header_text.append(
+                    f"delegate {snap['preset']} falló", style="bold red"
+                )
+                header = header_text
+            else:
+                header_text = Text()
+                header_text.append("✓ ", style="green")
+                header_text.append(
+                    f"delegate {snap['preset']} ok", style="bold green"
+                )
+                header = header_text
+        else:
+            header_text = Text()
+            header_text.append("  delegando → ", style="bold cyan")
+            header_text.append(str(snap["preset"]), style="tool.name")
+            header_text.append(f"  ({snap['model']})", style="dim")
+            if snap["agentic"]:
+                header_text.append("  agentic", style="italic dim")
+            header = Group(Spinner("dots", style="cyan"), header_text)
+        lines.append(header)
+
+        # Body: tail of streamed lines (skip if empty + finished).
+        body_lines = list(snap["lines"])  # type: ignore[arg-type]
+        if body_lines:
+            body_text = Text()
+            for ln in body_lines:
+                body_text.append(ln, style="dim")
+                body_text.append("\n")
+            lines.append(body_text)
+
+        # Agentic status footer.
+        if snap["agentic"]:
+            foot = Text()
+            turn = snap["current_turn"]
+            tool = snap["last_tool"] or "—"
+            status = snap["last_status"] or "running"
+            foot.append(f"turno {turn}  tool={tool}  estado={status}", style="dim")
+            lines.append(foot)
+
+        # Elapsed footer.
+        elapsed = snap["elapsed"]
+        if isinstance(elapsed, float):
+            if elapsed < 1:
+                elapsed_s = f"{elapsed * 1000:.0f}ms"
+            elif elapsed < 60:
+                elapsed_s = f"{elapsed:.1f}s"
+            else:
+                mins, secs = divmod(int(elapsed), 60)
+                elapsed_s = f"{mins}m {secs}s"
+            lines.append(Text(f"⏱  {elapsed_s}", style="dim"))
+
+        title = f"[bold]Delegación: {snap['preset']}[/]"
+        return Panel(
+            Group(*lines),
+            title=title,
+            border_style="cyan",
+            expand=False,
+            padding=(0, 1),
+        )
+
+    def refresh(self) -> None:
+        """Pull the latest snapshot into the Live frame."""
+        if not self._enabled or self._live is None:
+            return
+        self._live.update(self._build_renderable())
+
+    def __enter__(self) -> "DelegationLive":
+        if self._enabled:
+            self._live = Live(
+                self._build_renderable(),
+                console=console,
+                refresh_per_second=8,
+                transient=True,
+            )
+            self._live.__enter__()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        # Refresh once with the final state before closing so the user
+        # sees ok/error + last lines, then the transient frame erases.
+        if self._enabled and self._live is not None:
+            try:
+                self._live.update(self._build_renderable())
+            except Exception:
+                pass
+            self._live.__exit__(None, None, None)
+            self._live = None
+
+
+# ── Module-level helper exposed to the agent loop ─────────────────────
+
+
+def make_delegation_buffer(preset: str, model: str, agentic: bool) -> DelegationStreamBuffer:
+    """Construct the thread-safe buffer a ``delegate_subagent`` run can
+    push into. The REPL owns the corresponding ``DelegationLive`` and
+    polls it on each turn.
+
+    Returns a fresh buffer; callers are responsible for handing it to
+    the tool via a thread-local / contextvar hook (left for the actual
+    agentic integration to wire up — see repl.py for the polling side).
+    """
+    return DelegationStreamBuffer(preset=preset, model=model, agentic=agentic)

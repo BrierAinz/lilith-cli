@@ -962,6 +962,17 @@ async def _process_with_streaming(
     # ── Live tool progress tracker for parallel tool execution ────
     tool_progress = ToolProgressTracker()
 
+    # ── Live delegation streaming panel (tanda 6, ITEM 3) ────────────
+    # delegate_subagent runs on a worker thread (asyncio.to_thread) so
+    # we cannot pipe events into the agent loop directly. Instead we
+    # open a dedicated Live panel between the ``tool_call`` and
+    # ``tool_result`` events for that name and poll a thread-safe
+    # buffer. tool_progress.pause_live() frees the single Rich Live
+    # slot while our panel runs, mirroring how streaming alternates
+    # with the tool tracker elsewhere in this loop.
+    delegation_live: "DelegationLive | None" = None
+    delegation_buffer: "DelegationStreamBuffer | None" = None
+
     # ── Start the thinking spinner (shows while LLM processes) ────
     spinner_info = make_thinking_spinner()
     spinner_status = spinner_info["status"]
@@ -1052,6 +1063,28 @@ async def _process_with_streaming(
 
                         tool_progress.start(event["name"])
 
+                        # ITEM 3 (tanda 6): open the delegation streaming
+                        # panel when the model invokes delegate_subagent.
+                        # The tool itself runs on a worker thread; the
+                        # buffer below is what the tool pushes into (when
+                        # wired up). For now we capture preset / model /
+                        # agentic from the call arguments so the panel
+                        # renders meaningful metadata immediately.
+                        if (
+                            event["name"] == "delegate_subagent"
+                            and delegation_live is None
+                        ):
+                            args = event.get("arguments") or {}
+                            buf = DelegationStreamBuffer(
+                                preset=str(args.get("preset") or "?"),
+                                model=str(args.get("model") or "—"),
+                                agentic=bool(args.get("agentic")),
+                            )
+                            tool_progress.pause_live()
+                            delegation_buffer = buf
+                            delegation_live = DelegationLive(buf)
+                            delegation_live.__enter__()
+
                     # ── Tool result ──────────────────────────────────────
                     elif event_type == "tool_result":
                         if not first_token_received:
@@ -1062,6 +1095,28 @@ async def _process_with_streaming(
                         error = event.get("error") or event.get("is_error")
                         error_str = str(error) if error else None
                         tool_progress.complete(event["name"], error=error_str)
+
+                        # ITEM 3 (tanda 6): close the delegation streaming
+                        # panel that ``tool_call`` opened above. The
+                        # transient frame is erased by ``__exit__`` and
+                        # the standard ``render_tool_result`` /
+                        # ``render_tool_call`` below take over rendering.
+                        if (
+                            event["name"] == "delegate_subagent"
+                            and delegation_live is not None
+                        ):
+                            try:
+                                if error_str and delegation_buffer is not None:
+                                    delegation_buffer.finish(error=error_str)
+                                elif delegation_buffer is not None:
+                                    delegation_buffer.finish()
+                                delegation_live.refresh()
+                            finally:
+                                delegation_live.__exit__(None, None, None)
+                                delegation_live = None
+                                delegation_buffer = None
+                                # tool_progress reopens automatically on
+                                # its next ``start()``.
 
                         rendered = render_tool_result(event["name"], event["content"])
                         if rendered is not None:
@@ -1076,10 +1131,31 @@ async def _process_with_streaming(
                     # ── Turn complete ─────────────────────────────────────
                     elif event_type == "done":
                         usage = event.get("usage", {})
+                        # ITEM 3 safety net: if a delegation panel is
+                        # somehow still open (cancelled, lost event),
+                        # close it so Rich isn't left with a live frame.
+                        if delegation_live is not None:
+                            try:
+                                if delegation_buffer is not None:
+                                    delegation_buffer.finish()
+                                delegation_live.refresh()
+                            finally:
+                                delegation_live.__exit__(None, None, None)
+                                delegation_live = None
+                                delegation_buffer = None
                         break
 
                     # ── Turn cancelled ─────────────────────────────────────
                     elif event_type == "cancelled":
+                        if delegation_live is not None:
+                            try:
+                                if delegation_buffer is not None:
+                                    delegation_buffer.finish(error="cancelled")
+                                delegation_live.refresh()
+                            finally:
+                                delegation_live.__exit__(None, None, None)
+                                delegation_live = None
+                                delegation_buffer = None
                         break
 
         except StopAsyncIteration:

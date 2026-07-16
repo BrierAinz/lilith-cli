@@ -7768,3 +7768,189 @@ async def run_feedback_command(session: AgentSession, args: str) -> None:  # noq
         return
 
     render_error("Uso: /feedback [add <mensaje>|clear|help]")
+
+"""Source for /learn slash command block. Imported as a module from _learn_section.py."""
+
+from ._learn_section import (
+    SkillSuggestion,
+    suggest_from_post_mortems,
+    suggest_from_state_path,
+    save_suggestion,
+)
+
+# Internal state: cached suggestions from the last /learn invocation,
+# keyed by state file path so the user can /learn save <n> without
+# re-running the analysis.
+_LEARN_CACHE: dict[str, list[SkillSuggestion]] = {}
+
+
+async def run_learn_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+    """Suggest reusable delegation skills from historical post-mortems (/learn).
+
+    Examples:
+        /learn              # show candidate skills (table, numbered)
+        /learn save 1       # persist suggestion #1 as a real DelegationSkill YAML
+        /learn save 2 3     # persist suggestions 2 and 3 in one go
+        /learn clear        # drop the cached suggestions for the current session
+
+    Behaviour:
+      * Reads post-mortems from the active orchestration state file
+        (``~/.yggdrasil/orchestration_state.json`` by default; override
+        via ``YGGDRASIL_ORCHESTRATION_STATE``).
+      * Groups successful delegations by preset; presets with ``>=2``
+        successes are surfaced as candidates.
+      * ``/learn save <n>`` materialises the suggestion via the
+        ``DelegationSkillRegistry`` (lilith-skills, ~/.yggdrasil/skills/<n>.yaml).
+
+    This command is the automejora nivel-2 surface: it converts past
+    successful delegations into reusable skills without operator intervention.
+    """
+    import shlex as _shlex
+
+    from .render import console, render_error
+
+    text = args.strip()
+    if not text:
+        _render_learn_table()
+        return
+
+    try:
+        tokens = _shlex.split(text)
+    except ValueError as exc:
+        render_error(f"Argumentos inválidos: {exc}")
+        return
+
+    sub = tokens[0].lower()
+    if sub == "clear":
+        _LEARN_CACHE.clear()
+        console.print("[dim]caché de /learn vaciada.[/]")
+        return
+
+    if sub != "save":
+        render_error(
+            "Uso: /learn [save <n> [<n> ...] | clear]"
+        )
+        return
+
+    indices: list[int] = []
+    for raw in tokens[1:]:
+        try:
+            indices.append(int(raw))
+        except ValueError:
+            render_error(f"Índice inválido: {raw!r} (debe ser un entero)")
+            return
+
+    suggestions = _learn_cached_or_refresh()
+    if not suggestions:
+        render_error(
+            "No hay sugerencias en caché; ejecuta /learn primero."
+        )
+        return
+
+    by_index = {s.index: s for s in suggestions}
+    saved: list[str] = []
+    for idx in indices:
+        suggestion = by_index.get(idx)
+        if suggestion is None:
+            render_error(
+                f"Índice fuera de rango: {idx} (rango válido: 1..{len(suggestions)})"
+            )
+            continue
+        try:
+            path = save_suggestion(suggestion)
+        except (OSError, TypeError, ValueError) as exc:
+            render_error(
+                f"No se pudo guardar {suggestion.name!r}: {exc}"
+            )
+            continue
+        saved.append(str(path))
+
+    if saved:
+        console.print(
+            f"[success]✓ {len(saved)} skill(s) guardadas:[/]"
+        )
+        for path in saved:
+            console.print(f"  [dim]- {path}[/]")
+
+
+def _learn_state_path() -> Path:
+    """Return the active state path, honouring the env override."""
+    import os as _os
+    override = _os.environ.get("YGGDRASIL_ORCHESTRATION_STATE")
+    return (
+        Path(override).expanduser() if override
+        else Path.home() / ".yggdrasil" / "orchestration_state.json"
+    )
+
+
+def _learn_cached_or_refresh() -> list[SkillSuggestion]:
+    """Return cached suggestions for the current state path, refreshing if empty."""
+    state_path = _learn_state_path()
+    key = str(state_path)
+    cached = _LEARN_CACHE.get(key)
+    if cached:
+        return cached
+    suggestions = suggest_from_state_path(state_path)
+    _LEARN_CACHE[key] = suggestions
+    return suggestions
+
+
+def _render_learn_table() -> None:
+    """Render the /learn table (or a clear empty-state message)."""
+    from rich.table import Table
+
+    from .render import console, render_error
+
+    suggestions = _learn_cached_or_refresh()
+    state_path = _learn_state_path()
+    if not suggestions:
+        if state_path.exists():
+            render_error(
+                "No hay suficientes post-mortems exitosos para proponer skills "
+                "(se requieren >=2 por preset). Ejecuta mas delegaciones primero."
+            )
+        else:
+            render_error(
+                f"No se encontró el archivo de estado {state_path}. "
+                "Ejecuta delegaciones primero para generar post-mortems."
+            )
+        return
+
+    table = Table(
+        title="[bold realm]᛭ /learn — skills sugeridas desde post-mortems[/]",
+        show_header=True,
+        header_style="bold cyan",
+        border_style="cyan",
+        expand=True,
+        caption=(
+            f"[dim]{len(suggestions)} sugerencia(s) · "
+            "guarda con /learn save <n>[/dim]"
+        ),
+    )
+    table.add_column("#", style="bold cyan", no_wrap=True)
+    table.add_column("Nombre", style="white")
+    table.add_column("Preset", style="white")
+    table.add_column("Flags", style="dim")
+    table.add_column("Éxitos", style="bold", justify="right")
+    table.add_column("Descripción", style="white")
+
+    for s in suggestions:
+        flags = []
+        if s.agentic:
+            flags.append("agentic")
+        if s.structured:
+            flags.append("structured")
+        if s.max_tokens is not None:
+            flags.append(f"max_tokens={s.max_tokens}")
+        flags_str = ", ".join(flags) if flags else "-"
+        table.add_row(
+            str(s.index),
+            s.name,
+            s.preset,
+            flags_str,
+            str(s.success_count),
+            s.description,
+        )
+
+    console.print(table)
+    console.print()

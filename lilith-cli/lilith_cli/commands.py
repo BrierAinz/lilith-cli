@@ -173,6 +173,13 @@ class QuickstartCommand(BaseCommand):
         sections.append("  [bold cyan]/tools[/]     — lista, habilita o deshabilita herramientas")
         sections.append("  [bold cyan]/cost[/]      — muestra costo y uso de tokens")
 
+        sections.append("\n[bold cyan]v7 — arsenal del orquestador[/]")
+        sections.append("  [bold cyan]/state[/]     — ver o limpiar el plan de orquestación persistente")
+        sections.append("  [bold cyan]/skills[/]    — listar, mostrar o guardar skills de delegación")
+        sections.append("  [bold cyan]/costs[/]     — telemetría acumulada de delegaciones por preset")
+        sections.append("  [bold cyan]/subagents test[/] — healthcheck de un preset (latencia, modelo, límite)")
+        sections.append("  [bold cyan]/mcp list[/]  — servidores MCP montados en el REPL")
+
         sections.append("\n[bold cyan]Seguridad[/]")
         sections.append("  [status.ok]✓[/] [bold]diff-preview[/] — revisa cambios antes de aplicarlos")
         sections.append("  [status.ok]✓[/] [bold]undo[/] — respalda automáticamente archivos antes de editar")

@@ -617,10 +617,16 @@ class LLMProviderWrapper:
                 base_clean = base_clean[:-3]
             responses_path = f"{base_clean}/v1/responses"
 
+            # ── Floor 256 / cap 4096: fugu-ultra burns ~50-120 reasoning
+            # tokens before producing any visible text, so a tight cap
+            # silently returns status=incomplete with content="". Lift the
+            # floor to keep one-shot prompts viable; cap at 4096 to avoid
+            # runaway cost when the global max_tokens is configured high.
+            sakana_max = max(min(max_tokens, 4096), 256)
             sakana_payload: dict[str, Any] = {
                 "model": model,
                 "input": "\n".join(parts),
-                "max_output_tokens": min(max_tokens, 2048),
+                "max_output_tokens": sakana_max,
             }
             response = await client.post(responses_path, json=sakana_payload)
             response.raise_for_status()
@@ -713,14 +719,40 @@ class LLMProviderWrapper:
     def _normalise_sakana_response(data: dict[str, Any]) -> dict[str, Any]:
         """Convert a Sakana Responses API payload into the standard dict.
 
-        Sakana returns:
-          {"id": "resp_...",
-           "output": [{"type": "message", "content": [...]},
-                      {"type": "web_search_call", ...}],
-           "usage": {"input_tokens": N, "output_tokens": M, "total_tokens": T}}
-        The assistant text lives at output[*].content[*].text where type="text".
-        We also support the legacy Chat Completions shape so the helper is
-        tolerant if Sakana changes its mind.
+        Verified against live calls to ``https://api.sakana.ai/v1/responses``
+        (model ``fugu-ultra``, 2026-07-16). The wire format observed is:
+
+          {
+            "id": "resp-...",
+            "object": "response",
+            "status": "completed" | "incomplete",
+            "incomplete_details": {"reason": "max_output_tokens" | ...},
+            "output": [
+              {"type": "reasoning",
+               "id": "rs_...",
+               "summary": [{"type": "summary_text", "text": "..."}]},
+              {"type": "message",
+               "content": [{"type": "output_text", "text": "..."}]},
+            ],
+            "usage": {"input_tokens": N,
+                      "output_tokens": M,
+                      "total_tokens": T,
+                      "output_tokens_details": {"reasoning_tokens": R}}
+          }
+
+        The assistant text lives at
+        ``output[*].content[*].text`` where ``type == "output_text"``
+        (Sakana mirrors the OpenAI Responses API shape; ``text`` is also
+        accepted for forward-compat). Reasoning summaries live at
+        ``output[*].summary[*].text`` where ``type == "summary_text"``
+        — note this is ``summary``, NOT ``content`` (a common pitfall:
+        Sakana's reasoning blocks carry a list of summary chunks, not
+        OpenAI-style content chunks).
+
+        We also tolerate the legacy Chat Completions shape (``choices``)
+        in case Sakana falls back, and we surface an explicit ``error``
+        key when ``status == "incomplete"`` so callers don't mistake an
+        empty ``content`` for a successful zero-token reply.
         """
         # Chat Completions-style responses also flow through here when Sakana
         # decides to return them; detect via presence of "choices".
@@ -736,15 +768,21 @@ class LLMProviderWrapper:
             if kind == "message":
                 # Sakana Responses API: block.content[*].type is "output_text".
                 # OpenAI standard: same field would be "text". Accept both.
-                for c in block.get("content", []):
+                for c in block.get("content", []) or []:
                     ctype = c.get("type", "")
                     if ctype in ("output_text", "text"):
                         text_parts.append(c.get("text", ""))
                     elif ctype == "reasoning":
                         reasoning_parts.append(c.get("text", ""))
             elif kind == "reasoning":
-                for c in block.get("content", []):
-                    reasoning_parts.append(c.get("text", ""))
+                # Reasoning summaries live at ``summary[*].text`` — NOT
+                # ``content`` (Sakana diverges from the OpenAI Responses
+                # shape here). Accept ``content`` too for safety.
+                summary_items = block.get("summary") or block.get("content") or []
+                for c in summary_items:
+                    ctype = c.get("type", "")
+                    if ctype in ("summary_text", "reasoning_text", "text"):
+                        reasoning_parts.append(c.get("text", ""))
             elif kind == "tool_use" or kind == "function_call":
                 tool_calls.append(
                     ToolCall(
@@ -754,21 +792,49 @@ class LLMProviderWrapper:
                     )
                 )
 
-        usage = data.get("usage", {})
+        # ── Map Sakana's status to a finish_reason the rest of Lilith ──
+        # already understands, plus surface a structured error when the
+        # response was cut short (otherwise callers see content="" and
+        # have no idea why).
+        raw_status = data.get("status", "completed")
+        incomplete_reason = (
+            (data.get("incomplete_details") or {}).get("reason")
+            if raw_status == "incomplete"
+            else None
+        )
+        if raw_status == "incomplete":
+            finish_reason = "length"
+        else:
+            finish_reason = "stop"
+
+        usage = data.get("usage", {}) or {}
         prompt_tokens = usage.get("input_tokens", 0)
         completion_tokens = usage.get("output_tokens", 0)
-        return {
+        total_tokens = usage.get(
+            "total_tokens", prompt_tokens + completion_tokens
+        )
+
+        result: dict[str, Any] = {
             "content": "\n".join(p for p in text_parts if p),
             "reasoning_content": "\n".join(p for p in reasoning_parts if p),
             "tool_calls": tool_calls,
             "usage": {
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
-                "total_tokens": usage.get("total_tokens", prompt_tokens + completion_tokens),
+                "total_tokens": total_tokens,
             },
-            "finish_reason": data.get("status", "stop"),
+            "finish_reason": finish_reason,
             "model": data.get("model", ""),
         }
+        # Surface the truncation cause so callers (REPL, doctor, etc.)
+        # can show "Sakana: respuesta truncada por max_output_tokens"
+        # instead of "respondió en N ms pero sin contenido".
+        if raw_status == "incomplete":
+            result["error"] = (
+                f"Sakana Responses API returned status=incomplete "
+                f"(reason={incomplete_reason or 'unknown'})"
+            )
+        return result
 
     @staticmethod
     def _normalise_response(data: dict[str, Any]) -> dict[str, Any]:

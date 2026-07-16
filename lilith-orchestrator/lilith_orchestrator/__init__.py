@@ -16,6 +16,7 @@ from lilith_orchestrator.workflow import (
 )
 
 from lilith_orchestrator.dispatch import TaskDispatcher
+from lilith_orchestrator.task_router import DEFAULT_ROUTING_PRESETS, TaskRouter
 from lilith_orchestrator.nl_workflow import NLWorkflowBuilder
 from lilith_orchestrator.engine import LilithEngine, EngineUsage
 from lilith_orchestrator.tracing import (
@@ -117,6 +118,8 @@ __all__ = [
     "SubAgentRunner",
     "TOOL_HINTS",
     "TaskDispatcher",
+    "TaskRouter",
+    "DEFAULT_ROUTING_PRESETS",
     "Trace",
     "TraceStore",
     "Tracer",

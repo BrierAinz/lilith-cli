@@ -63,6 +63,31 @@ class ProviderProfile(BaseModel):
     use_responses: bool | None = None
 
 
+class MCPServerConfig(BaseModel):
+    """One MCP (Model Context Protocol) server entry.
+
+    Only the stdio transport is wired in this tanda; the ``mcp`` Python
+    SDK (already a transitive dep of ``lilith-tools``) spawns the
+    server process and exchanges JSON-RPC 2.0 over its stdin/stdout.
+
+    Each enabled server is started lazily at REPL boot (after the
+    welcome banner) and its tools are mounted into the global
+    :class:`lilith_tools.ToolRegistry` with synthetic names
+    ``mcp_<server>_<tool>``. A broken subprocess never aborts the
+    session — the manager logs the failure and exposes it through
+    ``/mcp list``.
+    """
+
+    command: str
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] | None = None
+    enabled: bool = True
+    # Per-call timeout in seconds. The synthetic tool's
+    # ``timeout_seconds`` is set to the same value so the agent loop
+    # honours it as a floor.
+    timeout: float = 30.0
+
+
 class YggdrasilConfig(BaseModel):
     """Root configuration model for the Yggdrasil CLI agent.
 
@@ -93,7 +118,26 @@ class YggdrasilConfig(BaseModel):
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     history: HistoryConfig = Field(default_factory=HistoryConfig)
     providers: dict[str, ProviderProfile] = Field(default_factory=dict)
-    # Safety: require diff preview before destructive file_write/file_edit.
+    # MCP servers whose tools should be mounted into the global
+    # ``ToolRegistry`` at REPL boot. See ``MCPServerConfig`` for the
+    # stdio-only contract. Disabled servers stay in the config but are
+    # not started; ``/mcp reload <name>`` brings them up later. The
+    # default is ``None`` rather than ``{}`` so that an explicit
+    # ``mcp_servers:`` key in YAML (even an empty mapping or ``null``)
+    # doesn't trip Pydantic with a ``None is not a dict`` error.
+    mcp_servers: dict[str, MCPServerConfig] | None = None
+
+    @property
+    def effective_mcp_servers(self) -> dict[str, MCPServerConfig]:
+        """Return ``mcp_servers`` as a (possibly empty) dict.
+
+        The underlying field is ``dict | None`` because we want YAML
+        keys that are explicitly set to ``null`` (or an empty mapping)
+        to round-trip without a Pydantic validation error. Every
+        consumer in ``lilith_cli`` uses this property so they can
+        iterate unconditionally.
+        """
+        return self.mcp_servers or {}
     confirm_write: bool = True
     # Maximum tool-calling loop iterations per user message. Guards against
     # runaway loops; the last iteration receives a soft-warning system
@@ -239,10 +283,27 @@ providers:
   #   base_url: http://localhost:11434
   #   model: llama3
   # local:
+  # local:
   #   base_url: http://localhost:1234/v1
   #   model: local-model
-"""
 
+# ── MCP servers (stdio only this tanda) ───────────────────────────
+# Each entry spawns a subprocess at REPL boot and mounts every tool
+# the server advertises into the global ``ToolRegistry`` as
+# ``mcp_<server>_<tool>``. Set ``enabled: false`` to keep the entry
+# around without starting it; ``/mcp reload <server>`` brings it up.
+# NOTE: this section is a sibling of ``providers:`` at the top level;
+# indenting it under ``providers:`` will make pydantic reject the file.
+mcp_servers:
+
+  # Example: a local fake server bundled with lilith-tools for tests.
+  # Uncomment to try it in a REPL session:
+  # fake:
+  #   command: python
+  #   args: ["-m", "lilith_tools.fake_mcp_server"]
+  #   enabled: false
+  #   timeout: 10.0
+"""
 
 # ── Config directory / file helpers ─────────────────────────────────
 

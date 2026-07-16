@@ -214,6 +214,10 @@ _SLASH_COMMANDS = [
     "/metrics",
     "/tokens",
     "/usage",
+    "/mcp",
+    "/mcps",
+    "/subagents",
+    "/sa",
 ]
 
 
@@ -454,6 +458,54 @@ async def run_repl(session: AgentSession) -> None:
             )
     except Exception:
         pass
+
+    # ── MCP server bootstrap (lazy, non-blocking) ────────────────
+    # Each enabled server in ``config.mcp_servers`` is spawned, its
+    # tools are mounted into the global ``ToolRegistry`` and the
+    # manager is attached to the session so ``/mcp`` can introspect
+    # it. A broken subprocess never aborts the REPL — the failure is
+    # printed as a one-line notice and ``/mcp list`` will show the
+    # detailed error. The manager is shut down in the ``finally``
+    # block below.
+    try:
+        from lilith_tools.mcp_client import MCPClientManager
+
+        mcp_servers_cfg = getattr(session.config, "effective_mcp_servers", {})
+        if mcp_servers_cfg:
+            manager = MCPClientManager(
+                {
+                    name: cfg.model_dump()
+                    for name, cfg in mcp_servers_cfg.items()
+                }
+            )
+            statuses = manager.start_all()
+            session._mcp_manager = manager  # type: ignore[attr-defined]
+            for server_name, status in statuses.items():
+                if status == "ok":
+                    count = len(manager.mounted_tools.get(server_name, []))
+                    console.print(
+                        f"[info]✓ MCP '{server_name}'[/] "
+                        f"montado ({count} tool)"
+                    )
+                elif status == "disabled":
+                    console.print(f"[dim]MCP '{server_name}' deshabilitado[/]")
+                else:
+                    console.print(
+                        f"[warning]⚠ MCP '{server_name}' falló: {status}[/]"
+                    )
+            # Invalidate the agent's tool cache so the LLM sees the
+            # newly-mounted tools without a session restart.
+            try:
+                if hasattr(session, "_tools_cache"):
+                    session._tools_cache = None  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        else:
+            session._mcp_manager = None  # type: ignore[attr-defined]
+    except Exception as exc:  # pragma: no cover — defensive
+        # Never crash the REPL over MCP bootstrap problems.
+        console.print(f"[warning]⚠ MCP bootstrap: {exc}[/]")
+        session._mcp_manager = None  # type: ignore[attr-defined]
 
     # ── Command registry
     registry = CommandRegistry(session)
@@ -835,8 +887,20 @@ async def run_repl(session: AgentSession) -> None:
         if saved_path:
             console.print(f"[dim]Conversación guardada: {saved_path.name}[/]")
 
+        # ── Tear down MCP subprocesses ────────────────────────────
+        mgr = getattr(session, "_mcp_manager", None)
+        if mgr is not None:
+            try:
+                mgr.shutdown()
+            except Exception:
+                pass
+            try:
+                session._mcp_manager = None  # type: ignore[attr-defined]
+            except Exception:
+                pass
 
-# ── One-shot mode ───────────────────────────────────────────────────
+
+    # ── One-shot mode ───────────────────────────────────────────────────
 
 
 async def _process_with_streaming(

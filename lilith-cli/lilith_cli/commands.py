@@ -7,10 +7,12 @@ and provides routing by command name.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -3491,6 +3493,405 @@ class SkillsCommand(BaseCommand):
         render_error("Uso: /skills list|show <name>|save latest --name <name>|delete <name> CONFIRMAR")
 
 
+class MCPCommand(BaseCommand):
+    """Inspect and manage MCP (Model Context Protocol) servers.
+
+    Sub-commands:
+
+    * ``/mcp list`` — show every configured server with its status
+      (``ok``, ``down``, ``disabled``), the number of mounted tools,
+      and the last error if any.
+    * ``/mcp reload <server>`` — tear down and re-spawn a single
+      server. Useful after editing ``~/.yggdrasil/config.yaml`` without
+      restarting the REPL.
+    """
+
+    name = "mcp"
+    description = "Listar y recargar servidores MCP montados en el REPL"
+    aliases = ["mcps"]
+
+    async def execute(self, args: str) -> None:
+        import shlex
+
+        try:
+            parts = shlex.split(args)
+        except ValueError as exc:
+            render_error(str(exc))
+            return
+        if not parts or parts[0].lower() in ("list", "ls", "status"):
+            self._list()
+            return
+        if parts[0].lower() == "reload" and len(parts) == 2:
+            self._reload(parts[1])
+            return
+        render_error("Uso: /mcp list | /mcp reload <server>")
+
+    def _manager(self) -> Any | None:
+        """Return the MCP manager attached to the session, if any.
+
+        The manager is attached by :func:`run_repl` at startup; tests
+        that bypass the REPL may not have one.
+        """
+        return getattr(self.session, "_mcp_manager", None)
+
+    def _list(self) -> None:
+        manager = self._manager()
+        if manager is None:
+            console.print(
+                "[dim]MCP no inicializado en esta sesión. "
+                "Inicia el REPL con run_repl() para usar /mcp.[/]"
+            )
+            return
+        rows = manager.status()
+        if not rows:
+            console.print("[dim]No hay servidores MCP configurados.[/]")
+            return
+        table = Table(show_header=True, header_style="bold cyan")
+        table.add_column("Server")
+        table.add_column("Estado", justify="center")
+        table.add_column("Tools", justify="right")
+        table.add_column("Error")
+        status_icon = {"ok": "[status.ok]ok[/]", "down": "[error]down[/]",
+                       "disabled": "[dim]disabled[/]"}
+        for row in rows:
+            table.add_row(
+                row["server"],
+                status_icon.get(row["status"], row["status"]),
+                str(row["tools"]),
+                row.get("error") or "",
+            )
+        console.print(table)
+
+    def _reload(self, server: str) -> None:
+        manager = self._manager()
+        if manager is None:
+            render_error("MCP no inicializado en esta sesión.")
+            return
+        status = manager.reload(server)
+        if status == "ok":
+            tools = manager.mounted_tools.get(server, [])
+            console.print(
+                f"[status.ok]✓ MCP '{server}'[/] "
+                f"recargado ({len(tools)} tools): "
+                f"{', '.join(tools) or '(ninguna)'}"
+            )
+        else:
+            render_error(f"MCP '{server}': {status}")
+
+
+class SubagentsCommand(BaseCommand):
+    """Inspect Hlidskjalf sub-agent presets.
+
+    Sub-commands:
+
+    * ``/subagents list`` — show every preset declared in
+      ``~/.yggdrasil/hlidskjalf_subagents.yaml`` along with its
+      provider, model and a one-line status.
+    * ``/subagents test [preset]`` — fire a ``PONG`` ping (with a
+      small ``max_tokens``) at every preset (or just the named one) in
+      parallel and report a table with latency, model actually used,
+      and any error. Per-preset timeout: 20 s.
+
+    The test never raises: a 401, timeout, or any other failure is
+    captured as a row in the table with the actual error message.
+    """
+
+    name = "subagents"
+    description = "Listar y probar presets de Hlidskjalf (sub-agentes)"
+    aliases = ["sa"]
+
+    # Per-preset timeout for /subagents test. Independent of the
+    # tool-level 180s of ``delegate_subagent`` because the healthcheck
+    # should fail fast on bad credentials.
+    _TEST_TIMEOUT_SECONDS = 20.0
+    # Probe size: tiny enough to be cheap on every provider, big enough
+    # for the provider to actually respond with content.
+    _TEST_MAX_TOKENS = 8
+    # Bonus probe: ask the provider for this many tokens and see what
+    # happens. If the API rejects the request, the error message often
+    # reports the actual ceiling.
+    _PROBE_MAX_TOKENS = 65536
+
+    async def execute(self, args: str) -> None:
+        import shlex
+
+        try:
+            parts = shlex.split(args)
+        except ValueError as exc:
+            render_error(str(exc))
+            return
+        action = (parts[0].lower() if parts else "list")
+        if action in ("list", "ls"):
+            self._list()
+            return
+        if action == "test":
+            target = parts[1] if len(parts) >= 2 else None
+            await self._test(target)
+            return
+        render_error(
+            "Uso: /subagents list | /subagents test [preset]"
+        )
+
+    # ── list ──────────────────────────────────────────────────────
+
+    def _list(self) -> None:
+        from .main import _load_subagent_presets
+
+        presets = _load_subagent_presets()
+        if not presets:
+            console.print(
+                "[dim]No hay presets en "
+                "~/.yggdrasil/hlidskjalf_subagents.yaml[/]"
+            )
+            return
+        cfg = None
+        try:
+            from .config import load_config
+            cfg = load_config()
+        except Exception:
+            cfg = None
+        configured_providers = set((cfg.providers or {}).keys()) if cfg else set()
+        table = Table(show_header=True, header_style="bold cyan")
+        table.add_column("Preset")
+        table.add_column("Provider")
+        table.add_column("Modelo")
+        table.add_column("Estado")
+        for name, preset in sorted(presets.items()):
+            provider = str((preset or {}).get("provider", "—"))
+            model = str((preset or {}).get("model", "—"))
+            if configured_providers and provider not in configured_providers:
+                state = "[warning]no en config.yaml[/]"
+            elif configured_providers:
+                state = "[status.ok]ok[/]"
+            else:
+                state = "[dim]config no cargado[/]"
+            table.add_row(name, provider, model, state)
+        console.print(table)
+
+    # ── test ──────────────────────────────────────────────────────
+
+    async def _test(self, target: str | None) -> None:
+        from .config import load_config
+        from .main import _load_subagent_presets
+        from .providers import LLMProviderWrapper
+
+        presets = _load_subagent_presets()
+        if not presets:
+            console.print(
+                "[warning]No hay presets en "
+                "~/.yggdrasil/hlidskjalf_subagents.yaml[/]"
+            )
+            return
+        if target is not None and target not in presets:
+            render_error(
+                f"Preset '{target}' no existe. Disponibles: "
+                f"{', '.join(sorted(presets))}"
+            )
+            return
+
+        try:
+            cfg = load_config()
+        except Exception as exc:
+            render_error(f"No pude cargar config: {exc}")
+            return
+
+        selected = (
+            {target: presets[target]} if target else dict(presets)
+        )
+        names = list(selected.keys())
+
+        # Pre-create the wrappers so the parallel section is purely
+        # network-bound; building a wrapper inside the gather would
+        # serialise httpx client init.
+        wrappers: dict[str, tuple[LLMProviderWrapper, dict]] = {}
+        for name in names:
+            preset = selected[name] or {}
+            provider_name = str(preset.get("provider") or "").lower()
+            if not provider_name:
+                wrappers[name] = (None, {"error": "preset sin 'provider'"})  # type: ignore[assignment]
+                continue
+            profile = (cfg.providers or {}).get(provider_name)
+            if profile is None:
+                wrappers[name] = (
+                    None,
+                    {"error": f"provider '{provider_name}' no en config.yaml"},
+                )
+                continue
+            try:
+                # Use the same per-call config shape that
+                # ``delegate_subagent`` builds at runtime, so the
+                # healthcheck mirrors production behaviour.
+                local_cfg = cfg.model_copy(deep=True)
+                local_cfg.provider = provider_name
+                local_cfg.model = (
+                    preset.get("model") or profile.model or cfg.model
+                )
+                if preset.get("max_tokens") is not None:
+                    local_cfg.max_tokens = int(preset["max_tokens"])
+                elif profile.max_tokens is not None:
+                    local_cfg.max_tokens = profile.max_tokens
+                if preset.get("temperature") is not None:
+                    local_cfg.temperature = float(preset["temperature"])
+                wrapper = LLMProviderWrapper(local_cfg)
+            except Exception as exc:
+                wrappers[name] = (None, {"error": f"init: {exc}"})
+                continue
+            wrappers[name] = (wrapper, {"profile": profile, "preset": preset})
+
+        async def _ping_one(name: str) -> dict[str, Any]:
+            wrapper, meta = wrappers[name]
+            row: dict[str, Any] = {
+                "preset": name,
+                "provider": (meta.get("preset") or {}).get("provider", "—"),
+                "model": (meta.get("preset") or {}).get("model", "—"),
+            }
+            if wrapper is None:
+                row["ok"] = False
+                row["latency_ms"] = 0
+                row["error"] = meta.get("error", "unknown")
+                return row
+            t0 = time.perf_counter()
+            try:
+                response = await wrapper.complete(
+                    [{"role": "user", "content": "PONG"}],
+                    tools=None,
+                    max_tokens=self._TEST_MAX_TOKENS,
+                )
+            except Exception as exc:
+                row["ok"] = False
+                row["latency_ms"] = int((time.perf_counter() - t0) * 1000)
+                row["error"] = f"{type(exc).__name__}: {exc}"
+                return row
+            finally:
+                # Per-call close so each preset's connection is freed;
+                # the gather runs them in parallel and the wrappers
+                # share no state.
+                try:
+                    await wrapper.close()
+                except Exception:
+                    pass
+
+            elapsed = (time.perf_counter() - t0) * 1000
+            row["latency_ms"] = int(elapsed)
+            content = response.get("content") or ""
+            usage = response.get("usage") or {}
+            row["ok"] = bool(content)
+            row["tokens_out"] = usage.get("completion_tokens") or len(content)
+            row["error"] = "" if row["ok"] else "respuesta vacía"
+
+            # Bonus: probe max_tokens by asking for a huge value and
+            # capturing the error. Providers that accept the request
+            # are reported as 'acepta N'; providers that reject get
+            # the actual error.
+            probe_row = await self._probe_max_tokens(wrapper, name)
+            row["max_tokens_probe"] = probe_row
+            return row
+
+        # Header announcing the run.
+        console.print(
+            f"[info]Probando {len(selected)} preset(s) en paralelo "
+            f"(timeout {self._TEST_TIMEOUT_SECONDS:.0f}s c/u)...[/]"
+        )
+
+        # Run in parallel with a hard ceiling — even though each
+        # wrapper.complete already gets its own timeout via
+        # ``asyncio.wait_for`` inside the provider, the gather adds a
+        # second wall-clock guarantee.
+        async def _guarded(name: str) -> dict[str, Any]:
+            try:
+                return await asyncio.wait_for(
+                    _ping_one(name),
+                    timeout=self._TEST_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                return {
+                    "preset": name,
+                    "provider": (
+                        (selected[name] or {}).get("provider", "—")
+                    ),
+                    "model": ((selected[name] or {}).get("model", "—")),
+                    "ok": False,
+                    "latency_ms": int(self._TEST_TIMEOUT_SECONDS * 1000),
+                    "error": "timeout global",
+                }
+            except Exception as exc:
+                return {
+                    "preset": name,
+                    "provider": (
+                        (selected[name] or {}).get("provider", "—")
+                    ),
+                    "model": ((selected[name] or {}).get("model", "—")),
+                    "ok": False,
+                    "latency_ms": 0,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+
+        rows: list[dict[str, Any]] = await asyncio.gather(
+            *(_guarded(name) for name in names)
+        )
+        # Stable order — gather preserves input order, but be safe.
+        rows.sort(key=lambda r: r["preset"])
+
+        self._render_test_table(rows)
+
+    async def _probe_max_tokens(
+        self, wrapper: LLMProviderWrapper, preset_name: str
+    ) -> dict[str, Any]:
+        """Best-effort probe of the real ``max_tokens`` ceiling.
+
+        We reuse the same wrapper (already closed in the main call) by
+        doing one final tiny ping; if that fails the main table is
+        already red and we just return ``{"status": "skipped"}``.
+        """
+        try:
+            await wrapper.complete(
+                [{"role": "user", "content": "PONG"}],
+                tools=None,
+                max_tokens=self._PROBE_MAX_TOKENS,
+            )
+            return {"status": f"acepta {self._PROBE_MAX_TOKENS}"}
+        except Exception as exc:
+            msg = f"{type(exc).__name__}: {exc}"
+            # Many providers report the ceiling in the error text.
+            import re
+
+            m = re.search(r"(\d{3,7})", msg)
+            ceiling = int(m.group(1)) if m else None
+            return {"status": "rechaza", "error": msg, "ceiling_hint": ceiling}
+
+    def _render_test_table(self, rows: list[dict[str, Any]]) -> None:
+        table = Table(show_header=True, header_style="bold cyan")
+        table.add_column("Preset")
+        table.add_column("Provider")
+        table.add_column("Modelo")
+        table.add_column("ms", justify="right")
+        table.add_column("Out", justify="right")
+        table.add_column("max_tokens probe")
+        table.add_column("Estado")
+        for row in rows:
+            probe = row.get("max_tokens_probe") or {}
+            if isinstance(probe, dict):
+                probe_text = probe.get("status", "—")
+                if probe.get("ceiling_hint"):
+                    probe_text = f"{probe_text} (~{probe['ceiling_hint']})"
+            else:
+                probe_text = str(probe) if probe else "—"
+            if row["ok"]:
+                state = "[status.ok]ok[/]"
+            else:
+                state = f"[error]{row.get('error', '?')}[/]"
+            table.add_row(
+                row["preset"],
+                row.get("provider", "—"),
+                row.get("model", "—"),
+                str(row.get("latency_ms", 0)),
+                str(row.get("tokens_out", 0)),
+                probe_text,
+                state,
+            )
+        console.print(table)
+
+
 class CommandRegistry:
     """Discovers, registers, and routes slash commands."""
 
@@ -3511,6 +3912,8 @@ class CommandRegistry:
             MemoryCommand,
             StateCommand,
             SkillsCommand,
+            MCPCommand,
+            SubagentsCommand,
             ClearCommand,
             CostCommand,
             TokensCommand,

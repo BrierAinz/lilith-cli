@@ -129,6 +129,8 @@ _SLASH_COMMANDS = [
     "/model",
     "/provider",
     "/memory",
+    "/state",
+    "/skills",
     "/clear",
     "/status",
     "/env",
@@ -434,7 +436,26 @@ async def run_repl(session: AgentSession) -> None:
     )
     console.print()
 
-    # ── Command registry ──────────────────────────────────────────
+    # Resume hint for persistent orchestration work from previous sessions.
+    try:
+        from lilith_tools.orchestration_state import OrchestrationStateStore
+
+        _orch_state = OrchestrationStateStore().get()
+        _active_plan = _orch_state.get("plan")
+        _pending = [
+            task
+            for task in _orch_state.get("tasks", [])
+            if task.get("status") != "completada"
+        ]
+        if _active_plan and _pending:
+            console.print(
+                f"[info]Plan activo: {_active_plan.get('name', '(sin nombre)')} — "
+                f"{len(_pending)} tareas pendientes. Usa /state[/]"
+            )
+    except Exception:
+        pass
+
+    # ── Command registry
     registry = CommandRegistry(session)
     registry.discover()
 

@@ -37,6 +37,12 @@ from lilith_skills.cross_context import (
     WorkflowStep,
     WorkflowsStore,
 )
+from lilith_skills.delegation_skills import (
+    DEFAULT_SKILLS,
+    DelegationSkill,
+    DelegationSkillRegistry,
+    default_skills_path,
+)
 from lilith_skills.card_validator import (
     CardToolValidation,
     CardValidationError,

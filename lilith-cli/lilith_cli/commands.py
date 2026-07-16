@@ -106,6 +106,10 @@ class BaseCommand:
         """Run the command. *args* is everything after the command name."""
         raise NotImplementedError
 
+    def session_console_capture(self):
+        """Expose Rich's capture context for command tests and embedders."""
+        return console.capture()
+
 
 # ── Command implementations ─────────────────────────────────────────
 
@@ -3355,6 +3359,138 @@ class FeedbackCommand(BaseCommand):
         console.print(f"[success]✓ {len(entries)} entrada(s) de feedback eliminada(s).[/]")
 
 
+class StateCommand(BaseCommand):
+    name = "state"
+    description = "Mostrar o limpiar el plan persistente de orquestación"
+
+    async def execute(self, args: str) -> None:
+        from lilith_tools.orchestration_state import OrchestrationStateStore
+
+        store = OrchestrationStateStore()
+        parts = args.strip().split()
+        if parts and parts[0].lower() == "clear":
+            if len(parts) < 2 or parts[1] != "CONFIRMAR":
+                console.print("[warning]Confirma con: /state clear CONFIRMAR[/]")
+                return
+            store.clear()
+            console.print("[success]✓ Estado de orquestación limpiado.[/]")
+            return
+        state = store.get()
+        plan = state.get("plan")
+        if not plan:
+            console.print("[dim]No hay plan activo.[/]")
+            return
+        console.print(f"\n[bold realm]Plan activo: {plan['name']}[/]")
+        if plan.get("description"):
+            console.print(f"[dim]{plan['description']}[/]")
+        table = Table(show_header=True, header_style="bold cyan")
+        table.add_column("ID")
+        table.add_column("Tarea")
+        table.add_column("Estado")
+        table.add_column("Preset")
+        table.add_column("Usage", justify="right")
+        for task in state.get("tasks", []):
+            usage = task.get("usage") or {}
+            total = usage.get("total_tokens", 0)
+            table.add_row(
+                str(task.get("id", "")), str(task.get("title", "")),
+                str(task.get("status", "")), str(task.get("preset") or "—"),
+                str(total),
+            )
+        console.print(table)
+
+
+class SkillsCommand(BaseCommand):
+    name = "skills"
+    description = "Listar, mostrar, guardar o borrar skills de delegación"
+
+    async def execute(self, args: str) -> None:
+        import shlex
+        from lilith_skills.delegation_skills import (
+            DelegationSkill,
+            DelegationSkillRegistry,
+        )
+
+        registry = DelegationSkillRegistry()
+        try:
+            parts = shlex.split(args)
+        except ValueError as exc:
+            render_error(str(exc))
+            return
+        action = parts[0].lower() if parts else "list"
+        if action == "list":
+            table = Table(show_header=True, header_style="bold cyan")
+            table.add_column("Nombre")
+            table.add_column("Preset")
+            table.add_column("Flags")
+            table.add_column("Descripción")
+            for skill in registry.list():
+                flags = []
+                if skill.agentic:
+                    flags.append("agentic")
+                if skill.structured:
+                    flags.append("structured")
+                if skill.max_tokens is not None:
+                    flags.append(f"max={skill.max_tokens}")
+                table.add_row(skill.name, skill.preset, ", ".join(flags) or "—", skill.description)
+            console.print(table)
+            return
+        if action == "show" and len(parts) == 2:
+            skill = registry.get(parts[1])
+            if skill is None:
+                render_error(f"Skill '{parts[1]}' no existe")
+                return
+            console.print(Panel(json.dumps(skill.to_dict(), ensure_ascii=False, indent=2), title=skill.name))
+            return
+        if action == "save":
+            if len(parts) < 2 or parts[1].lower() != "latest" or "--name" not in parts:
+                render_error("Uso: /skills save latest --name <nombre> [--description texto]")
+                return
+            name_idx = parts.index("--name") + 1
+            if name_idx >= len(parts):
+                render_error("--name requiere valor")
+                return
+            description = "Delegación guardada"
+            if "--description" in parts:
+                desc_idx = parts.index("--description") + 1
+                if desc_idx < len(parts):
+                    description = parts[desc_idx]
+            history = getattr(self.session, "_tool_call_history", [])
+            last = next((item for item in reversed(history) if item.get("name") == "delegate_subagent"), None)
+            if last is None:
+                render_error("No hay una delegación anterior para guardar")
+                return
+            call = last.get("arguments") or {}
+            prompt = str(call.get("prompt", ""))
+            if "{TASK}" not in prompt:
+                prompt = prompt + "\n\nTarea reutilizada: {TASK}\nProyecto: {PROJECT}\nContexto: {CONTEXT}"
+            else:
+                if "{PROJECT}" not in prompt:
+                    prompt += "\nProyecto: {PROJECT}"
+                if "{CONTEXT}" not in prompt:
+                    prompt += "\nContexto: {CONTEXT}"
+            skill = DelegationSkill(
+                name=parts[name_idx], description=description,
+                preset=str(call.get("preset", "")), prompt_template=prompt,
+                agentic=bool(call.get("agentic", False)),
+                structured=bool(call.get("structured", False)),
+                max_tokens=call.get("max_tokens"),
+            )
+            registry.save(skill)
+            console.print(f"[success]✓ Skill '{skill.name}' guardada.[/]")
+            return
+        if action == "delete" and len(parts) >= 2:
+            if len(parts) < 3 or parts[2] != "CONFIRMAR":
+                console.print(f"[warning]Confirma con: /skills delete {parts[1]} CONFIRMAR[/]")
+                return
+            if not registry.delete(parts[1]):
+                render_error(f"Skill '{parts[1]}' no existe")
+                return
+            console.print(f"[success]✓ Skill '{parts[1]}' eliminada.[/]")
+            return
+        render_error("Uso: /skills list|show <name>|save latest --name <name>|delete <name> CONFIRMAR")
+
+
 class CommandRegistry:
     """Discovers, registers, and routes slash commands."""
 
@@ -3373,6 +3509,8 @@ class CommandRegistry:
             ModelCommand,
             ProviderCommand,
             MemoryCommand,
+            StateCommand,
+            SkillsCommand,
             ClearCommand,
             CostCommand,
             TokensCommand,

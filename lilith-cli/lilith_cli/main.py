@@ -339,43 +339,160 @@ def _load_subagent_presets(config_path: Path | str | None = None) -> dict[str, A
 def delegate(
     target: Annotated[
         str,
-        Parameter(help="Provider profile name (sakana, kimi, deepseek, mimo, m2, ...)"),
+        Parameter(help="Provider profile name (sakana, kimi, deepseek, mimo, m2, ...) OR Hlidskjalf preset name when --preset is used"),
     ],
     text: Annotated[str, Parameter(help="Prompt to send")],
     model: Annotated[str | None, Parameter(name=["--model", "-m"])] = None,
     config_path: Annotated[str | None, Parameter(name="--config")] = None,
+    preset: Annotated[str | None, Parameter(name=["--preset"], help="Use a Hlidskjalf sub-agent preset from ~/.yggdrasil/hlidskjalf_subagents.yaml (overrides target as provider profile)")] = None,
+    agentic: Annotated[bool, Parameter(name=["--agentic"], help="Run the preset with the agentic mini-loop (file tools in workdir)")] = False,
+    structured: Annotated[bool, Parameter(name=["--structured"], help="Force the preset response to validate against TASK_SCHEMA (degradation chain: json_schema -> json_object -> prompt)")] = False,
+    max_tokens: Annotated[int | None, Parameter(name=["--max-tokens"], help="Override max_tokens for this preset call")] = None,
+    max_turns: Annotated[int | None, Parameter(name=["--max-turns"], help="Cap the agentic mini-loop turns (default 10 in DelegateSubagentTool)")] = None,
 ) -> None:
     """Shortcut: send a one-shot prompt to a specific provider profile.
 
     Example:
         lilith delegate sakana "summarise the Asgard realm"
         lilith delegate kimi "refactor this loop" --model kimi-k2
+        lilith delegate ejecutor-kimi "write tests" --preset ejecutor-kimi --agentic --max-turns 5
+
+    Compatibility: without any of the new flags (--preset/--agentic/--structured/
+    --max-tokens/--max-turns) the command keeps the original one-shot behaviour
+    (AgentSession + run_oneshot). When ANY of those flags is supplied, the call
+    routes through ``lilith_tools.delegate.DelegateSubagentTool`` so the delegation
+    gets the full agentic/structured/multi-turn surface and is automatically
+    recorded in the orchestration state (delegated -> completada/fallida).
     """
-    cfg = load_config(config_path)
+    use_tool_path = bool(preset) or agentic or structured or (max_tokens is not None) or (max_turns is not None)
 
-    target_lower = target.lower()
-    if target_lower not in (cfg.providers or {}):
-        available = sorted(cfg.providers.keys()) if cfg.providers else []
-        from .render import console
+    if not use_tool_path:
+        cfg = load_config(config_path)
 
-        console.print(
-            f"[error]Provider '{target}' not in config. "
-            f"Available: {available}[/]"
-        )
+        target_lower = target.lower()
+        if target_lower not in (cfg.providers or {}):
+            available = sorted(cfg.providers.keys()) if cfg.providers else []
+            from .render import console
+
+            console.print(
+                f"[error]Provider '{target}' not in config. "
+                f"Available: {available}[/]"
+            )
+            raise SystemExit(2)
+
+        provider_profile = cfg.providers[target_lower]
+        cfg.provider = target_lower
+        if model:
+            cfg.model = model
+        elif provider_profile.model:
+            cfg.model = provider_profile.model
+
+        from .agent import AgentSession
+        from .repl import run_oneshot
+
+        session = AgentSession(cfg)
+        asyncio.run(run_oneshot(session, text))
+        return
+
+    # ── Tool-routed path (tanda 14): DelegateSubagentTool ─────────────────────────────────────────────────────────────────────────────────────────
+    # When any delegation flag is set we want the same machinery the
+    # orchestrator/REPL already use, so the call lands in orchestration
+    # state and supports agentic/structured/max_tokens/max_turns.
+    preset_name = (preset or target).strip()
+    if not preset_name:
+        from .render import render_error
+        render_error("delegate: preset o target requerido para rutear por DelegateSubagentTool")
         raise SystemExit(2)
 
-    provider_profile = cfg.providers[target_lower]
-    cfg.provider = target_lower
+    try:
+        from lilith_tools.delegate import DelegateSubagentTool  # type: ignore[import-not-found]
+        from lilith_tools.base import ToolResult  # type: ignore[import-not-found]
+    except Exception as exc:
+        from .render import render_error
+        render_error(f"No se pudo cargar DelegateSubagentTool: {exc}")
+        raise SystemExit(2)
+
+    kwargs: dict[str, Any] = {
+        "preset": preset_name,
+        "prompt": text,
+        "agentic": agentic,
+        "structured": structured,
+    }
+    if max_tokens is not None:
+        kwargs["max_tokens"] = int(max_tokens)
+    if max_turns is not None:
+        kwargs["max_turns"] = int(max_turns)
+    # --model only applies to the one-shot path; the tool derives the
+    # model from the preset YAML. We surface this as a warning rather
+    # than silently ignoring it, so the user knows.
     if model:
-        cfg.model = model
-    elif provider_profile.model:
-        cfg.model = provider_profile.model
+        from .render import console
+        console.print(
+            "[warning]--model se ignora al rutear por DelegateSubagentTool "
+            "(el modelo viene del preset)[/]"
+        )
 
-    from .agent import AgentSession
-    from .repl import run_oneshot
+    result = DelegateSubagentTool().execute(**kwargs)
+    # Duck-typed: any object with success/data/error attributes works.
+    # The renderer is defensive and falls back gracefully if a field is missing.
+    if not hasattr(result, "success") or not hasattr(result, "data"):
+        from .render import render_error
+        render_error(f"DelegateSubagentTool devolvió un resultado inesperado: {type(result).__name__}")
+        raise SystemExit(2)
 
-    session = AgentSession(cfg)
-    asyncio.run(run_oneshot(session, text))
+    _render_delegate_tool_result(preset_name, result)
+    if not result.success:
+        raise SystemExit(1)
+
+
+def _render_delegate_tool_result(preset_name: str, result: Any) -> None:
+    """Print a DelegateSubagentTool ToolResult in a CLI-friendly way.
+
+    One-shot path: prints the content (or structured JSON pretty-printed)
+    plus a footer with files_written / turns_used / usage when present.
+    Agentic path: prints content plus the same footer; files_written is
+    always populated and turns_used/partial flag are surfaced.
+    """
+    from .render import console, render_error
+
+    data = result.data if isinstance(result.data, dict) else {}
+
+    if not result.success:
+        err = result.error or "delegación fallida"
+        render_error(f"delegate ({preset_name}): {err}")
+
+    structured_payload = data.get("structured")
+    if structured_payload:
+        import json as _json
+        console.print(_json.dumps(structured_payload, ensure_ascii=False, indent=2))
+    else:
+        content = data.get("content") or data.get("raw_content") or ""
+        if content:
+            console.print(content)
+
+    # Footer: files_written / turns_used / usage.
+    files_written = data.get("files_written") or []
+    turns_used = data.get("turns_used")
+    usage = data.get("usage") or {}
+    footer: list[str] = []
+    if files_written:
+        footer.append(f"files_written={len(files_written)}")
+        for fw in files_written[:5]:
+            footer.append(f"  - {fw}")
+        if len(files_written) > 5:
+            footer.append(f"  ... (+{len(files_written) - 5} mas)")
+    if turns_used is not None:
+        footer.append(f"turns_used={turns_used}")
+    if usage:
+        prompt_t = usage.get("prompt_tokens")
+        completion_t = usage.get("completion_tokens")
+        if prompt_t is not None or completion_t is not None:
+            footer.append(
+                f"usage(prompt={prompt_t or 0}, completion={completion_t or 0})"
+            )
+    if footer:
+        console.print("[dim]" + " | ".join(footer) + "[/]")
+
 
 
 # ── Doctor (healthcheck) ────────────────────────────────────────────

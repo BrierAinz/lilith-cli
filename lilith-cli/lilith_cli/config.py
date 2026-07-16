@@ -167,11 +167,51 @@ class YggdrasilConfig(BaseModel):
     # Agent operating mode (default, plan-first, review-only, auto-edit).
     agent_mode: str = "default"
 
+    # ── HTTP retry policy for the LLM wrapper ────────────────────────
+    # The wrapper re-issues transient HTTP failures (429, 5xx, connection
+    # resets) with exponential back-off plus jitter, and respects the
+    # Retry-After header when the server provides one. Non-transient
+    # failures (4xx other than 429, programming errors) are NOT retried.
+    retry_max: int = 3
+    retry_backoff_base: float = 1.0
+    retry_backoff_max: float = 30.0
+    # Jitter expressed as a fraction of the computed back-off (e.g.
+    # 0.25 → ±25 % random spread). 0.0 disables jitter.
+    retry_jitter: float = 0.25
+
     @field_validator("max_iterations")
     @classmethod
     def _validate_max_iterations(cls, value: int) -> int:
         if value < 1:
             raise ValueError("max_iterations must be >= 1")
+        return value
+
+    @field_validator("retry_max")
+    @classmethod
+    def _validate_retry_max(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("retry_max must be >= 0")
+        return value
+
+    @field_validator("retry_backoff_base")
+    @classmethod
+    def _validate_retry_backoff_base(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("retry_backoff_base must be > 0")
+        return value
+
+    @field_validator("retry_backoff_max")
+    @classmethod
+    def _validate_retry_backoff_max(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("retry_backoff_max must be > 0")
+        return value
+
+    @field_validator("retry_jitter")
+    @classmethod
+    def _validate_retry_jitter(cls, value: float) -> float:
+        if value < 0 or value > 1:
+            raise ValueError("retry_jitter must be in [0, 1]")
         return value
 
     model_config = {"extra": "ignore"}  # Allow extra keys for forward-compatibility
@@ -267,6 +307,16 @@ max_iterations: 10
 
 # Agent operating mode (default, plan-first, review-only, auto-edit).
 agent_mode: default
+
+# ── HTTP retry policy for the LLM wrapper ────────────────────────
+# Transient failures (429, 5xx, connection resets) are retried with
+# exponential back-off + jitter, and the Retry-After header is
+# honoured when the server provides one. Non-transient failures
+# (4xx other than 429) are NOT retried.
+retry_max: 3
+retry_backoff_base: 1.0
+retry_backoff_max: 30.0
+retry_jitter: 0.25
 
 # ── Provider profiles ──────────────────────────────────────────
 # Each profile maps a short name (used by `--provider <name>` or by

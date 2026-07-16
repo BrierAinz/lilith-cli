@@ -41,6 +41,7 @@ from .extra_commands import (
     run_changelog_command,
     run_compact_command,
     run_compare_command,
+    run_conclave_command,
     run_cost_command,
     run_deps_command,
     run_diff_staged_command,
@@ -147,6 +148,7 @@ _SLASH_COMMANDS = [
     "/dcfg",
     "/deps",
     "/compare",
+    "/conclave",
     "/editor",
     "/diff-staged",
     "/diffstaged",
@@ -807,6 +809,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "compare":
                     await run_compare_command(session, cmd_args)
+                    continue
+                if cmd_name == "conclave":
+                    await run_conclave_command(session, cmd_args)
                     continue
                 if cmd_name in ("capture", "cap"):
                     await run_capture_command(session, cmd_args)

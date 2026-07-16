@@ -5565,6 +5565,200 @@ async def run_reverse_command(session: AgentSession, args: str) -> None:  # noqa
 
     console.print(f"[bold cyan]{result}[/bold cyan]")
     console.print()
+
+
+# ── /conclave command ─────────────────────────────────────────────────────
+
+
+async def run_conclave_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+    """Fan-out the same question across 2-4 Hlidskjalf presets (/conclave).
+
+    Examples:
+        /conclave ¿Qué motor usa Lilith?
+        /conclave "¿Qué motor usa Lilith?" --presets investigador-minimax,grok-research
+        /conclave "resume X" --presets a,b --structured --max-tokens 1024 --timeout 30
+
+    Behaviour:
+        * Delegates to :class:`lilith_tools.conclave.ConclaveTool`, which
+          already implements the parallel fan-out + per-preset 60s
+          timeout contract.
+        * Renders a Rich panel per preset with model, content (truncated
+          to ~15 lines), and the per-preset error (if any). A failing
+          preset never takes down the rest.
+        * The conclave call is sync internally (it spins its own
+          ``asyncio.run`` per preset), so we run it through
+          ``loop.run_in_executor`` to avoid nested event loops.
+    """
+    import asyncio as _asyncio
+
+    text = args.strip()
+    if not text:
+        render_error(
+            "Uso: /conclave <pregunta> "
+            "[--presets a,b,c] [--structured] [--max-tokens N] [--timeout N]"
+        )
+        return
+
+    presets: list[str] | None = None
+    structured = False
+    max_tokens: int | None = None
+    per_timeout: float | None = None
+
+    import shlex as _shlex
+    try:
+        tokens = _shlex.split(text)
+    except ValueError as exc:
+        render_error(f"Argumentos inválidos: {exc}")
+        return
+
+    filtered: list[str] = []
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == "--presets" and i + 1 < len(tokens):
+            presets = [
+                p.strip() for p in tokens[i + 1].split(",") if p.strip()
+            ]
+            i += 2
+            continue
+        if tok == "--structured":
+            structured = True
+            i += 1
+            continue
+        if tok == "--max-tokens" and i + 1 < len(tokens):
+            try:
+                max_tokens = int(tokens[i + 1])
+            except ValueError:
+                render_error("--max-tokens requiere un entero")
+                return
+            i += 2
+            continue
+        if tok == "--timeout" and i + 1 < len(tokens):
+            try:
+                per_timeout = float(tokens[i + 1])
+            except ValueError:
+                render_error("--timeout requiere un número")
+                return
+            i += 2
+            continue
+        filtered.append(tok)
+        i += 1
+
+    question = " ".join(filtered).strip()
+    if not question:
+        render_error("La pregunta no puede estar vacía.")
+        return
+
+    try:
+        from lilith_tools.conclave import ConclaveTool  # type: ignore[import-not-found]
+    except Exception as exc:
+        render_error(f"No se pudo cargar la tool 'conclave': {exc}")
+        return
+
+    def _invoke() -> Any:
+        kwargs: dict[str, Any] = {
+            "question": question,
+            "structured": structured,
+        }
+        if presets is not None:
+            kwargs["presets"] = presets
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+        if per_timeout is not None:
+            kwargs["timeout"] = per_timeout
+        return ConclaveTool().execute(**kwargs)
+
+    loop = _asyncio.get_event_loop()
+    try:
+        result = await loop.run_in_executor(None, _invoke)
+    except Exception as exc:
+        # The REPL must survive a per-command crash. Surface the exception
+        # as a synthetic ToolResult so the renderer can describe it.
+        from lilith_tools.base import ToolResult  # type: ignore[import-not-found]
+
+        result = ToolResult(
+            success=False,
+            data=None,
+            error=f"conclave raised: {type(exc).__name__}: {exc}",
+        )
+
+    _render_conclave_panel(question, presets, result)
+
+
+def _render_conclave_panel(
+    question: str,
+    presets: list[str] | None,
+    result: Any,
+) -> None:
+    """Pretty-print the ConclaveTool result as one panel per preset."""
+    from rich.panel import Panel
+    from rich.text import Text
+
+    data = getattr(result, "data", None)
+    if not isinstance(data, dict):
+        render_error(
+            f"conclave devolvió resultado inesperado: {type(result).__name__}"
+        )
+        return
+
+    requested = data.get("presets_requested") or presets or []
+    responses = data.get("responses") or []
+    ok = data.get("ok_count", 0)
+    failed = data.get("failed_count", 0)
+
+    header_status = (
+        "[success]OK[/success]" if getattr(result, "success", False)
+        else "[error]FALLO[/error]"
+    )
+    console.print(
+        f"\n[bold realm]᛭ Conclave[/] {header_status} · "
+        f"pregunta: [italic]{question!r}[/italic] · "
+        f"presets={len(requested)} · ok={ok} fallaron={failed}"
+    )
+    if getattr(result, "error", "") and not getattr(result, "success", False):
+        console.print(f"  [error]{result.error}[/error]")
+
+    if not responses:
+        console.print("  [dim](sin respuestas)[/dim]\n")
+        return
+
+    for row in responses:
+        preset_name = row.get("preset", "?")
+        model = row.get("model") or "?"
+        content = row.get("content") or ""
+        error = row.get("error") or ""
+        usage = row.get("usage") or {}
+
+        title_parts = [f"preset={preset_name}", f"model={model}"]
+        if usage.get("total_tokens"):
+            title_parts.append(f"tokens={usage['total_tokens']}")
+        title = " · ".join(title_parts)
+
+        body = Text()
+        if error:
+            body.append(f"ERROR: {error}\n", style="bold red")
+            body.append("(este preset no tumba al resto)\n", style="dim")
+        if content:
+            body.append(_truncate_content(content, max_lines=15))
+        else:
+            body.append("(sin contenido)", style="dim")
+
+        style = "red" if error else "cyan"
+        console.print(Panel(body, title=title, border_style=style, expand=True))
+
+    console.print()
+
+
+def _truncate_content(content: str, *, max_lines: int = 15) -> str:
+    """Return *content* truncated to at most *max_lines* lines."""
+    lines_in = content.splitlines()
+    if len(lines_in) <= max_lines:
+        return content
+    head = lines_in[:max_lines]
+    hidden = len(lines_in) - max_lines
+    return "\n".join(head) + f"\n[dim]… (+{hidden} líneas más)[/dim]"
+
+
 async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
     """Show available commands grouped by category (/help [category])."""
     from rich.table import Table
@@ -5653,6 +5847,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
                     ("summary", "Resumen conciso de la conversación"),
                     ("replay", "Reproducir interacción"),
                     ("subagents", "Listar y probar presets de sub-agentes [test]"),
+                    ("conclave", "Fan-out de pregunta a 2-4 presets en paralelo [--presets a,b,c]"),
                     ("mcp", "Servidores MCP montados en el REPL [list|reload]"),
                 ],
         "Help": [

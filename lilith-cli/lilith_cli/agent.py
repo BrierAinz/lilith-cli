@@ -489,8 +489,8 @@ class AgentSession:
             sort_keys=True, ensure_ascii=False, default=str,
         )
         if (
-            signature == self._last_failed_tool_signature
-            and self._identical_tool_failures >= 2
+            signature == getattr(self, "_last_failed_tool_signature", None)
+            and getattr(self, "_identical_tool_failures", 0) >= 2
         ):
             return ToolResult(
                 tool_call_id=tool_call.id,
@@ -518,9 +518,10 @@ class AgentSession:
         duration = _time.perf_counter() - start
 
         failed = result.content.startswith("Error:")
+        last_signature = getattr(self, "_last_failed_tool_signature", None)
         if failed:
-            if signature == self._last_failed_tool_signature:
-                self._identical_tool_failures += 1
+            if signature == last_signature:
+                self._identical_tool_failures = getattr(self, "_identical_tool_failures", 0) + 1
             else:
                 self._last_failed_tool_signature = signature
                 self._identical_tool_failures = 1

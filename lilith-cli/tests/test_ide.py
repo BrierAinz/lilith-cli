@@ -494,13 +494,26 @@ class TestDebuggerIntegration:
             await pilot.pause()
             assert app.current_file.suffix == ".md"
 
-    async def test_debug_python_file_starts_worker(self, fake_session, tmp_path):
+    async def test_debug_python_file_starts_worker(self, fake_session, tmp_path, monkeypatch):
         app = LilithIDEApp(fake_session, root=tmp_path, show_splash=False)
         file = tmp_path / "script.py"
         file.write_text("x = 1\n", encoding="utf-8")
+        started = []
         async with app.run_test(size=(120, 40)) as pilot:
             app._open_file(file)
             await pilot.pause()
-            app.action_debug_current_file()
-            await pilot.pause()
-            assert app.current_file.suffix == ".py"
+            original_run_worker = app.run_worker
+
+            def capture_worker(awaitable, *args, **kwargs):
+                started.append(awaitable)
+                awaitable.close()
+                return None
+
+            monkeypatch.setattr(app, "run_worker", capture_worker)
+            try:
+                app.action_debug_current_file()
+                await pilot.pause()
+                assert app.current_file.suffix == ".py"
+                assert len(started) == 1
+            finally:
+                monkeypatch.setattr(app, "run_worker", original_run_worker)

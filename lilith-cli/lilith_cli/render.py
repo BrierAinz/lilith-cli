@@ -1,4 +1,4 @@
-"""Rich-based terminal renderer for Yggdrasil CLI v6.5.
+"""Rich-based terminal renderer for Yggdrasil CLI v6.6.
 
 Provides themed output helpers: markdown, streaming text, tool-call cards,
 thinking panels, turn separators, welcome banners, and a theme system
@@ -95,7 +95,7 @@ _NORSE_BANNER = r"""
         ᛭          ᛟ          ᛭
   ╔═════════════════════════════════╗
   ║        Y G G D R A S I L        ║
-  ║          C L I · v6.5           ║
+  ║          C L I · v6.6           ║
   ║   Where Ancient Meets Digital   ║
   ╚═════════════════════════════════╝
         ┃        ┃       ┃
@@ -106,7 +106,7 @@ _NORSE_BANNER = r"""
 _CYBERPUNK_BANNER = r"""
   ╔═════════════════════════════════╗
   ║     ⟐  Y G G D R A S I L  ⟐     ║
-  ║          C L I · v6.5           ║
+  ║          C L I · v6.6           ║
   ║   Signals From The Edge Nodes   ║
   ╚═════════════════════════════════╝
           ╠══╦══╦══╦══╦══╣
@@ -115,14 +115,14 @@ _CYBERPUNK_BANNER = r"""
 """
 
 _MINIMAL_BANNER = r"""
-yggdrasil cli · v6.5
+yggdrasil cli · v6.6
 ────────────────────
 """
 
 _LILITH_BANNER = r"""
              ☾  ✦  ☽
      L I L I T H  ·  C L I
-             v6.5
+             v6.6
   Demon of Information terminal
 """
 

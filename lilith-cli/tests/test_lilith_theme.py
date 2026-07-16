@@ -10,7 +10,7 @@ def test_lilith_banner_defined():
     assert _LILITH_BANNER is not None
     assert len(_LILITH_BANNER) > 50
     assert "L I L I T H" in _LILITH_BANNER
-    assert "v6.5" in _LILITH_BANNER
+    assert "v6.6" in _LILITH_BANNER
 
 
 def test_lilith_theme_registered():

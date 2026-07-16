@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lilith-memory"
-version = "1.4.0"
+version = "1.5.0"
 description = "Vector memory store with SQLite backend + semantic chunker + vector recall (hashed-embedding RAG) + ontology graph"
 requires-python = ">=3.11"
 license = "MIT"

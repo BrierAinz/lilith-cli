@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 from typing import TYPE_CHECKING, Any
 
 
@@ -322,22 +323,164 @@ class LLMProviderWrapper:
     ) -> dict[str, Any]:
         """Send messages and return a standardised response dict.
 
-        Retries up to 3 times with exponential back-off on transient errors.
+        Retries up to ``config.retry_max`` times with exponential back-off
+        and jitter on transient HTTP failures (429, 5xx, connection
+        resets, timeouts). Honours the ``Retry-After`` response header
+        when present. Non-transient failures (4xx other than 429) are
+        surfaced immediately without burning retries.
         """
         model = model or self._resolve_model()
         last_exc: Exception | None = None
+        last_response: httpx.Response | None = None
 
-        for attempt in range(1, _MAX_RETRIES + 1):
+        retry_max = max(0, int(getattr(self.config, "retry_max", _MAX_RETRIES)))
+        base = float(getattr(self.config, "retry_backoff_base", _BASE_DELAY))
+        backoff_max = float(getattr(self.config, "retry_backoff_max", 30.0))
+        jitter = float(getattr(self.config, "retry_jitter", 0.25))
+
+        for attempt in range(1, retry_max + 2):  # 1 initial + retry_max retries
             try:
-                return await self._do_complete(model, messages, tools=tools, **kwargs)
-            except Exception as exc:
+                return await self._do_complete(
+                    model, messages, tools=tools, **kwargs
+                )
+            except httpx.HTTPStatusError as exc:
                 last_exc = exc
-                logger.warning("Attempt %d/%d failed: %s", attempt, _MAX_RETRIES, exc)
-                if attempt < _MAX_RETRIES:
-                    delay = _BASE_DELAY * (2 ** (attempt - 1))
+                last_response = exc.response
+                status = exc.response.status_code
+                if not self._is_retryable_status(status):
+                    # Deterministic client error (e.g. 400, 401, 403, 404,
+                    # 422). Retrying would just burn the budget.
+                    logger.warning(
+                        "Attempt %d: non-retryable HTTP %d — surfacing immediately",
+                        attempt,
+                        status,
+                    )
+                    raise
+                if attempt > retry_max:
+                    logger.warning(
+                        "Attempt %d: HTTP %d — giving up after %d retries",
+                        attempt,
+                        status,
+                        retry_max,
+                    )
+                    break
+                delay = self._compute_retry_delay(
+                    attempt, base, backoff_max, jitter, exc.response
+                )
+                logger.warning(
+                    "Attempt %d: HTTP %d, retrying in %.2fs",
+                    attempt,
+                    status,
+                    delay,
+                )
+                if delay > 0:
                     await asyncio.sleep(delay)
+            except (
+                httpx.ConnectError,
+                httpx.TimeoutException,
+                httpx.NetworkError,
+            ) as exc:
+                last_exc = exc
+                last_response = None
+                if attempt > retry_max:
+                    logger.warning(
+                        "Attempt %d: %s — giving up after %d retries",
+                        attempt,
+                        type(exc).__name__,
+                        retry_max,
+                    )
+                    break
+                delay = self._compute_retry_delay(
+                    attempt, base, backoff_max, jitter, None
+                )
+                logger.warning(
+                    "Attempt %d: %s, retrying in %.2fs",
+                    attempt,
+                    type(exc).__name__,
+                    delay,
+                )
+                if delay > 0:
+                    await asyncio.sleep(delay)
+            except Exception as exc:
+                # Programming errors (TypeError, KeyError, json decode,
+                # etc.) and anything else that isn't an HTTP/transport
+                # failure: surface immediately, do NOT retry.
+                logger.warning(
+                    "Attempt %d: non-retryable error %s: %s",
+                    attempt,
+                    type(exc).__name__,
+                    exc,
+                )
+                raise
 
-        raise RuntimeError(f"LLM call failed after {_MAX_RETRIES} retries: {last_exc}")
+        status_part = (
+            f" (HTTP {last_response.status_code})" if last_response is not None else ""
+        )
+        raise RuntimeError(
+            f"LLM call failed after {retry_max} retries{status_part}: {last_exc}"
+        )
+
+    @staticmethod
+    def _is_retryable_status(status_code: int) -> bool:
+        """Decide whether an HTTP status is worth retrying.
+
+        Per the de-facto convention: 429 (rate limit) and 5xx (server
+        errors) are transient. Other 4xx codes (400, 401, 403, 404,
+        422, …) reflect deterministic client mistakes — retrying
+        without changing the request is pointless and just burns
+        budget.
+        """
+        if status_code == 429:
+            return True
+        if 500 <= status_code < 600:
+            return True
+        return False
+
+    @staticmethod
+    def _compute_retry_delay(
+        attempt: int,
+        base: float,
+        backoff_max: float,
+        jitter: float,
+        response: httpx.Response | None,
+    ) -> float:
+        """Compute the sleep before the next retry.
+
+        Honours the ``Retry-After`` header (seconds form; HTTP-date is
+        ignored because it's brittle across clocks). When absent,
+        applies ``base * 2 ** (attempt-1)`` with optional multiplicative
+        jitter and a hard ceiling at ``backoff_max``.
+        """
+        retry_after = None
+        if response is not None:
+            ra = response.headers.get("Retry-After") or response.headers.get(
+                "retry-after"
+            )
+            if ra:
+                try:
+                    retry_after = float(ra)
+                except (TypeError, ValueError):
+                    # HTTP-date form (e.g. "Wed, 21 Oct 2015 07:28:00 GMT")
+                    # is intentionally ignored — clock skew between the
+                    # client and provider makes it unreliable.
+                    retry_after = None
+
+        if retry_after is not None and retry_after > 0:
+            # Honour Retry-After only when it carries real information
+            # (> 0). "Retry-After: 0" degenerates to the exponential
+            # back-off below. Cap at backoff_max so a malicious or buggy
+            # server can't lock us out for hours.
+            return min(retry_after, backoff_max)
+
+        # Exponential back-off: base * 2 ** (attempt - 1).
+        delay = base * (2 ** max(0, attempt - 1))
+        if delay > backoff_max:
+            delay = backoff_max
+        # Multiplicative jitter in [1 - j, 1 + j].
+        if jitter > 0:
+            spread = 1.0 + (random.uniform(-jitter, jitter))
+            delay = max(0.0, delay * spread)
+        return delay
 
     # ── Core interface: stream ───────────────────────────────────────
 

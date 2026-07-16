@@ -3361,6 +3361,51 @@ class FeedbackCommand(BaseCommand):
         console.print(f"[success]✓ {len(entries)} entrada(s) de feedback eliminada(s).[/]")
 
 
+class CostsCommand(BaseCommand):
+    name = "costs"
+    description = "Mostrar o reiniciar telemetría de delegaciones"
+
+    async def execute(self, args: str) -> None:
+        from lilith_tools.orchestration_state import OrchestrationStateStore
+
+        store = OrchestrationStateStore()
+        parts = args.strip().split()
+        if parts and parts[0].lower() == "reset":
+            if len(parts) < 2 or parts[1] != "CONFIRMAR":
+                console.print("[warning]Confirma con: /costs reset CONFIRMAR[/]")
+                return
+            store.reset_costs()
+            console.print("[success]✓ Telemetría de costes reiniciada.[/]")
+            return
+        summary = store.cost_summary(getattr(self.session, "_session_id", ""))
+        table = Table(show_header=True, header_style="bold cyan")
+        table.add_column("Tipo")
+        table.add_column("Preset/Provider")
+        table.add_column("Prompt", justify="right")
+        table.add_column("Completion", justify="right")
+        table.add_column("Llamadas", justify="right")
+        historical = summary["historical"]
+        for scope, label in (("presets", "preset"), ("providers", "provider")):
+            for name, usage in sorted(historical.get(scope, {}).items()):
+                table.add_row(
+                    label, name, str(usage.get("prompt_tokens", 0)),
+                    str(usage.get("completion_tokens", 0)), str(usage.get("calls", 0)),
+                )
+        console.print(table)
+        session_total = summary["session"].get("total", {})
+        history_total = historical.get("total", {})
+        console.print(
+            f"Sesión: {session_total.get('prompt_tokens', 0)} prompt + "
+            f"{session_total.get('completion_tokens', 0)} completion / "
+            f"{session_total.get('calls', 0)} llamadas"
+        )
+        console.print(
+            f"Histórico: {history_total.get('prompt_tokens', 0)} prompt + "
+            f"{history_total.get('completion_tokens', 0)} completion / "
+            f"{history_total.get('calls', 0)} llamadas"
+        )
+
+
 class StateCommand(BaseCommand):
     name = "state"
     description = "Mostrar o limpiar el plan persistente de orquestación"
@@ -3910,6 +3955,7 @@ class CommandRegistry:
             ModelCommand,
             ProviderCommand,
             MemoryCommand,
+            CostsCommand,
             StateCommand,
             SkillsCommand,
             MCPCommand,

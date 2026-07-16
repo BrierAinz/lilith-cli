@@ -129,6 +129,7 @@ _SLASH_COMMANDS = [
     "/model",
     "/provider",
     "/memory",
+    "/costs",
     "/state",
     "/skills",
     "/clear",

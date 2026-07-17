@@ -112,9 +112,30 @@ class TestFindYggDir:
         assert result == ygg
 
     def test_not_found(self, tmp_path):
-        """Test when .ygg doesn't exist."""
-        result = find_ygg_dir(tmp_path)
+        """Test when .ygg doesn't exist.
+
+        Bounded with stop_at so a real .ygg/ above tmp_path (e.g. ~/.ygg
+        created by runtime audit hooks) can't leak into the search.
+        """
+        result = find_ygg_dir(tmp_path, stop_at=tmp_path)
         assert result is None
+
+    def test_stop_at_boundary_is_inclusive(self, tmp_path):
+        """A .ygg/ at the stop_at directory itself is still found."""
+        ygg = tmp_path / ".ygg"
+        ygg.mkdir()
+        subdir = tmp_path / "a" / "b"
+        subdir.mkdir(parents=True)
+
+        assert find_ygg_dir(subdir, stop_at=tmp_path) == ygg
+
+    def test_stop_at_blocks_ancestors(self, tmp_path):
+        """A .ygg/ above stop_at is never returned."""
+        (tmp_path / ".ygg").mkdir()
+        inner = tmp_path / "project" / "src"
+        inner.mkdir(parents=True)
+
+        assert find_ygg_dir(inner, stop_at=tmp_path / "project") is None
 
 
 class TestLoadYggContext:

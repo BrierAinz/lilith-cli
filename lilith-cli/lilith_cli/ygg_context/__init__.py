@@ -155,11 +155,16 @@ class YggContext:
 # ── Loader Functions ───────────────────────────────────────────────────────────
 
 
-def find_ygg_dir(start_path: Path | str | None = None) -> Path | None:
+def find_ygg_dir(
+    start_path: Path | str | None = None,
+    stop_at: Path | str | None = None,
+) -> Path | None:
     """Find the .ygg/ directory by searching upward from start_path.
 
     Args:
         start_path: Starting path (default: current working directory).
+        stop_at: Boundary directory; the search checks it but never
+            climbs above it. Useful to keep searches hermetic in tests.
 
     Returns:
         Path to .ygg/ if found, None otherwise.
@@ -168,6 +173,8 @@ def find_ygg_dir(start_path: Path | str | None = None) -> Path | None:
         start_path = Path.cwd()
     else:
         start_path = Path(start_path).resolve()
+    if stop_at is not None:
+        stop_at = Path(stop_at).resolve()
 
     # Search upward (max 10 levels)
     current = start_path
@@ -175,6 +182,8 @@ def find_ygg_dir(start_path: Path | str | None = None) -> Path | None:
         ygg_path = current / YGG_DIR
         if ygg_path.is_dir():
             return ygg_path
+        if stop_at is not None and current == stop_at:
+            break
         parent = current.parent
         if parent == current:
             break

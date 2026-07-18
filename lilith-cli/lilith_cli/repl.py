@@ -43,9 +43,9 @@ from .extra_commands import (
     run_compare_command,
     run_conclave_command,
     run_learn_command,
-    run_cost_command,
     run_deps_command,
     run_diff_staged_command,
+    run_diffconfig_command,
     run_doctor_command,
     run_editor_command,
     run_env_command,
@@ -807,9 +807,6 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "compact":
                     await run_compact_command(session, cmd_args)
-                    continue
-                if cmd_name == "cost":
-                    await run_cost_command(session, cmd_args)
                     continue
                 if cmd_name == "fork":
                     await run_fork_command(session, cmd_args)

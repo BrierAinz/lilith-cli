@@ -852,7 +852,9 @@ class MetricsCommand(BaseCommand):
         )
 
     def _tool_metrics(self) -> tuple[dict[str, int], dict[str, float], int]:
-        history = getattr(self.session, "_tool_call_history", [])
+        history = getattr(self.session, "_tool_call_history", None)
+        if history is None:
+            return {}, {}, 0
         counts: dict[str, int] = {}
         durations: dict[str, list[float]] = {}
         total = 0
@@ -870,7 +872,9 @@ class MetricsCommand(BaseCommand):
         return counts, avg, total
 
     def _command_metrics(self) -> dict[str, int]:
-        history = getattr(self.session, "_command_history", [])
+        history = getattr(self.session, "_command_history", None)
+        if history is None:
+            return {}
         counts: dict[str, int] = {}
         for entry in history:
             name = entry.get("name")
@@ -879,13 +883,28 @@ class MetricsCommand(BaseCommand):
         return counts
 
     def _file_edit_metrics(self) -> dict[str, int]:
-        history = getattr(self.session, "_file_edit_history", [])
+        history = getattr(self.session, "_file_edit_history", None)
+        if history is None:
+            return {}
         counts: dict[str, int] = {}
         for entry in history:
             path = entry.get("path")
             if path:
                 counts[path] = counts.get(path, 0) + 1
         return counts
+
+    def _telemetry_status(self) -> dict[str, bool]:
+        """Return which telemetry lists are active on the session.
+
+        Used by renderers to distinguish 'telemetry off in this session'
+        from 'no events recorded yet' — the latter is a normal empty
+        state, the former is an actionable hint.
+        """
+        return {
+            "tools": hasattr(self.session, "_tool_call_history"),
+            "commands": hasattr(self.session, "_command_history"),
+            "files": hasattr(self.session, "_file_edit_history"),
+        }
 
     async def _show_summary(self) -> None:
         console.print("\n[bold realm]᛭ Métricas de la sesión[/]\n")
@@ -898,6 +917,9 @@ class MetricsCommand(BaseCommand):
         console.print(f"  Total:        {usage.get('total_tokens', 0)}")
         console.print()
 
+        # Telemetry status — tells the user if some counters aren't wired.
+        status = self._telemetry_status()
+
         # Tool calls.
         counts, avg, total = self._tool_metrics()
         console.print("[bold frost]Llamadas a herramientas[/]")
@@ -905,6 +927,8 @@ class MetricsCommand(BaseCommand):
         if counts:
             for name, count in sorted(counts.items(), key=lambda x: -x[1])[:5]:
                 console.print(f"  {name}: {count} (avg {avg[name]:.3f}s)")
+        elif not status["tools"]:
+            console.print("  [info](telémetría no activa en esta sesión)[/]")
         else:
             console.print("  (ninguna)")
         console.print()
@@ -915,6 +939,8 @@ class MetricsCommand(BaseCommand):
         if cmd_counts:
             for name, count in sorted(cmd_counts.items(), key=lambda x: -x[1])[:5]:
                 console.print(f"  /{name}: {count}")
+        elif not status["commands"]:
+            console.print("  [info](telémetría no activa en esta sesión)[/]")
         else:
             console.print("  (ninguno)")
         console.print()
@@ -925,6 +951,8 @@ class MetricsCommand(BaseCommand):
         if file_counts:
             for path, count in sorted(file_counts.items(), key=lambda x: -x[1])[:5]:
                 console.print(f"  {path}: {count}")
+        elif not status["files"]:
+            console.print("  [info](telémetría no activa en esta sesión)[/]")
         else:
             console.print("  (ninguno)")
         console.print()
@@ -1167,15 +1195,34 @@ class BifrostCommand(BaseCommand):
 
     async def execute(self, args: str) -> None:
         """Show Bifrost IPC status and optionally send a message."""
+        from lilith_cli.main import _resolve_yggdrasil_root
+
         try:
-            from lilith_cli.main import _resolve_yggdrasil_root
-
             root = _resolve_yggdrasil_root()
-            bifrost_path = root / "Vanaheim" / "bifrost" / "bifrost" / "ipc.py"
-            if not bifrost_path.exists():
-                render_error("Bifrost IPC no encontrado en Vanaheim/bifrost/bifrost/ipc.py")
-                return
+        except Exception as exc:
+            console.print(
+                "[warning]Bifrost solo funciona dentro del monorepo Yggdrasil "
+                f"({exc}). Inicializá el repo o movete a la raíz.[/]"
+            )
+            return
 
+        if root is None:
+            console.print(
+                "[warning]Bifrost solo funciona dentro del monorepo Yggdrasil. "
+                "No se encontró la raíz del repo desde el directorio actual "
+                f"({Path.cwd()}).[/]"
+            )
+            return
+
+        bifrost_path = root / "Vanaheim" / "bifrost" / "bifrost" / "ipc.py"
+        if not bifrost_path.exists():
+            console.print(
+                f"[warning]Bifrost IPC no encontrado en {bifrost_path}. "
+                "El submódulo Vanaheim/bifrost probablemente no está clonado.[/]"
+            )
+            return
+
+        try:
             # Try to load BifrostIPC
             import sys
 
@@ -1200,10 +1247,13 @@ class BifrostCommand(BaseCommand):
             console.print(f"  [cyan]Archivo de historial:[/] {ipc._history}")
             console.print()
 
-        except ImportError as e:
-            render_error(f"No se pudo importar Bifrost IPC: {e}")
-        except Exception as e:
-            render_error(f"Error al obtener estado de Bifrost: {e}")
+        except ImportError as exc:
+            render_error(
+                f"No se pudo importar Bifrost IPC desde {bifrost_path.parent}: "
+                f"{exc}. Verificá que el submódulo esté instalado."
+            )
+        except Exception as exc:
+            render_error(f"Error al obtener estado de Bifrost: {exc}")
 
 
 class ConfigCommand(BaseCommand):

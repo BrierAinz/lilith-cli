@@ -1486,14 +1486,25 @@ def _save_aliases(aliases: dict[str, str]) -> None:
 _DIFF_CONFIG_FILE = CONFIG_DIR / "diff_config.json"
 
 
-async def run_diffconfig_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
-    """Ejecuta /diff-config para cambiar el modo de confirmación de ediciones.
+# ── /diff-config command ──────────────────────────────────────────────
+#
+# NOTE: /diff-config itself is handled by ``DiffConfigCommand`` in
+# commands.py (registered in the CommandRegistry) and shows the diff
+# between global and project config files.
+#
+# The helpers below — `_DIFF_CONFIG_FILE`, `_load_diff_config`,
+# `_save_diff_config` and the `run_diffconfig_command` async function —
+# were originally wired to that name too, but with a different semantic
+# ("edit-confirmation mode": always/ask/never). After the registry took
+# over /diff-config, this implementation became unreachable. Kept
+# alive in case someone wires it back via a separate name (e.g. a
+# future /edit-confirm slash command). Remove if that never happens.
+_DIFF_CONFIG_FILE = CONFIG_DIR / "diff_config.json"
 
-    Examples:
-        /diff-config
-        /diff-config always
-        /diff-config ask
-        /diff-config never
+
+async def run_diffconfig_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+    """Edit-confirmation mode toggle — currently NOT wired to any
+    slash command. See the note above this function.
     """
     text = args.strip()
     valid_modes = ("always", "ask", "never")
@@ -2137,37 +2148,6 @@ async def run_last_tool_command(session: AgentSession, args: str) -> None:
 # ── /load command ───────────────────────────────────────────────────
 
 
-async def run_load_command(session: AgentSession, args: str) -> None:
-    """Ejecuta /load para restaurar una conversación exportada.
-
-    Examples:
-        /load <nombre>
-    """
-    text = args.strip()
-    if not text:
-        render_error("Uso: /load <nombre>")
-        return
-
-    _CONVERSATIONS_DIR = CONFIG_DIR / "conversations"
-    filepath = _CONVERSATIONS_DIR / f"{text}.json"
-    if not filepath.exists():
-        render_error(f"Conversación no encontrada: {filepath}")
-        return
-
-    try:
-        data = json.loads(filepath.read_text(encoding="utf-8"))
-    except Exception as exc:
-        render_error(f"Error cargando conversación: {exc}")
-        return
-
-    if not isinstance(data, dict):
-        render_error("Formato de conversación inválido.")
-        return
-
-    session.history = data.get("messages", [])
-    console.print(f"[success]✓ Conversación cargada: {text} ({len(session.history)} mensajes)[/]")
-
-
 # ── /theme command ──────────────────────────────────────────────────
 
 
@@ -2231,30 +2211,6 @@ async def run_config_command(session: AgentSession, args: str) -> None:  # noqa:
 
 
 # ── /cost command ─────────────────────────────────────────────────────
-
-
-async def run_cost_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
-    """Muestra el costo y uso de tokens de la sesión (/cost)."""
-    from rich.table import Table
-
-    total = session.total_usage or {}
-    per_model = getattr(session, "_per_model_usage", {})
-
-    table = Table(
-        title="[bold realm]᛭ Uso y costo de tokens[/]",
-        show_header=True,
-        header_style="bold cyan",
-        border_style="cyan",
-        expand=False,
-    )
-    table.add_column("Métrica", style="tool.name")
-    table.add_column("Valor", style="tool.result")
-    table.add_row("Prompt tokens", str(total.get("prompt_tokens", 0)))
-    table.add_row("Completion tokens", str(total.get("completion_tokens", 0)))
-    table.add_row("Total tokens", str(total.get("total_tokens", 0)))
-    if per_model:
-        table.add_row("Modelos usados", ", ".join(per_model.keys()))
-    console.print(table)
 
 
 # ── /plan command ─────────────────────────────────────────────────────
@@ -2781,6 +2737,9 @@ async def run_profile_command(session: AgentSession, args: str) -> None:
 
 # ── /tour command ───────────────────────────────────────────────────────
 
+# Tour steps. Names + bodies reference real slash commands so the tour
+# doesn't drift from what the registry actually exposes; if a command
+# disappears, /tour will say so on next launch instead of staying stale.
 _TOUR_STEPS: list[tuple[str, str]] = [
     (
         "Bienvenido a Lilith",
@@ -2794,18 +2753,18 @@ _TOUR_STEPS: list[tuple[str, str]] = [
     ),
     (
         "Herramientas principales",
-        "read_file, write_file y patch manejan archivos; run_test ejecuta pruebas;\n"
-        "git_operation y search_files cubren git y búsquedas.",
+        "read_file, write_file y patch manejan archivos; /test ejecuta pruebas; "
+        "/git cubre git, /search busca en archivos.",
     ),
     (
         "Comandos de barra",
-        "/plan crea planes de trabajo, /tools lista o habilita herramientas,\n"
-        "/cost muestra el uso de tokens y costo estimado.",
+        "/help lista todos los comandos; /tools habilita/deshabilita herramientas; "
+        "/cost y /metrics muestran uso de tokens y costos.",
     ),
     (
         "Funciones avanzadas",
-        "/context gestiona el contexto de la sesión, /export guarda conversaciones,\n"
-        "/bookmark almacena valores útiles para reutilizarlos.",
+        "/export guarda la conversación, /load la restaura; "
+        "/bookmark marca puntos de interés; /compact resume el historial.",
     ),
 ]
 

@@ -18,6 +18,7 @@ when exercising the back-off logic with realistic settings.
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -497,3 +498,291 @@ def test_compute_retry_delay_with_jitter_in_band():
     for _ in range(50):
         d = LLMProviderWrapper._compute_retry_delay(1, base, 30.0, jitter, None)
         assert lo <= d <= hi
+
+
+# ── stream() retry helpers ──────────────────────────────────────────────────
+# Unlike the non-streaming helpers above, these mock client.stream()
+# (an async context manager) and the inner response.aiter_lines()
+# async iterator. We script a sequence of responses where each entry
+# can be either a 'live' SSE response (status 200 + iterable of SSE
+# lines) or a transient failure (status 5xx/4xx with a body that
+# raise_for_status() will explode on).
+
+
+class _FakeStreamResponse:
+    """Stand-in for httpx.Response inside an open SSE stream.
+
+    Supports only the attributes the wrapper's _stream_openai_sse()
+    touches: status_code, raise_for_status(), aiter_lines().
+    """
+
+    def __init__(self, status: int, lines: list | None = None) -> None:
+        self.status_code = status
+        self.headers: dict[str, str] = {}
+        self._lines = list(lines) if lines else []
+        self.request = httpx.Request(
+            "POST", "https://mock.example/v1/chat/completions"
+        )
+
+    async def aiter_lines(self):
+        for line in self._lines:
+            yield line
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise httpx.HTTPStatusError(
+                f"HTTP {self.status_code}",
+                request=self.request,
+                response=self,
+            )
+
+
+class _FakeStreamCtx:
+    """Async context manager that yields one _FakeStreamResponse."""
+
+    def __init__(self, response) -> None:
+        self._response = response
+
+    async def __aenter__(self):
+        return self._response
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        return None
+
+
+class _ScriptedStreamClient:
+    """Client that returns a different streaming response on each call.
+
+    ``responses`` is a list of _FakeStreamResponse objects; each
+    ``client.stream("POST", ...)`` pops the next one and wraps it in
+    an async context manager. When the list is exhausted any further
+    call raises AssertionError so a misconfigured test fails loudly.
+    """
+
+    def __init__(self, responses) -> None:
+        self.responses = list(responses)
+        self.stream_calls: int = 0
+        self.is_closed = False
+
+    def stream(self, method, path, *, json):
+        self.stream_calls += 1
+        if not self.responses:
+            raise AssertionError(
+                "ScriptedStreamClient ran out of responses"
+            )
+        return _FakeStreamCtx(self.responses.pop(0))
+
+    async def post(self, path, *, json):  # pragma: no cover
+        raise AssertionError("non-streaming .post() should not be called")
+
+    async def aclose(self) -> None:
+        self.is_closed = True
+
+
+def _success_chunk(content: str) -> str:
+    """One OpenAI-format SSE data: line carrying a content delta."""
+    return json.dumps(
+        {
+            "id": "cmpl-1",
+            "object": "chat.completion.chunk",
+            "model": "test-model",
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"content": content},
+                    "finish_reason": None,
+                }
+            ],
+        }
+    )
+
+
+def _sse_lines(*contents: str) -> list:
+    """Return SSE data: lines + terminator."""
+    out = [f"data: {_success_chunk(c)}" for c in contents]
+    out.append("data: [DONE]")
+    return out
+
+
+# ── stream() retry tests ─────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_stream_500_then_500_then_200_is_retried_and_succeeds():
+    """Two transient 500s followed by a 200 should be retried twice
+    and eventually yield the SSE content. The pre-first-chunk retry
+    rule applies: both 500s happen on the connection handshake
+    (raise_for_status) before any chunk is yielded to the caller."""
+    client = _ScriptedStreamClient(
+        [
+            _FakeStreamResponse(500),
+            _FakeStreamResponse(500),
+            _FakeStreamResponse(200, _sse_lines("hi", " there")),
+        ]
+    )
+    provider = LLMProviderWrapper(_config())
+    provider._client = client
+
+    sleep_calls: list = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleep_calls.append(delay)
+
+    with patch("lilith_cli.providers.asyncio.sleep", side_effect=fake_sleep):
+        chunks = []
+        async for chunk in provider.stream([{"role": "user", "content": "hi"}]):
+            chunks.append(chunk)
+
+    # We reconnected twice (so 3 stream() calls total) and consumed
+    # the SSE body from the third attempt.
+    assert client.stream_calls == 3
+    contents = [c.get("content") for c in chunks if c.get("content")]
+    assert contents == ["hi", " there"]
+    # Two sleeps, one between each pair of attempts.
+    assert len(sleep_calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_stream_500_persistent_propagates_runtime_error():
+    """When every attempt returns 500, stream() should raise
+    RuntimeError mentioning the status code and exhausted retries
+    (not a raw httpx.HTTPStatusError). retry_max=2 means 3 total
+    attempts: initial + 2 retries."""
+    client = _ScriptedStreamClient(
+        [_FakeStreamResponse(500)] * 5
+    )
+    provider = LLMProviderWrapper(_config(retry_max=2))
+    provider._client = client
+
+    with patch("lilith_cli.providers.asyncio.sleep", new=AsyncMock()):
+        with pytest.raises(RuntimeError) as excinfo:
+            async for _ in provider.stream(
+                [{"role": "user", "content": "hi"}]
+            ):
+                pass
+
+    # Initial + 2 retries = 3 stream() calls.
+    assert client.stream_calls == 3
+    assert "500" in str(excinfo.value)
+    assert "2 retries" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_stream_422_is_not_retried():
+    """422 (and any 4xx other than 429) is deterministic: the server
+    will keep returning the same thing. stream() must surface the
+    failure on the first attempt without burning the retry budget."""
+    client = _ScriptedStreamClient([_FakeStreamResponse(422)])
+    provider = LLMProviderWrapper(_config(retry_max=5))
+    provider._client = client
+
+    with patch(
+        "lilith_cli.providers.asyncio.sleep", new=AsyncMock()
+    ) as sleep_mock:
+        with pytest.raises(httpx.HTTPStatusError) as excinfo:
+            async for _ in provider.stream(
+                [{"role": "user", "content": "hi"}]
+            ):
+                pass
+
+    assert excinfo.value.response.status_code == 422
+    assert client.stream_calls == 1, "422 must not be retried"
+    sleep_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_stream_failure_after_first_chunk_propagates_without_retry():
+    """Once the first SSE chunk has been yielded to the caller we
+    cannot safely resume the stream: any subsequent failure must
+    propagate without retry and carry a useful message identifying
+    the provider and the status. This test simulates the server
+    dying right after sending one chunk."""
+
+    class _BoomAfterFirstChunk:
+        """Async iterator that yields one chunk then raises."""
+
+        def __init__(self) -> None:
+            self.yielded = False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if not self.yielded:
+                self.yielded = True
+                return "data: " + _success_chunk("first")
+            raise httpx.ReadTimeout(
+                "server hung up mid-stream",
+                request=httpx.Request(
+                    "POST",
+                    "https://mock.example/v1/chat/completions",
+                ),
+            )
+
+    class _DyingStreamResponse:
+        status_code = 200
+
+        def __init__(self) -> None:
+            self.request = httpx.Request(
+                "POST",
+                "https://mock.example/v1/chat/completions",
+            )
+            self._iter = _BoomAfterFirstChunk()
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def aiter_lines(self):
+            return self._iter
+
+    class _DyingStreamCtx:
+        def __init__(self, resp) -> None:
+            self._resp = resp
+
+        async def __aenter__(self):
+            return self._resp
+
+        async def __aexit__(self, *exc):
+            return None
+
+    class _DyingStreamClient:
+        is_closed = False
+        stream_calls = 0
+
+        def stream(self, method, path, *, json):
+            type(self).stream_calls += 1
+            return _DyingStreamCtx(_DyingStreamResponse())
+
+        async def post(self, path, *, json):  # pragma: no cover
+            raise AssertionError(".post() should not be called")
+
+        async def aclose(self) -> None:
+            pass
+
+    client = _DyingStreamClient()
+    provider = LLMProviderWrapper(_config(retry_max=5))
+    provider._client = client
+
+    with patch(
+        "lilith_cli.providers.asyncio.sleep", new=AsyncMock()
+    ) as sleep_mock:
+        chunks = []
+        with pytest.raises(RuntimeError) as excinfo:
+            async for chunk in provider.stream(
+                [{"role": "user", "content": "hi"}]
+            ):
+                chunks.append(chunk)
+
+    # We consumed the first chunk before the failure propagated.
+    assert any(
+        c.get("content") == "first" for c in chunks
+    ), f"expected to have consumed the first chunk, got {chunks!r}"
+    # No retries happened (we cannot resume a half-streamed response).
+    assert client.stream_calls == 1
+    sleep_mock.assert_not_called()
+    # Error message carries provider context (base URL from _config())
+    # and identifies the failure as ReadTimeout.
+    msg = str(excinfo.value)
+    assert "aborted mid-stream" in msg
+    assert "ReadTimeout" in msg
+    assert "mock.example" in msg

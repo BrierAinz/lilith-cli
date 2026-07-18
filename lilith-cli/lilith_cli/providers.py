@@ -332,6 +332,34 @@ class LLMProviderWrapper:
         surfaced immediately without burning retries.
         """
         model = model or self._resolve_model()
+
+        async def _attempt() -> dict[str, Any]:
+            return await self._do_complete(model, messages, tools=tools, **kwargs)
+
+        return await self._run_with_retry(_attempt, op_label="LLM call")
+
+    async def _run_with_retry(
+        self,
+        attempt_fn,
+        *,
+        op_label: str = "LLM call",
+    ) -> Any:
+        """Run ``attempt_fn()`` with retry/backoff on transient HTTP failures.
+
+        ``attempt_fn`` is a zero-arg async callable invoked once per
+        attempt. On transient HTTP failures (429, 5xx, connection resets,
+        timeouts) the call is retried up to ``config.retry_max`` times
+        with exponential back-off + jitter, honouring the ``Retry-After``
+        header when present. Non-transient failures (4xx other than 429,
+        programming errors) are surfaced immediately. When the budget is
+        exhausted, a ``RuntimeError`` carrying the last status code and
+        exception detail is raised.
+
+        The log format is the canonical "retry N/M tras HTTP X de <base_url>
+        en Xs" line — used by both ``complete()`` and ``stream()`` so an
+        operator scanning logs sees a consistent shape regardless of the
+        caller.
+        """
         last_exc: Exception | None = None
         last_response: httpx.Response | None = None
 
@@ -339,12 +367,11 @@ class LLMProviderWrapper:
         base = float(getattr(self.config, "retry_backoff_base", _BASE_DELAY))
         backoff_max = float(getattr(self.config, "retry_backoff_max", 30.0))
         jitter = float(getattr(self.config, "retry_jitter", 0.25))
+        base_url = self._resolve_base_url() or ""
 
         for attempt in range(1, retry_max + 2):  # 1 initial + retry_max retries
             try:
-                return await self._do_complete(
-                    model, messages, tools=tools, **kwargs
-                )
+                return await attempt_fn()
             except httpx.HTTPStatusError as exc:
                 last_exc = exc
                 last_response = exc.response
@@ -370,15 +397,20 @@ class LLMProviderWrapper:
                     attempt, base, backoff_max, jitter, exc.response
                 )
                 logger.warning(
-                    "Attempt %d: HTTP %d, retrying in %.2fs",
+                    "%s: retry %d/%d tras HTTP %d de %s en %.2fs",
+                    op_label,
                     attempt,
+                    retry_max,
                     status,
+                    base_url,
                     delay,
                 )
                 if delay > 0:
                     await asyncio.sleep(delay)
             except (
                 httpx.ConnectError,
+                httpx.ConnectTimeout,
+                httpx.ReadTimeout,
                 httpx.TimeoutException,
                 httpx.NetworkError,
             ) as exc:
@@ -396,9 +428,12 @@ class LLMProviderWrapper:
                     attempt, base, backoff_max, jitter, None
                 )
                 logger.warning(
-                    "Attempt %d: %s, retrying in %.2fs",
+                    "%s: retry %d/%d tras %s de %s en %.2fs",
+                    op_label,
                     attempt,
+                    retry_max,
                     type(exc).__name__,
+                    base_url,
                     delay,
                 )
                 if delay > 0:
@@ -419,7 +454,7 @@ class LLMProviderWrapper:
             f" (HTTP {last_response.status_code})" if last_response is not None else ""
         )
         raise RuntimeError(
-            f"LLM call failed after {retry_max} retries{status_part}: {last_exc}"
+            f"{op_label} failed after {retry_max} retries{status_part}: {last_exc}"
         )
 
     @staticmethod
@@ -504,8 +539,17 @@ class LLMProviderWrapper:
         # ── Anthropic-compat / Sakana-Responses profiles don't speak the
         # OpenAI SSE protocol this method implements; fall back to the
         # non-streaming path and emit the result as a single chunk.
+        # The fallback is wrapped in _run_with_retry so a transient 5xx
+        # from Sakana/Anthropic also gets the same backoff that the
+        # OpenAI SSE path below enjoys; non-transient errors bubble up.
         if self._is_anthropic() or self._is_sakana_responses():
-            result = await self._do_complete(model, messages, tools=tools, **kwargs)
+
+            async def _fallback_attempt() -> dict[str, Any]:
+                return await self._do_complete(model, messages, tools=tools, **kwargs)
+
+            result = await self._run_with_retry(
+                _fallback_attempt, op_label="stream() (Anthropic/Sakana fallback)"
+            )
             reasoning = result.get("reasoning_content")
             if reasoning:
                 yield {
@@ -524,6 +568,13 @@ class LLMProviderWrapper:
                 "tool_calls": tcs or None,
             }
             return
+
+        # — OpenAI SSE path. The HTTP+parsing work lives in the
+        # private generator _stream_openai_sse() so stream() can wrap
+        # it with retry. We retry only BEFORE the first chunk is
+        # yielded: once the caller has consumed anything we cannot
+        # resume a half-streamed response safely, so transient
+        # failures past that point propagate with a clear message.
 
         client = await self._get_client()
 
@@ -548,6 +599,109 @@ class LLMProviderWrapper:
         if response_format:
             payload["response_format"] = response_format
 
+        # Local attempt counter so retries don't leak across stream()
+        # calls (and across concurrent calls) via shared state. The
+        # counter resets at zero for every new stream() invocation.
+        attempt = 0
+        first_chunk_emitted = False
+        retry_max = max(0, int(getattr(self.config, "retry_max", _MAX_RETRIES)))
+        base_url = self._resolve_base_url() or ""
+
+        while True:
+            try:
+                async for chunk in self._stream_openai_sse(client, payload):
+                    first_chunk_emitted = True
+                    yield chunk
+                return  # generator exhausted normally
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                if first_chunk_emitted:
+                    # Cannot resume a partial SSE stream ── surface
+                    # the failure with provider+status context so the
+                    # REPL can show a useful message instead of a raw
+                    # traceback from response.raise_for_status().
+                    raise RuntimeError(
+                        f"stream() from {base_url} aborted mid-stream "
+                        f"with HTTP {status}: {exc}"
+                    ) from exc
+                # Pre-first-chunk: only retry transient statuses.
+                if not self._is_retryable_status(status):
+                    raise
+                attempt += 1
+                if attempt > retry_max:
+                    raise RuntimeError(
+                        f"stream() from {base_url} failed after "
+                        f"{retry_max} retries (HTTP {status}): {exc}"
+                    ) from exc
+                delay = self._compute_retry_delay(
+                    attempt,
+                    float(getattr(self.config, "retry_backoff_base", _BASE_DELAY)),
+                    float(getattr(self.config, "retry_backoff_max", 30.0)),
+                    float(getattr(self.config, "retry_jitter", 0.25)),
+                    exc.response,
+                )
+                logger.warning(
+                    "stream(): retry %d/%d tras HTTP %d de %s en %.2fs",
+                    attempt,
+                    retry_max,
+                    status,
+                    base_url,
+                    delay,
+                )
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                continue
+            except (
+                httpx.ConnectError,
+                httpx.ConnectTimeout,
+                httpx.ReadTimeout,
+                httpx.TimeoutException,
+                httpx.NetworkError,
+            ) as exc:
+                if first_chunk_emitted:
+                    raise RuntimeError(
+                        f"stream() from {base_url} aborted mid-stream "
+                        f"with {type(exc).__name__}: {exc}"
+                    ) from exc
+                attempt += 1
+                if attempt > retry_max:
+                    raise RuntimeError(
+                        f"stream() from {base_url} failed after "
+                        f"{retry_max} retries ({type(exc).__name__}): {exc}"
+                    ) from exc
+                delay = self._compute_retry_delay(
+                    attempt,
+                    float(getattr(self.config, "retry_backoff_base", _BASE_DELAY)),
+                    float(getattr(self.config, "retry_backoff_max", 30.0)),
+                    float(getattr(self.config, "retry_jitter", 0.25)),
+                    None,
+                )
+                logger.warning(
+                    "stream(): retry %d/%d tras %s de %s en %.2fs",
+                    attempt,
+                    retry_max,
+                    type(exc).__name__,
+                    base_url,
+                    delay,
+                )
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                continue
+
+   
+    async def _stream_openai_sse(
+        self,
+        client,
+        payload,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Yield SSE chunks for an OpenAI-compatible /chat/completions call.
+
+        Extracted from the old stream() body so stream() can wrap this
+        generator with retry-on-pre-first-chunk logic without disturbing
+        the per-chunk parsing. Raises httpx.HTTPStatusError on the status
+        line so the wrapper can decide whether to retry; everything past
+        raise_for_status() runs only after a 2xx response.
+        """
         # Accumulate tool calls across chunks.
         tc_accumulator: dict[int, dict[str, Any]] = {}
 
@@ -644,7 +798,6 @@ class LLMProviderWrapper:
                     "finish_reason": finish_reason,
                     "tool_calls": None,
                 }
-
     # ── Internal: HTTP completion ────────────────────────────────────
 
     async def _do_complete(

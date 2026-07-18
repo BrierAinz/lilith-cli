@@ -6827,8 +6827,15 @@ def _format_duration_short(seconds: float) -> str:
 
 
 def _tool_metrics(session) -> tuple[dict[str, int], dict[str, float], int]:
-    """Aggregate tool call counts and average duration from session history."""
-    history = getattr(session, "_tool_call_history", [])
+    """Aggregate tool call counts and average duration from session history.
+
+    Returns (counts, averages, total). If the session was never wired with
+    telemetry tracking (``_tool_call_history`` attribute missing), returns
+    empty dicts + 0 — caller can detect this via ``_telemetry_status``.
+    """
+    history = getattr(session, "_tool_call_history", None)
+    if history is None:
+        return {}, {}, 0
     counts: dict[str, int] = {}
     durations: dict[str, list[float]] = {}
     total = 0
@@ -6848,7 +6855,9 @@ def _tool_metrics(session) -> tuple[dict[str, int], dict[str, float], int]:
 
 def _command_metrics(session) -> dict[str, int]:
     """Count slash command invocations from session history."""
-    history = getattr(session, "_command_history", [])
+    history = getattr(session, "_command_history", None)
+    if history is None:
+        return {}
     counts: dict[str, int] = {}
     for entry in history:
         name = entry.get("name")
@@ -6859,13 +6868,29 @@ def _command_metrics(session) -> dict[str, int]:
 
 def _file_edit_metrics(session) -> dict[str, int]:
     """Count file edits per path from session history."""
-    history = getattr(session, "_file_edit_history", [])
+    history = getattr(session, "_file_edit_history", None)
+    if history is None:
+        return {}
     counts: dict[str, int] = {}
     for entry in history:
         path = entry.get("path")
         if path:
             counts[path] = counts.get(path, 0) + 1
     return counts
+
+
+def _telemetry_status(session) -> dict[str, bool]:
+    """Which telemetry lists are active on the session.
+
+    Lets the renderer distinguish 'telemetry off in this session' from
+    'no events recorded yet' — the latter is a normal empty state,
+    the former is an actionable hint.
+    """
+    return {
+        "tools": hasattr(session, "_tool_call_history"),
+        "commands": hasattr(session, "_command_history"),
+        "files": hasattr(session, "_file_edit_history"),
+    }
 
 
 # ── /tokens ─────────────────────────────────────────────────────────────
@@ -6987,7 +7012,11 @@ async def _metrics_show_summary(session) -> None:
             for name, cnt in top_tools
         )
     else:
-        tool_lines = "[dim](ninguna)[/]"
+        status = _telemetry_status(session)
+        if not status["tools"]:
+            tool_lines = "[info](telémetría no activa en esta sesión)[/]"
+        else:
+            tool_lines = "[dim](ninguna)[/]"
     grid.add_row(f"[bold frost]Herramientas[/] ({total})", tool_lines)
 
     # Slash commands
@@ -6997,7 +7026,11 @@ async def _metrics_show_summary(session) -> None:
             f"[tool.name]/{name}[/]: {cnt}" for name, cnt in top_cmds
         )
     else:
-        cmd_lines = "[dim](ninguno)[/]"
+        status = _telemetry_status(session)
+        if not status["commands"]:
+            cmd_lines = "[info](telémetría no activa en esta sesión)[/]"
+        else:
+            cmd_lines = "[dim](ninguno)[/]"
     grid.add_row("[bold frost]Comandos[/]", cmd_lines)
 
     # File edits
@@ -7007,7 +7040,11 @@ async def _metrics_show_summary(session) -> None:
             f"[tool.name]{path}[/]: {cnt}" for path, cnt in top_files
         )
     else:
-        file_lines = "[dim](ninguno)[/]"
+        status = _telemetry_status(session)
+        if not status["files"]:
+            file_lines = "[info](telémetría no activa en esta sesión)[/]"
+        else:
+            file_lines = "[dim](ninguno)[/]"
     grid.add_row("[bold frost]Archivos editados[/]", file_lines)
 
     console.print(Panel(

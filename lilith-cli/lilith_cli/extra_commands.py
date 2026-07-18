@@ -3706,6 +3706,112 @@ def _build_tree(
     return files_count, dirs_count
 
 
+# ── /recent command ──────────────────────────────────────────────────
+
+
+async def run_recent_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+    """List files edited or written during the current session.
+
+    Reads ``session._file_edit_history`` (populated by agent.py when
+    file_write / file_edit tools succeed) and renders the most recent
+    entries first. Each entry shows the file path, the tool used, a
+    short timestamp, and the file's current size on disk.
+
+    Examples:
+        /recent                — show last 10 edits (default)
+        /recent 25             — show last 25
+        /recent clear          — wipe the in-session history
+    """
+    history = getattr(session, "_file_edit_history", None)
+    if history is None:
+        console.print(
+            "[warning]Telemetría de ediciones no activa en esta sesión.[/]"
+        )
+        return
+
+    text = args.strip().lower()
+
+    if text == "clear":
+        history.clear()
+        console.print("[success]✓ Historial de archivos recientes vaciado.[/]")
+        return
+
+    # Parse optional count (default 10, max 50).
+    limit = 10
+    if text:
+        try:
+            limit = max(1, min(50, int(text)))
+        except ValueError:
+            render_error(f"Uso: /recent [N | clear]  ·  N entre 1 y 50, recibí: {text!r}")
+            return
+
+    if not history:
+        console.print("[dim]No hay archivos editados en esta sesión todavía.[/]")
+        return
+
+    # Most recent first, deduped by path so multiple edits to the same
+    # file collapse to one entry with the latest timestamp.
+    seen: dict[str, dict] = {}
+    for entry in reversed(history):
+        path = entry.get("path", "")
+        if path and path not in seen:
+            seen[path] = entry
+
+    items = list(seen.values())[:limit]
+
+    from rich.table import Table
+
+    table = Table(
+        title="[bold realm]᛭ Archivos editados recientemente[/]",
+        show_header=True,
+        header_style="bold cyan",
+        border_style="cyan",
+        expand=False,
+    )
+    table.add_column("#", style="dim", justify="right", width=4)
+    # no_wrap + overflow='ignore' preserves long paths verbatim (no
+    # '…' truncation), letting the terminal's own wrap handle them.
+    table.add_column("Archivo", style="tool.name", no_wrap=True, overflow="ignore")
+    table.add_column("Tool", justify="center", width=10)
+    table.add_column("Cuándo", style="dim", width=19)
+    table.add_column("Tamaño", justify="right", style="dim", width=10)
+
+    for i, entry in enumerate(items, start=1):
+        path_str = entry.get("path", "?")
+        tool = entry.get("tool", "?")
+        ts = entry.get("timestamp", "")
+        if "T" in ts:
+            ts = ts.replace("T", " ")[:19]
+
+        # Resolve size from disk; if the file was deleted, show "—".
+        try:
+            size_bytes = Path(path_str).stat().st_size
+            size_str = _format_size(size_bytes)
+        except OSError:
+            size_str = "[dim]—[/]"
+
+        table.add_row(str(i), path_str, tool, ts, size_str)
+
+    console.print(table)
+    if len(seen) > limit:
+        console.print(
+            f"[dim]Mostrando {limit} de {len(seen)} archivos únicos. "
+            f"Usá /recent {limit * 2} para ver más.[/]"
+        )
+    console.print()
+
+
+def _format_size(num_bytes: int) -> str:
+    """Compact human-readable file size."""
+    if num_bytes < 1024:
+        return f"{num_bytes} B"
+    if num_bytes < 1024 * 1024:
+        return f"{num_bytes / 1024:.1f} KB"
+    if num_bytes < 1024 * 1024 * 1024:
+        return f"{num_bytes / (1024 * 1024):.1f} MB"
+    return f"{num_bytes / (1024 * 1024 * 1024):.1f} GB"
+
+
 # ── /cls (clear screen) ─────────────────────────────────────────────
 
 
@@ -5757,6 +5863,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("last-tool", "Detalles de la última tool call"),
             ("pin", "Fijar mensaje al contexto siempre visible"),
             ("cls", "Limpiar la pantalla del terminal (sin tocar historial)"),
+            ("recent", "Archivos editados recientemente [N | clear]"),
         ],
         "Configuration": [
             ("config", "Configuración actual"),

@@ -43,6 +43,7 @@ from .extra_commands import (
     run_clear_screen_command,
     run_compare_command,
     run_conclave_command,
+    run_recent_command,
     run_learn_command,
     run_deps_command,
     run_diff_staged_command,
@@ -204,6 +205,7 @@ _SLASH_COMMANDS = [
     "/test",
     "/tour",
     "/tree",
+    "/recent",
     "/log",
     "/fork",
     "/model-info",
@@ -814,6 +816,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "tree":
                     await run_tree_command(session, cmd_args)
+                    continue
+                if cmd_name == "recent":
+                    await run_recent_command(session, cmd_args)
                     continue
                 if cmd_name in ("cls", "clear-screen"):
                     await run_clear_screen_command(session, cmd_args)

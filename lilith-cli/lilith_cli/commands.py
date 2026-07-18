@@ -2320,8 +2320,13 @@ class ThemeCommand(BaseCommand):
                 yaml.dump(raw, default_flow_style=False, allow_unicode=True),
                 encoding="utf-8",
             )
-        except Exception:
-            pass  # Best-effort — don't crash on config save.
+        except Exception as exc:
+            # Best-effort — don't crash on config save, but tell the user
+            # the theme won't survive a restart so they aren't confused.
+            console.print(
+                f"[warning](tema activo en esta sesión, pero no se pudo "
+                f"persistir en {CONFIG_FILE.name}: {exc})[/]"
+            )
 
         console.print()
         console.print(

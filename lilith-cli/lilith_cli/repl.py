@@ -225,6 +225,27 @@ _SLASH_COMMANDS = [
     "/mcps",
     "/subagents",
     "/sa",
+    "/cost",
+    "/doctor",
+    "/explain",
+    "/feedback",
+    "/hash",
+    "/help",
+    "/hooks",
+    "/json",
+    "/lines",
+    "/lint-fix",
+    "/multi-file",
+    "/now",
+    "/plan",
+    "/qr",
+    "/release",
+    "/replay",
+    "/reverse",
+    "/snippet",
+    "/uuid",
+    "/voice",
+    "/whereami",
 ]
 
 
@@ -402,7 +423,10 @@ def _list_saved_conversations() -> list[dict[str, Any]]:
                     "preview": preview,
                 },
             )
-        except Exception:
+        except Exception as exc:
+            # Don't swallow corruption silently — surface the file that
+            # failed to read so the user can rename/delete it via /profile.
+            console.print(f"[warning]No pude leer {fpath.name}: {exc}[/]")
             continue
 
     return conversations
@@ -412,8 +436,20 @@ def _load_conversation(filepath: Path) -> dict[str, Any] | None:
     """Load a conversation JSON file. Returns the full data dict or None."""
     try:
         return json.loads(filepath.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        render_error(f"Archivo no encontrado: {filepath.name}")
+        return None
+    except json.JSONDecodeError as exc:
+        render_error(
+            f"{filepath.name} no es JSON válido (línea {exc.lineno}, col {exc.colno}): "
+            f"{exc.msg}. Usá /resume para ver las conversaciones disponibles."
+        )
+        return None
     except Exception as exc:
-        render_error(f"Error cargando conversación: {exc}")
+        render_error(
+            f"Error cargando {filepath.name}: {exc}. "
+            f"Usá /resume para ver las conversaciones disponibles."
+        )
         return None
 
 

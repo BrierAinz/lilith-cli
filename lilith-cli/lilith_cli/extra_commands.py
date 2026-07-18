@@ -1292,7 +1292,7 @@ async def run_secret_command(session: AgentSession, args: str) -> None:  # noqa:
 
 # ── Tip helpers ──────────────────────────────────────────────────────
 
-LILITH_TIPS: list[str] = [
+_DEFAULT_TIPS: list[str] = [
     "Usá /theme nord para cambiar al tema inspirado en el Ártico.",
     "Con /env prefix PYTHON listás todas las variables de entorno que empiezan con PYTHON.",
     "/compact resumí los últimos mensajes de la conversación para ahorrar contexto.",
@@ -1304,11 +1304,54 @@ LILITH_TIPS: list[str] = [
     "Con /pin fijás mensajes importantes para que no se pierdan al compactar.",
     "/bench mide latencias del proveedor actual para comparar configuraciones.",
 ]
+_TIPS_PATH = CONFIG_DIR / "tips.json"
+
+# LILITH_TIPS starts as the bundled defaults; user-added tips are loaded
+# from disk on first access via _ensure_tips_loaded() and persisted on
+# /tip add so they survive across REPL restarts (previously they lived
+# only in-process and leaked across sessions in the same run).
+LILITH_TIPS: list[str] = list(_DEFAULT_TIPS)
 _TIPS = LILITH_TIPS  # back-compat alias
+_TIPS_LOADED = False
+
+
+def _ensure_tips_loaded() -> None:
+    """Lazy-load user tips from ~/.yggdrasil/tips.json on first access."""
+    global _TIPS_LOADED
+    if _TIPS_LOADED:
+        return
+    _TIPS_LOADED = True
+    try:
+        if _TIPS_PATH.exists():
+            data = json.loads(_TIPS_PATH.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                # Append user tips after the bundled defaults, skipping any
+                # that exactly match a default (idempotent across sessions).
+                for tip in data:
+                    if isinstance(tip, str) and tip not in _DEFAULT_TIPS:
+                        LILITH_TIPS.append(tip)
+    except Exception as exc:
+        console.print(f"[warning]tips.json ilegible ({exc}); usando defaults.[/]")
+
+
+def _save_user_tips() -> None:
+    """Persist only the user-added tips (not the bundled defaults)."""
+    user_tips = [t for t in LILITH_TIPS if t not in _DEFAULT_TIPS]
+    try:
+        _TIPS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _TIPS_PATH.write_text(
+            json.dumps(user_tips, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        console.print(
+            f"[warning]No pude persistir el consejo en {_TIPS_PATH.name}: {exc}[/]"
+        )
 
 
 async def run_tip_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
     """Show, list, count, or add tips (/tip [n|list|count|add <texto>])."""
+    _ensure_tips_loaded()
     raw = args.strip()
     text = raw.lower()
 
@@ -1329,6 +1372,7 @@ async def run_tip_command(session: AgentSession, args: str) -> None:  # noqa: AR
             render_error("Uso: /tip add <texto del consejo>")
             return
         LILITH_TIPS.append(new_tip)
+        _save_user_tips()
         console.print(f"[success]✓ Consejo añadido (total: {len(LILITH_TIPS)})[/success]")
         return
 
@@ -3998,8 +4042,13 @@ def _load_profiles() -> dict[str, dict[str, Any]]:
         data = _json.loads(_PROFILES_PATH.read_text(encoding="utf-8"))
         if isinstance(data, dict):
             return data
-    except Exception:
-        pass
+    except Exception as exc:
+        # Don't hide corruption: a broken profiles.json silently falling
+        # back to defaults makes /profile save look broken on next launch.
+        console.print(
+            f"[warning]profiles.json corrupto o ilegible ({exc}); "
+            f"usando defaults. Borrá {_PROFILES_PATH} para regenerar.[/]"
+        )
     return dict(_DEFAULT_PROFILES)
 
 
@@ -5779,6 +5828,10 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("quit", "Salir"),
             ("log", "Resumen de sesión [stats|clear|path|N]"),
             ("capture", "Transcripción Markdown [--output path --include-tools]"),
+            ("load", "Restaurar conversación exportada"),
+            ("continue", "Reanudar conversación guardada"),
+            ("last-tool", "Detalles de la última tool call"),
+            ("pin", "Fijar mensaje al contexto siempre visible"),
         ],
         "Configuration": [
             ("config", "Configuración actual"),
@@ -5800,6 +5853,13 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("fork", "Fork de la sesión actual"),
             ("agent", "Subagent asíncrono"),
             ("auto", "Modo autónomo"),
+            ("todos", "Lista de TODOs persistente"),
+            ("review", "Pre-commit review con quality gates"),
+            ("stream", "Estado del streaming de tokens"),
+            ("json-mode", "Toggle modo JSON forzado"),
+            ("watch", "Re-run de un comando al cambiar archivos"),
+            ("editor", "Abrir editor externo para el último patch"),
+            ("explain", "Explicar el último comando o tool call"),
         ],
         "Information": [
                     ("cost", "Costo estimado"),
@@ -5814,7 +5874,6 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
                     ("state", "Plan de orquestación persistente [show|clear]"),
                     ("costs", "Telemetría de delegaciones por preset [reset]"),
                     ("skills", "Catálogo de skills de delegación [show|save|delete <name>]"),
-                    ("conclave", "Fan-out de pregunta a 2-4 presets en paralelo [--presets a,b,c]"),
                     ("learn", "Minar post-mortems de delegación y sugerir skills [save N]"),
                 ],
         "Files & Git": [
@@ -5824,6 +5883,8 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("diff-staged", "Cambios preparados"),
             ("tree", "Árbol de archivos"),
             ("multi-file", "Edit multi-archivo atómico"),
+            ("hooks", "Listar/instalar/desinstalar hooks de git"),
+            ("release", "Tag + changelog + push de release"),
         ],
         "Utilities": [
             ("hash", "MD5/SHA de texto/archivo"),
@@ -5836,6 +5897,13 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("alias", "Aliases [set|get|remove|list]"),
             ("tip", "Tips de Lilith [N|list|add|count]"),
             ("compare", "Comparar archivos [files|json|text] <a> <b>"),
+            ("search", "Buscar en historial o archivos [history|files <patrón>]"),
+            ("snippet", "Guardar/ejecutar snippets reutilizables"),
+            ("model-info", "Detalles del modelo activo (precio, contexto, alias)"),
+            ("bench", "Medir latencias del proveedor [N iteraciones]"),
+            ("redact", "Redactar secretos antes de copiar al portapapeles"),
+            ("voice", "TTS toggle [on|off|status|test <texto>]"),
+            ("lint-fix", "Auto-fix con ruff/black"),
         ],
         "Environment": [
             ("env", "Variables de entorno [--json]"),

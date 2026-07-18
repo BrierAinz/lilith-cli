@@ -706,6 +706,19 @@ class LLMProviderWrapper:
         tc_accumulator: dict[int, dict[str, Any]] = {}
 
         async with client.stream("POST", "/chat/completions", json=payload) as response:
+            if response.status_code >= 400:
+                # Surface the provider's body so 4xx errors give an
+                # actionable message instead of an opaque traceback.
+                try:
+                    body = await response.aread()
+                    body_text = body.decode("utf-8", errors="replace")[:500]
+                except Exception:
+                    body_text = "<unreadable>"
+                raise httpx.HTTPStatusError(
+                    f"{response.status_code} from {payload.get('model', '?')}: {body_text}",
+                    request=response.request,
+                    response=response,
+                )
             response.raise_for_status()
 
             async for raw_line in response.aiter_lines():

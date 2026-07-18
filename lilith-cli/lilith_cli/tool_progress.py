@@ -153,7 +153,7 @@ class ToolProgressTracker:
 
     def _refresh(self) -> None:
         """Update the Live panel if it is active."""
-        if self._live is not live_none:
+        if self._live is not None:
             self._live.update(
                 _build_tool_progress_renderable(
                     list(self.running.keys()),
@@ -183,13 +183,13 @@ class ToolProgressTracker:
         scrollback on every stream/tool alternation; ``render_summary()``
         prints the one persistent line at end of turn.
         """
-        if self._live is not live_none:
+        if self._live is not None:
             self._live.__exit__(None, None, None)
             self._live = None
 
     def _ensure_live(self) -> None:
         """Create and start the Live panel on first use."""
-        if self._live is live_none:
+        if self._live is None:
             self._live = Live(
                 _build_tool_progress_renderable(
                     list(self.running.keys()),
@@ -209,12 +209,9 @@ class ToolProgressTracker:
         return self
 
     def __exit__(self, *args: object) -> None:
-        if self._live is not live_none:
+        if self._live is not None:
             self._live.__exit__(*args)
             self._live = None
-
-
-live_none: Live | None = None
 
 
 def render_tool_progress(

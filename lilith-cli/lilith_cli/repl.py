@@ -40,6 +40,7 @@ from .extra_commands import (
     run_capture_command,
     run_changelog_command,
     run_compact_command,
+    run_clear_screen_command,
     run_compare_command,
     run_conclave_command,
     run_learn_command,
@@ -209,6 +210,7 @@ _SLASH_COMMANDS = [
     "/macro",
     "/m",
     "/cls",
+    "/clear-screen",
     "/agent",
     "/mode",
     "/modo",
@@ -812,6 +814,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "tree":
                     await run_tree_command(session, cmd_args)
+                    continue
+                if cmd_name in ("cls", "clear-screen"):
+                    await run_clear_screen_command(session, cmd_args)
                     continue
                 if cmd_name == "uuid":
                     await run_uuid_command(session, cmd_args)

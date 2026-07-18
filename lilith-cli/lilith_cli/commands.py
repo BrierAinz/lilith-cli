@@ -611,7 +611,6 @@ class MemoryCommand(BaseCommand):
 class ClearCommand(BaseCommand):
     name = "clear"
     description = "Limpiar historial de conversación"
-    aliases = ["cls"]
 
     async def execute(self, _args: str) -> None:
         self.session.clear_history()

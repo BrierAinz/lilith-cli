@@ -3706,6 +3706,35 @@ def _build_tree(
     return files_count, dirs_count
 
 
+# ── /cls (clear screen) ─────────────────────────────────────────────
+
+
+async def run_clear_screen_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+    """Limpia la pantalla del terminal sin tocar el historial.
+
+    Equivalente a escribir ``cls`` (Windows) o ``clear`` (Unix) en el shell,
+    pero dentro del REPL. No toca ``session.history`` ni ``session._file_edit_history``.
+
+    Examples:
+        /cls
+    """
+    import os
+    import sys
+
+    del session  # unused; kept for command-dispatcher signature parity.
+
+    # ANSI clear-screen + cursor-home. Works on Windows 10+ Terminal, modern
+    # conemu, Linux/macOS terminals, and the Git-Bash mintty used here.
+    if sys.stdout.isatty():
+        os.system("cls" if os.name == "nt" else "clear")
+    else:
+        # Non-TTY (piped output, tests, IDE captures): just emit enough
+        # newlines to push the prior content off-screen. Better than
+        # silently doing nothing.
+        sys.stdout.write("\n" * 50)
+        sys.stdout.flush()
+
+
 async def run_tree_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
     """Ejecuta /tree para mostrar el árbol de archivos del directorio actual.
 
@@ -5727,6 +5756,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("continue", "Reanudar conversación guardada"),
             ("last-tool", "Detalles de la última tool call"),
             ("pin", "Fijar mensaje al contexto siempre visible"),
+            ("cls", "Limpiar la pantalla del terminal (sin tocar historial)"),
         ],
         "Configuration": [
             ("config", "Configuración actual"),

@@ -164,6 +164,8 @@ _SLASH_COMMANDS = [
     "/reintentar",
     "/continue",
     "/cont",
+    "/bookmark",
+    "/bm",
     "/copy",
     "/recap",
     "/summary",

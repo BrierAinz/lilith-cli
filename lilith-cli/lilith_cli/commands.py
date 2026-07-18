@@ -655,7 +655,7 @@ class UndoCommand(BaseCommand):
 
     name = "undo"
     description = "Deshacer la última operación de archivo"
-    aliases = ["u"]
+    aliases = []
 
     async def execute(self, args: str) -> None:
         from lilith_tools.undo import UndoManager
@@ -1451,7 +1451,7 @@ class ContinueCommand(BaseCommand):
 
     name = "continue"
     description = "Continuar la respuesta anterior"
-    aliases = ["cont", "c"]
+    aliases = ["cont"]
 
     async def execute(self, _args: str) -> None:
         prompt = "Continuá por favor."
@@ -2415,9 +2415,16 @@ class DiffCommand(BaseCommand):
             result = tool.execute(path=path, content=content, show_diff=True)
 
         elif subcmd == "edit":
-            # Parse: /diff edit path old_string new_string [--all]
-            # Quoted strings are not unquoted here; we just split by whitespace.
-            tokens = rest.split()
+            # Parse: /diff edit <path> <old_string> <new_string> [--all]
+            # Use shlex to honour quoted strings (otherwise any string with
+            # whitespace — filenames, code, JSON literals — gets shredded).
+            import shlex
+
+            try:
+                tokens = shlex.split(rest)
+            except ValueError as exc:
+                render_error(f"Argumentos mal balanceados (comillas): {exc}")
+                return
             if len(tokens) < 3:
                 render_error("Uso: /diff edit <path> <old> <new> [--all]")
                 return

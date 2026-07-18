@@ -103,6 +103,7 @@ _MODEL_CONTEXTS: dict[str, int] = {
     "qwen-plus-latest": 128_000,
     "qwen3.7-max": 128_000,
     # Kimi
+    "k3": 262_144,
     "kimi-for-coding": 256_000,
     "moonshot-v1-128k": 128_000,
     # BytePlus
@@ -151,6 +152,7 @@ _MODEL_CONTEXTS: dict[str, int] = {
     "qwen-max-latest": 32_000,
     "qwen-plus-latest": 128_000,
     "qwen3.7-max": 32_000,
+    "k3": 262_144,
     "kimi-for-coding": 128_000,
     "moonshot-v1-128k": 128_000,
     "seed-1-6-250915": 128_000,

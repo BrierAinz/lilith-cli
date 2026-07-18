@@ -45,7 +45,6 @@ from .extra_commands import (
     run_learn_command,
     run_deps_command,
     run_diff_staged_command,
-    run_diffconfig_command,
     run_doctor_command,
     run_editor_command,
     run_env_command,

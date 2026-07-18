@@ -342,9 +342,8 @@ def run_work_once(
     not ``sakana`` — the orchestrator (Lilith) is already running on
     Sakana Fugu Ultra in the main session; the queue worker just
     forwards tasks to spawned sub-agents, so it picks one of the
-    sub-agent channels by default. Pass ``channel="opencode-go"`` to
-    route through GLM-5.2, or ``channel="sakana"`` to push a task
-    onto the orchestrator's own model.
+    sub-agent channels by default. Pass ``channel="sakana"`` to push
+    a task onto the orchestrator's own model.
     """
     if console is None:
         from rich.console import Console as _Console

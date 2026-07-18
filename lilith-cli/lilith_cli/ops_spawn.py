@@ -82,14 +82,15 @@ _CHANNELS: dict[str, str | list[str]] = {
     # Lilith's main session itself runs on Sakana Fugu Ultra (see the
     # default config in ``lilith_cli/config.py``). Spawned sub-agents
     # are routed through the opencode CLI, which exposes multiple
-    # models under different channels. The two defaults below match
-    # the per-provider profiles declared in the default config:
+    # models under different channels. The default below matches
+    # the per-provider profile declared in the default config:
     #   * minimax      → MiniMax-M3 (Anthropic-compatible)
-    #   * opencode-go  → glm-5.2 (OpenCode Go gateway, hard-pinned)
     # ``sakana`` is still available so a sub-agent can opt into the
     # same model the orchestrator is running, when a task needs it.
+    # (``opencode-go`` was retired 2026-07-18: the opencode CLI's
+    # auth.json key expired with the plan and its catalog drifted;
+    # the env-var ``opencode-go`` HTTP profile in config.py remains.)
     "minimax": "minimax/MiniMax-M3",
-    "opencode-go": "opencode-go/glm-5.2",
     "sakana": "sakana/fugu-ultra",
 }
 

@@ -1957,25 +1957,30 @@ async def run_export_command(session: AgentSession, args: str) -> None:
 
 def _capture_usage() -> str:
     """Devuelve la línea de uso de /capture en español."""
-    return "Uso: /capture [nombre] [--output <ruta>] [--include-tools] [--no-usage] [--tags <tag1,tag2,...>] [--exclude-system]"
+    return "Uso: /capture [nombre] [--output <ruta>] [--include-tools] [--no-usage] [--tags <tags>] [--exclude-system] [--first N | --last N]"
 
 
-def _capture_parse_args(args: str) -> tuple[str | None, str | None, bool, bool, list[str], bool] | None:
+def _capture_parse_args(args: str) -> tuple[str | None, str | None, bool, bool, list[str], bool, int | None, int | None] | None:
     """Parsea argumentos de /capture sin shlex para preservar rutas Windows.
 
-    Returns (name, output_path, include_tools, include_usage, tags, exclude_system).
-    ``exclude_system`` skips ``role: 'system'`` and ``role: 'tool'`` messages
-    when rendering the transcript body (they still appear in the
-    --include-tools section if requested).
+    Returns (name, output_path, include_tools, include_usage, tags, exclude_system,
+    first_n, last_n). ``first_n`` and ``last_n`` are mutually exclusive:
+    ``--first N`` keeps the first N messages, ``--last N`` keeps the
+    last N. ``None`` means "no limit".
     """
     output_path: str | None = None
     include_tools = False
     include_usage = True
     tags: list[str] = []
     exclude_system = False
+    first_n: int | None = None
+    last_n: int | None = None
     positional: list[str] = []
     tokens = (args or "").split()
-    flags = {"--output", "--include-tools", "--no-usage", "--tags", "--exclude-system"}
+    flags = {
+        "--output", "--include-tools", "--no-usage", "--tags",
+        "--exclude-system", "--first", "--last",
+    }
 
     i = 0
     while i < len(tokens):
@@ -1989,15 +1994,38 @@ def _capture_parse_args(args: str) -> tuple[str | None, str | None, bool, bool, 
         elif tok == "--exclude-system":
             exclude_system = True
             i += 1
+        elif tok == "--first":
+            i += 1
+            if i >= len(tokens) or tokens[i] in flags:
+                render_error(_capture_usage())
+                return None
+            try:
+                first_n = int(tokens[i])
+                if first_n < 1:
+                    raise ValueError
+            except ValueError:
+                render_error(f"--first debe ser entero positivo, recibí: {tokens[i]!r}")
+                return None
+            i += 1
+        elif tok == "--last":
+            i += 1
+            if i >= len(tokens) or tokens[i] in flags:
+                render_error(_capture_usage())
+                return None
+            try:
+                last_n = int(tokens[i])
+                if last_n < 1:
+                    raise ValueError
+            except ValueError:
+                render_error(f"--last debe ser entero positivo, recibí: {tokens[i]!r}")
+                return None
+            i += 1
         elif tok == "--tags":
             i += 1
             tag_parts: list[str] = []
             while i < len(tokens) and tokens[i] not in flags:
                 tag_parts.append(tokens[i])
                 i += 1
-            # Each whitespace-separated token may itself be a
-            # comma-separated list (e.g. '--tags work,urgent,review').
-            # Flatten so every tag gets its own entry.
             flat: list[str] = []
             for p in tag_parts:
                 flat.extend(p.split(","))
@@ -2038,7 +2066,7 @@ def _capture_parse_args(args: str) -> tuple[str | None, str | None, bool, bool, 
             i += 1
 
     name = " ".join(positional).strip() or None
-    return name, output_path, include_tools, include_usage, tags, exclude_system
+    return name, output_path, include_tools, include_usage, tags, exclude_system, first_n, last_n
 
 
 def _capture_usage_dict(session: AgentSession) -> dict[str, Any]:
@@ -2101,6 +2129,7 @@ async def run_capture_command(session: AgentSession, args: str) -> None:
         console.print("  [cyan]/capture --no-usage[/]              [dim]# omite uso de tokens[/dim]")
         console.print("  [cyan]/capture --tags <tags>[/]          [dim]# ej. --tags work,urgent[/dim]")
         console.print("  [cyan]/capture --exclude-system[/]       [dim]# omite mensajes system/tool[/dim]")
+        console.print("  [cyan]/capture --first N | --last N[/]   [dim]# limita a N mensajes[/dim]")
         return
 
     history = getattr(session, "history", None) or []
@@ -2111,7 +2140,7 @@ async def run_capture_command(session: AgentSession, args: str) -> None:
     parsed = _capture_parse_args(text)
     if parsed is None:
         return
-    name, output_path, include_tools, include_usage, tags, exclude_system = parsed
+    name, output_path, include_tools, include_usage, tags, exclude_system, first_n, last_n = parsed
 
     transcripts_dir = CONFIG_DIR / "transcripts"
     if output_path:
@@ -2145,6 +2174,10 @@ async def run_capture_command(session: AgentSession, args: str) -> None:
             m for m in history
             if (m.get("role") if isinstance(m, dict) else "") not in ("system", "tool")
         ]
+    if first_n is not None:
+        messages_to_render = messages_to_render[:first_n]
+    elif last_n is not None:
+        messages_to_render = messages_to_render[-last_n:]
     for msg in messages_to_render:
         if isinstance(msg, dict):
             role = str(msg.get("role", "Mensaje"))
@@ -6227,7 +6260,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("copy", "Copiar al portapapeles"),
             ("quit", "Salir"),
             ("log", "Resumen de sesión [stats|clear|path|N]"),
-            ("capture", "Transcripción Markdown [--output <ruta> | --include-tools | --no-usage | --tags <tags> | --exclude-system]"),
+            ("capture", "Transcripción Markdown [--output <ruta> | --include-tools | --no-usage | --tags <tags> | --exclude-system | --first N | --last N]"),
             ("load", "Restaurar conversación exportada"),
             ("continue", "Reanudar conversación guardada"),
             ("last-tool", "Detalles de la última tool call"),

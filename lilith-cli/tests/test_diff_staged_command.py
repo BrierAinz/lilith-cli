@@ -72,8 +72,17 @@ async def test_diff_staged_stats_shows_file_only(tmp_path, monkeypatch):
     with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
         await run_diff_staged_command(session, "stats")
 
-    output = "\n".join(str(p) for p in prints)
-    assert "stats.txt" in output
+    # El nombre del archivo vive dentro de la tabla Rich (str() de una Table
+    # es solo su repr): inspeccionar las celdas, no el texto capturado.
+    from rich.table import Table
+
+    tables = [p for p in prints if isinstance(p, Table)]
+    assert tables, "esperaba una tabla Rich en la salida de /diff-staged stats"
+    cells = [str(cell) for col in tables[0].columns for cell in col._cells]
+    assert any("stats.txt" in cell for cell in cells)
+
+    resumen = "\n".join(str(p) for p in prints if not isinstance(p, Table))
+    assert "1 archivo(s) preparado(s)" in resumen
 
 
 @pytest.mark.asyncio

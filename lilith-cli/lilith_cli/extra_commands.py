@@ -9,6 +9,7 @@ antes de la logica de despacho normal del CommandRegistry.
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import logging
@@ -1960,113 +1961,144 @@ def _capture_usage() -> str:
     return "Uso: /capture [nombre] [--output <ruta>] [--include-tools] [--no-usage] [--tags <tags>] [--exclude-system] [--first N | --last N]"
 
 
-def _capture_parse_args(args: str) -> tuple[str | None, str | None, bool, bool, list[str], bool, int | None, int | None] | None:
-    """Parsea argumentos de /capture sin shlex para preservar rutas Windows.
+# Flags whose value is a variadic list that should stop at the next flag.
+# We join their value tokens with ``,`` during preprocessing so argparse
+# (with ``nargs="*"``) doesn't greedily swallow the next flag's tokens.
+_CAPTURE_VARIADIC_FLAGS = frozenset({"--tags", "--output"})
+_CAPTURE_KNOWN_FLAGS = frozenset({
+    "--output", "--include-tools", "--no-usage", "--tags",
+    "--exclude-system", "--first", "--last",
+})
 
-    Returns (name, output_path, include_tools, include_usage, tags, exclude_system,
-    first_n, last_n). ``first_n`` and ``last_n`` are mutually exclusive:
-    ``--first N`` keeps the first N messages, ``--last N`` keeps the
-    last N. ``None`` means "no limit".
+
+def _capture_positive_int(value: str) -> int:
+    """argparse ``type=`` for ``--first``/``--last``: must be a positive integer.
+
+    Raises ``argparse.ArgumentTypeError`` so argparse wraps it into the standard
+    error path (``parser.error``), which we then surface as ``render_error`` +
+    usage hint at the top level.
     """
-    output_path: str | None = None
-    include_tools = False
-    include_usage = True
-    tags: list[str] = []
-    exclude_system = False
-    first_n: int | None = None
-    last_n: int | None = None
-    positional: list[str] = []
-    tokens = (args or "").split()
-    flags = {
-        "--output", "--include-tools", "--no-usage", "--tags",
-        "--exclude-system", "--first", "--last",
-    }
+    try:
+        n = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"debe ser entero positivo, recibí: {value!r}"
+        )
+    if n < 1:
+        raise argparse.ArgumentTypeError(
+            f"debe ser entero positivo, recibí: {value!r}"
+        )
+    return n
 
+
+def _capture_parse_args(args: str) -> tuple[str | None, str | None, bool, bool, list[str], bool, int | None, int | None] | None:
+    """Parsea argumentos de /capture con ``argparse`` preservando rutas Windows.
+
+    La firma pública y el orden de la tupla retornada coinciden con la
+    implementación manual anterior::
+
+        (name, output_path, include_tools, include_usage, tags,
+         exclude_system, first_n, last_n)
+
+    ``--first N`` y ``--last N`` son mutuamente excluyentes (``--first N``
+    conserva las primeras N, ``--last N`` las últimas N; ``None`` significa
+    "sin límite"). ``--tags`` acepta una lista separada por espacios o por
+    comas (incluyendo la forma ``--tags=foo,bar``), se le quita el ``#``
+    inicial y se descartan las piezas vacías. ``--output`` acepta tanto
+    ``--output ruta`` como ``--output=ruta``.
+
+    Devuelve ``None`` y emite ``render_error`` + línea de uso ante cualquier
+    argumento inválido (flag desconocido, entero no positivo, ``--tags``
+    vacío, etc.).
+    """
+    raw_tokens = (args or "").split()
+
+    # Preprocess: ``--tags`` y ``--output`` son variádicos pero deben detenerse
+    # en la próxima flag. Unimos sus valores con ``,`` en un solo token para
+    # que ``argparse`` (con ``nargs="*"``) no se los trague por codicia y
+    # respete las flags vecinas. La normalización posterior hace split por
+    # coma igual que antes.
+    tokens: list[str] = []
     i = 0
-    while i < len(tokens):
-        tok = tokens[i]
-        if tok == "--include-tools":
-            include_tools = True
+    while i < len(raw_tokens):
+        tok = raw_tokens[i]
+        if tok in _CAPTURE_VARIADIC_FLAGS:
+            tokens.append(tok)
             i += 1
-        elif tok == "--no-usage":
-            include_usage = False
-            i += 1
-        elif tok == "--exclude-system":
-            exclude_system = True
-            i += 1
-        elif tok == "--first":
-            i += 1
-            if i >= len(tokens) or tokens[i] in flags:
-                render_error(_capture_usage())
-                return None
-            try:
-                first_n = int(tokens[i])
-                if first_n < 1:
-                    raise ValueError
-            except ValueError:
-                render_error(f"--first debe ser entero positivo, recibí: {tokens[i]!r}")
-                return None
-            i += 1
-        elif tok == "--last":
-            i += 1
-            if i >= len(tokens) or tokens[i] in flags:
-                render_error(_capture_usage())
-                return None
-            try:
-                last_n = int(tokens[i])
-                if last_n < 1:
-                    raise ValueError
-            except ValueError:
-                render_error(f"--last debe ser entero positivo, recibí: {tokens[i]!r}")
-                return None
-            i += 1
-        elif tok == "--tags":
-            i += 1
-            tag_parts: list[str] = []
-            while i < len(tokens) and tokens[i] not in flags:
-                tag_parts.append(tokens[i])
+            value_tokens: list[str] = []
+            while i < len(raw_tokens) and raw_tokens[i] not in _CAPTURE_KNOWN_FLAGS:
+                value_tokens.append(raw_tokens[i])
                 i += 1
-            flat: list[str] = []
-            for p in tag_parts:
-                flat.extend(p.split(","))
-            tags = [t.lstrip("#").strip(",").strip() for t in flat]
-            tags = [t for t in tags if t]
-            if not tags:
-                render_error(_capture_usage())
-                return None
-        elif tok.startswith("--tags="):
-            value = tok.split("=", 1)[1]
-            tags = [t.lstrip("#").strip(",").strip() for t in value.split(",")]
-            tags = [t for t in tags if t]
-            if not tags:
-                render_error(_capture_usage())
-                return None
-            i += 1
-        elif tok == "--output":
-            i += 1
-            path_parts: list[str] = []
-            while i < len(tokens) and tokens[i] not in flags:
-                path_parts.append(tokens[i])
-                i += 1
-            output_path = " ".join(path_parts).strip()
-            if not output_path:
-                render_error(_capture_usage())
-                return None
-        elif tok.startswith("--output="):
-            output_path = tok.split("=", 1)[1].strip()
-            if not output_path:
-                render_error(_capture_usage())
-                return None
-            i += 1
-        elif tok.startswith("--"):
-            render_error(f"Opción desconocida: {tok}. {_capture_usage()}")
-            return None
+            if value_tokens:
+                tokens.append(",".join(value_tokens))
         else:
-            positional.append(tok)
+            tokens.append(tok)
             i += 1
 
-    name = " ".join(positional).strip() or None
-    return name, output_path, include_tools, include_usage, tags, exclude_system, first_n, last_n
+    parser = argparse.ArgumentParser(
+        prog="/capture", add_help=False, exit_on_error=False,
+    )
+    parser.add_argument("--output", nargs="*", default=None)
+    parser.add_argument("--include-tools", action="store_true")
+    parser.add_argument("--no-usage", action="store_true")
+    parser.add_argument("--exclude-system", action="store_true")
+    parser.add_argument("--tags", nargs="*", default=None)
+    parser.add_argument("--first", type=_capture_positive_int, default=None, dest="first_n")
+    parser.add_argument("--last", type=_capture_positive_int, default=None, dest="last_n")
+
+    try:
+        parsed, unknown = parser.parse_known_args(tokens)
+    except argparse.ArgumentError as exc:
+        msg = str(exc).strip() or "argumento inválido"
+        render_error(msg)
+        console.print(_capture_usage())
+        return None
+
+    # Cualquier flag desconocida cae en ``unknown``; el resto es el nombre
+    # posicional (puede contener espacios y, en Windows, rutas con guiones).
+    stray_flags = [tok for tok in unknown if tok.startswith("--")]
+    if stray_flags:
+        render_error(f"Opción desconocida: {stray_flags[0]}. {_capture_usage()}")
+        return None
+
+    name = " ".join(unknown).strip() or None
+
+    # Normalización de ``--tags``: coma-separado, ``#`` inicial fuera, vacíos
+    # descartados. Idéntica a la implementación manual anterior.
+    tags_raw = parsed.tags or []
+    flat: list[str] = []
+    for t in tags_raw:
+        flat.extend(t.split(","))
+    tags = [t.lstrip("#").strip(",").strip() for t in flat]
+    tags = [t for t in tags if t]
+    if parsed.tags is not None and not tags:
+        render_error(_capture_usage())
+        return None
+
+    # Normalización de ``--output``: une los tokens con espacio (preserva
+    # rutas con espacios en Windows) y rechaza valores vacíos.
+    if parsed.output is not None:
+        output_path = " ".join(parsed.output).strip() or None
+        if output_path is None:
+            render_error(_capture_usage())
+            return None
+    else:
+        output_path = None
+
+    # ``--no-usage`` es ``store_true``; ``include_usage`` es su negación
+    # (``True`` por defecto).
+    include_usage = not parsed.no_usage
+
+    return (
+        name,
+        output_path,
+        parsed.include_tools,
+        include_usage,
+        tags,
+        parsed.exclude_system,
+        parsed.first_n,
+        parsed.last_n,
+    )
 
 
 def _capture_usage_dict(session: AgentSession) -> dict[str, Any]:

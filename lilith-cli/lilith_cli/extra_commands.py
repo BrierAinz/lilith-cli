@@ -2354,14 +2354,16 @@ async def run_last_tool_command(session: AgentSession, args: str) -> None:
 
 
 async def run_theme_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
-    """Ejecuta /theme [name] para cambiar el tema visual.
+    """Ejecuta /theme [name|current|preview <name>] para cambiar o inspeccionar el tema.
 
     Examples:
-        /theme
-        /theme cyberpunk
-        /theme list
+        /theme                      — listar temas disponibles
+        /theme cyberpunk            — cambiar al tema
+        /theme current              — mostrar el tema activo + atributos
+        /theme preview cyberpunk    — muestra cómo se ve un tema sin aplicarlo
+        /theme list                 — alias explícito de listar
     """
-    from .render import list_themes, set_theme
+    from .render import get_theme, list_themes, set_theme
 
     text = args.strip()
 
@@ -2370,6 +2372,64 @@ async def run_theme_command(session: AgentSession, args: str) -> None:  # noqa: 
         console.print("\n[bold realm]᛭ Temas disponibles[/]")
         for theme in themes:
             console.print(f"  [bold cyan]{theme.name}[/] — {theme.description}")
+        console.print()
+        return
+
+    parts = text.split(maxsplit=1)
+    subcmd = parts[0].lower()
+    rest = parts[1] if len(parts) > 1 else ""
+
+    if subcmd == "current":
+        active = get_theme()
+        console.print(
+            f"\n[bold realm]᛭ Tema activo[/] "
+            f"[bold cyan]{active.name}[/]\n"
+        )
+        console.print(f"  [info]Label:[/]            [bold]{active.label}[/]")
+        console.print(f"  [info]Prefijo prompt:[/]    [bold]{active.prompt_prefix}[/]")
+        console.print(f"  [info]Bordes:[/]           [bold {active.border_style}]{active.border_style}[/]")
+        console.print(f"  [info]Descripción:[/]      {active.description}")
+        console.print()
+        return
+
+    if subcmd == "preview":
+        if not rest:
+            render_error("Uso: /theme preview <nombre>")
+            return
+        try:
+            target = get_theme(rest)
+        except KeyError:
+            render_error(f"Tema desconocido: {rest}. Usá /theme list para ver los disponibles.")
+            return
+        # Render a sample panel with the target theme's colors without
+        # mutating the live theme. We use a temp console with the
+        # target theme's style to show what /help banners would look
+        # like. Does NOT call set_theme(), so the user's current theme
+        # is untouched.
+        from rich.console import Console
+        from rich.panel import Panel
+
+        preview_console = Console(theme=None, record=False, force_terminal=True)
+        # We can't easily swap themes mid-console; instead, just print
+        # the theme's attributes so the user sees what they'd get.
+        console.print(
+            f"\n[bold realm]᛭ Preview de '{rest}' (sin aplicar)[/]\n"
+        )
+        console.print(f"  [info]Label:[/]            [bold]{target.label}[/]")
+        console.print(f"  [info]Prefijo prompt:[/]    [bold]{target.prompt_prefix}[/]")
+        console.print(f"  [info]Bordes:[/]           [bold {target.border_style}]{target.border_style}[/]")
+        console.print(f"  [info]Descripción:[/]      {target.description}")
+        # Sample a panel in the target border color so the user sees
+        # the actual styling, not just metadata.
+        sample = Panel(
+            f"Prompt prefix: [bold]{target.prompt_prefix}[/]\n"
+            f"Border: {target.border_style}\n"
+            f"Label: {target.label}",
+            title=f"[bold {target.border_style}]{target.label}[/]",
+            border_style=target.border_style,
+            expand=False,
+        )
+        console.print(sample)
         console.print()
         return
 
@@ -6135,7 +6195,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("config", "Configuración actual"),
             ("model", "Mostrar/cambiar modelo"),
             ("provider", "Mostrar/cambiar proveedor"),
-            ("theme", "Cambiar tema visual"),
+            ("theme", "Cambiar tema visual [name | current | preview <name> | list]"),
             ("tools", "Habilitar/deshabilitar herramientas"),
             ("profile", "Perfiles de configuración [list|save|show|load|delete]"),
         ],

@@ -1957,23 +1957,25 @@ async def run_export_command(session: AgentSession, args: str) -> None:
 
 def _capture_usage() -> str:
     """Devuelve la línea de uso de /capture en español."""
-    return "Uso: /capture [nombre] [--output <ruta>] [--include-tools] [--no-usage] [--tags <tag1,tag2,...>]"
+    return "Uso: /capture [nombre] [--output <ruta>] [--include-tools] [--no-usage] [--tags <tag1,tag2,...>] [--exclude-system]"
 
 
-def _capture_parse_args(args: str) -> tuple[str | None, str | None, bool, bool, list[str]] | None:
+def _capture_parse_args(args: str) -> tuple[str | None, str | None, bool, bool, list[str], bool] | None:
     """Parsea argumentos de /capture sin shlex para preservar rutas Windows.
 
-    Returns (name, output_path, include_tools, include_usage, tags).
-    ``tags`` is the parsed --tags list (e.g. ['work','urgent']); empty
-    list when --tags wasn't given.
+    Returns (name, output_path, include_tools, include_usage, tags, exclude_system).
+    ``exclude_system`` skips ``role: 'system'`` and ``role: 'tool'`` messages
+    when rendering the transcript body (they still appear in the
+    --include-tools section if requested).
     """
     output_path: str | None = None
     include_tools = False
     include_usage = True
     tags: list[str] = []
+    exclude_system = False
     positional: list[str] = []
     tokens = (args or "").split()
-    flags = {"--output", "--include-tools", "--no-usage", "--tags"}
+    flags = {"--output", "--include-tools", "--no-usage", "--tags", "--exclude-system"}
 
     i = 0
     while i < len(tokens):
@@ -1984,30 +1986,29 @@ def _capture_parse_args(args: str) -> tuple[str | None, str | None, bool, bool, 
         elif tok == "--no-usage":
             include_usage = False
             i += 1
+        elif tok == "--exclude-system":
+            exclude_system = True
+            i += 1
         elif tok == "--tags":
             i += 1
-            # Collect tags until the next flag.
             tag_parts: list[str] = []
             while i < len(tokens) and tokens[i] not in flags:
                 tag_parts.append(tokens[i])
                 i += 1
-            # Strip leading '#' (so users can write '#work' as on social
-            # media) AND drop pieces that are empty or consist only of
-            # commas / whitespace (e.g. '--tags ,,, work ,,, urgent ,,').
-            tags = [
-                t.lstrip("#").strip(",").strip()
-                for t in tag_parts
-            ]
+            # Each whitespace-separated token may itself be a
+            # comma-separated list (e.g. '--tags work,urgent,review').
+            # Flatten so every tag gets its own entry.
+            flat: list[str] = []
+            for p in tag_parts:
+                flat.extend(p.split(","))
+            tags = [t.lstrip("#").strip(",").strip() for t in flat]
             tags = [t for t in tags if t]
             if not tags:
                 render_error(_capture_usage())
                 return None
         elif tok.startswith("--tags="):
             value = tok.split("=", 1)[1]
-            tags = [
-                t.lstrip("#").strip(",").strip()
-                for t in value.split(",")
-            ]
+            tags = [t.lstrip("#").strip(",").strip() for t in value.split(",")]
             tags = [t for t in tags if t]
             if not tags:
                 render_error(_capture_usage())
@@ -2037,7 +2038,7 @@ def _capture_parse_args(args: str) -> tuple[str | None, str | None, bool, bool, 
             i += 1
 
     name = " ".join(positional).strip() or None
-    return name, output_path, include_tools, include_usage, tags
+    return name, output_path, include_tools, include_usage, tags, exclude_system
 
 
 def _capture_usage_dict(session: AgentSession) -> dict[str, Any]:
@@ -2099,6 +2100,7 @@ async def run_capture_command(session: AgentSession, args: str) -> None:
         console.print("  [cyan]/capture --include-tools[/]         [dim]# incluye herramientas[/dim]")
         console.print("  [cyan]/capture --no-usage[/]              [dim]# omite uso de tokens[/dim]")
         console.print("  [cyan]/capture --tags <tags>[/]          [dim]# ej. --tags work,urgent[/dim]")
+        console.print("  [cyan]/capture --exclude-system[/]       [dim]# omite mensajes system/tool[/dim]")
         return
 
     history = getattr(session, "history", None) or []
@@ -2109,7 +2111,7 @@ async def run_capture_command(session: AgentSession, args: str) -> None:
     parsed = _capture_parse_args(text)
     if parsed is None:
         return
-    name, output_path, include_tools, include_usage, tags = parsed
+    name, output_path, include_tools, include_usage, tags, exclude_system = parsed
 
     transcripts_dir = CONFIG_DIR / "transcripts"
     if output_path:
@@ -2137,7 +2139,13 @@ async def run_capture_command(session: AgentSession, args: str) -> None:
         lines.append(f"- **Tags:** {', '.join('#' + t for t in tags)}")
     lines.extend(["", "---", ""])
 
-    for msg in history:
+    messages_to_render = history
+    if exclude_system:
+        messages_to_render = [
+            m for m in history
+            if (m.get("role") if isinstance(m, dict) else "") not in ("system", "tool")
+        ]
+    for msg in messages_to_render:
         if isinstance(msg, dict):
             role = str(msg.get("role", "Mensaje"))
             content = msg.get("content", "")
@@ -6219,7 +6227,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("copy", "Copiar al portapapeles"),
             ("quit", "Salir"),
             ("log", "Resumen de sesión [stats|clear|path|N]"),
-            ("capture", "Transcripción Markdown [--output <ruta> | --include-tools | --no-usage | --tags <tags>]"),
+            ("capture", "Transcripción Markdown [--output <ruta> | --include-tools | --no-usage | --tags <tags> | --exclude-system]"),
             ("load", "Restaurar conversación exportada"),
             ("continue", "Reanudar conversación guardada"),
             ("last-tool", "Detalles de la última tool call"),

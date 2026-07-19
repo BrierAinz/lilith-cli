@@ -41,6 +41,11 @@ class DummySession:
 async def test_git_command_runs_git_operation_tool(tmp_path, monkeypatch):
     """/git status delega en GitOperationTool y muestra stdout."""
     monkeypatch.chdir(tmp_path)
+    # git_operation ancla al _SESSION_ROOT capturado en import (los sandboxes
+    # desplazan el cwd); anclarlo al tmp_path para que el test sea hermético.
+    from lilith_tools import git_tools
+
+    monkeypatch.setattr(git_tools, "_SESSION_ROOT", tmp_path)
     # Inicializar repo para que git status tenga éxito.
     import subprocess
 

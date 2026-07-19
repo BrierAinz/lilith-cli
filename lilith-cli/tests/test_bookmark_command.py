@@ -96,3 +96,92 @@ async def test_bookmark_command_registry(fake_session) -> None:
     assert registry.get("bookmark") is not None
     assert registry.get("bm") is not None
     assert registry.get("mark") is not None
+
+
+@pytest.mark.asyncio
+async def test_bookmark_rename_persists(tmp_bookmarks_path: Path) -> None:
+    """/bookmark rename <id> <new name> updates the bookmark's name on disk."""
+    session = _DummySession(history=[{"role": "user", "content": "x"}])
+    cmd = BookmarkCommand(session)
+    await cmd.execute("original")
+    await cmd.execute("rename 1 mejor nombre")
+
+    data = json.loads(tmp_bookmarks_path.read_text(encoding="utf-8"))
+    assert data[0]["name"] == "mejor nombre"
+    assert data[0]["id"] == 1
+
+
+@pytest.mark.asyncio
+async def test_bookmark_rename_invalid_id_errors(tmp_bookmarks_path: Path, capsys) -> None:
+    """/bookmark rename abc foo renders a clean error (no traceback)."""
+    session = _DummySession(history=[])
+    cmd = BookmarkCommand(session)
+    await cmd.execute("rename abc foo")
+
+    out = capsys.readouterr().out
+    assert "inv" in out.lower()  # "inválido"
+
+
+@pytest.mark.asyncio
+async def test_bookmark_rename_missing_id_errors(tmp_bookmarks_path: Path, capsys) -> None:
+    """/bookmark rename 999 foo when no bookmark with id 999 exists errors."""
+    session = _DummySession(history=[{"role": "user", "content": "x"}])
+    cmd = BookmarkCommand(session)
+    await cmd.execute("primero")
+    await cmd.execute("rename 999 otro")
+
+    out = capsys.readouterr().out
+    assert "999" in out
+
+
+@pytest.mark.asyncio
+async def test_bookmark_search_finds_by_name(tmp_bookmarks_path: Path, capsys) -> None:
+    """/bookmark search <text> renders matches whose name contains the query."""
+    session = _DummySession(history=[
+        {"role": "user", "content": "msg uno"},
+        {"role": "assistant", "content": "ok"},
+    ])
+    cmd = BookmarkCommand(session)
+    await cmd.execute("API design")
+    await cmd.execute("Bug fix")
+    await cmd.execute("search API")
+
+    out = capsys.readouterr().out
+    # The search results table is the section after the "Marcadores que
+    # matchean" title; it must list API design but NOT Bug fix.
+    search_section = out.split("Marcadores que matchean", 1)[-1]
+    assert "API design" in search_section
+    assert "Bug fix" not in search_section
+
+
+@pytest.mark.asyncio
+async def test_bookmark_search_finds_by_content(tmp_bookmarks_path: Path, capsys) -> None:
+    """/bookmark search <text> also matches against the bookmarked message body."""
+    # The bookmark records index = len(history)-1 at creation time. With
+    # history [user("kubernetes"), assistant("ok")], the bookmark
+    # points at the assistant reply (index 1). /bookmark search should
+    # still match if the query hits that reply.
+    session = _DummySession(history=[
+        {"role": "user", "content": "kubernetes intro"},
+        {"role": "assistant", "content": "ok, let's talk about pods"},
+    ])
+    cmd = BookmarkCommand(session)
+    await cmd.execute("primero")  # index = 1 (assistant reply)
+    await cmd.execute("search pods")
+
+    out = capsys.readouterr().out
+    assert "primero" in out
+    assert "contenido" in out  # match-type column
+
+
+@pytest.mark.asyncio
+async def test_bookmark_search_no_match(tmp_bookmarks_path: Path, capsys) -> None:
+    """/bookmark search with no hits says so explicitly."""
+    session = _DummySession(history=[])
+    cmd = BookmarkCommand(session)
+    await cmd.execute("foo")
+    await cmd.execute("search nothingmatches")
+
+    out = capsys.readouterr().out
+    assert "nothingmatches" in out
+    assert "Sin marcadores" in out

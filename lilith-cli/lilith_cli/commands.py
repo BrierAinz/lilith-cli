@@ -2790,6 +2790,8 @@ class BookmarkCommand(BaseCommand):
         /bookmark list            — show all bookmarks
         /bookmark go <n>          — show the message at bookmark N
         /bookmark delete <n>      — remove bookmark N
+        /bookmark rename <n> <name>  — rename bookmark N
+        /bookmark search <text>   — filter bookmarks by name or message content
     """
 
     name = "bookmark"
@@ -2812,8 +2814,40 @@ class BookmarkCommand(BaseCommand):
             await self._delete_bookmark(bookmarks, arg[7:].strip())
             return
 
+        if arg.lower().startswith("search "):
+            await self._search_bookmarks(bookmarks, arg[7:].strip())
+            return
+
+        if arg.lower().startswith("rename "):
+            await self._rename_bookmark(bookmarks, arg[7:].strip())
+            return
+
         # Anything else is treated as a bookmark name (default: timestamp if empty).
         await self._add_bookmark(bookmarks, arg)
+
+    async def _rename_bookmark(self, bookmarks: list[dict[str, Any]], raw: str) -> None:
+        """/bookmark rename <id> <new name> updates the bookmark's display name."""
+        parts = raw.split(maxsplit=1)
+        if len(parts) < 2 or not parts[1].strip():
+            render_error("Uso: /bookmark rename <id> <nuevo nombre>")
+            return
+        try:
+            bookmark_id = int(parts[0])
+        except ValueError:
+            render_error(f"ID inválido: {parts[0]!r}")
+            return
+        new_name = parts[1].strip()
+        for bm in bookmarks:
+            if bm.get("id") == bookmark_id:
+                old_name = bm.get("name", "")
+                bm["name"] = new_name
+                _save_bookmarks(bookmarks)
+                console.print(
+                    f"[success]✓ Marcador {bookmark_id} renombrado:[/] "
+                    f"[dim]{old_name}[/] → [bold cyan]{new_name}[/]"
+                )
+                return
+        render_error(f"Marcador {bookmark_id} no encontrado.")
 
     async def _add_bookmark(self, bookmarks: list[dict[str, Any]], name: str) -> None:
         history = self.session.history
@@ -2892,6 +2926,65 @@ class BookmarkCommand(BaseCommand):
                 console.print(f"[success]✓ Marcador {bookmark_id} eliminado.[/]")
                 return
         render_error(f"Marcador {bookmark_id} no encontrado.")
+
+    async def _search_bookmarks(self, bookmarks: list[dict[str, Any]], query: str) -> None:
+        """/bookmark search <text> filters bookmarks whose name or stored
+        message content contains the query (case-insensitive substring).
+
+        Useful when /bookmark list grows past a screenful and the user
+        wants to find a specific marker without scrolling.
+        """
+        query_lower = query.strip().lower()
+        if not query_lower:
+            render_error("Uso: /bookmark search <texto>")
+            return
+
+        history = self.session.history
+        matches: list[tuple[dict[str, Any], str]] = []
+        for bm in bookmarks:
+            name = str(bm.get("name", "")).lower()
+            if query_lower in name:
+                matches.append((bm, "nombre"))
+                continue
+
+            # Search inside the bookmarked message content too.
+            try:
+                idx = int(bm.get("index", -1))
+                if 0 <= idx < len(history):
+                    content = str(history[idx].get("content", "")).lower()
+                    if query_lower in content:
+                        matches.append((bm, "contenido"))
+            except (TypeError, ValueError):
+                continue
+
+        if not matches:
+            console.print(f"[dim]Sin marcadores que matcheen '{query}'.[/]")
+            return
+
+        table = Table(
+            title=f"[bold realm]᛭ Marcadores que matchean '{query}'[/]",
+            show_header=True,
+            header_style="bold cyan",
+            expand=False,
+        )
+        table.add_column("ID", justify="right", style="cyan", width=4)
+        table.add_column("Nombre", style="white")
+        table.add_column("Match", style="dim", width=10)
+        table.add_column("Posición", justify="right", width=9)
+        table.add_column("Creado", style="dim", width=19)
+
+        for bm, where in matches:
+            table.add_row(
+                str(bm.get("id", "?")),
+                bm.get("name", ""),
+                where,
+                str(bm.get("index", "?")),
+                bm.get("created", "")[:19].replace("T", " "),
+            )
+        console.print()
+        console.print(table)
+        console.print()
+        console.print(f"[dim]{len(matches)} marcador(es) encontrado(s). Usá /bookmark go <id> para ver el mensaje.[/]")
 
 
 # ── Macro storage helpers ─────────────────────────────────────────

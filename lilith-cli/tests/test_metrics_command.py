@@ -123,3 +123,32 @@ async def test_metrics_command_registry_registered():
     assert registry.get("metrics") is not None
     assert registry.get("mtr") is not None
     assert registry.get("metrics").name == "metrics"
+
+
+@pytest.mark.asyncio
+async def test_metrics_distinguishes_telemetry_off_from_empty(capsys):
+    """When the session has no _tool_call_history attr (telemetry off),
+    /metrics must NOT show '(ninguna)' as if everything were empty —
+    it must print a hint that the telemetry is off (audit item 18)."""
+    session = _make_session("local-model")
+
+    # Simulate a barebones session by removing the telemetry attrs that
+    # AgentSession.__init__ sets up by default. In real-world sessions
+    # that go through full bootstrapping these are always present, so
+    # the only way the 'no attrs' branch fires is a session constructed
+    # without going through AgentSession.__init__ — e.g. a fresh dummy
+    # or a session that explicitly opts out of telemetry tracking.
+    for attr in ("_tool_call_history", "_command_history", "_file_edit_history"):
+        if hasattr(session, attr):
+            delattr(session, attr)
+
+    await run_metrics_command(session, "")
+
+    captured = capsys.readouterr().out
+    # The hint mentions that telemetry is off in this session, instead
+    # of implying the user simply didn't run anything.
+    assert "telémetría no activa" in captured
+    # And the bare '(ninguna)' line should NOT appear, since that's
+    # ambiguous with 'no events yet'.
+    assert "(ninguna)" not in captured
+    assert "(ninguno)" not in captured

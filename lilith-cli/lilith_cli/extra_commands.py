@@ -5853,7 +5853,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("redo", "Rehacer"),
             ("save", "Guardar conversación"),
             ("export", "Exportar [--format json|md --output path]"),
-            ("bookmark", "Marcadores de conversación"),
+            ("bookmark", "Marcadores de conversación [list|go|delete|rename|search]"),
             ("copy", "Copiar al portapapeles"),
             ("quit", "Salir"),
             ("log", "Resumen de sesión [stats|clear|path|N]"),

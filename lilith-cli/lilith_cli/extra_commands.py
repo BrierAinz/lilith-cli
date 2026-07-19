@@ -577,17 +577,26 @@ async def run_diff_staged_command(session: AgentSession, args: str) -> None:  # 
     """Ejecuta /diff-staged para mostrar cambios preparados en git.
 
     Examples:
-        /diff-staged
-        /diff-staged stats
-        /diff-staged <archivo>
+        /diff-staged              — patch completo
+        /diff-staged stats        — tabla con archivos + +/- counts
+        /diff-staged <archivo>    — diff del archivo preparado
     """
     text = args.strip()
 
-    cmd = ["git", "diff", "--cached"]
-    if text.lower() == "stats":
-        cmd = ["git", "diff", "--cached", "--stat"]
+    # `--numstat` is the machine-friendly form of `--stat`: one row per
+    # file with added/removed counts (or '-' for binary). We use it for
+    # both the default and explicit `stats` rendering — then parse it
+    # into a Rich Table so the user sees aligned columns instead of the
+    # raw `git diff --stat` ASCII output.
+    use_stats = text.lower() == "stats"
+    if use_stats:
+        cmd = ["git", "diff", "--cached", "--numstat"]
     elif text:
         cmd = ["git", "diff", "--cached", "--", text]
+    else:
+        # Default still runs full diff (preserves the historical behavior);
+        # `stats` is the explicit fast path.
+        cmd = ["git", "diff", "--cached"]
 
     try:
         result = subprocess.run(
@@ -610,9 +619,68 @@ async def run_diff_staged_command(session: AgentSession, args: str) -> None:  # 
         console.print("[dim]No hay cambios preparados.[/]")
         return
 
-    console.print(f"\n[bold realm]᛭ Cambios preparados[/]" + (f" — {text}" if text and text.lower() != "stats" else ""))
-    console.print(output, markup=False, highlight=False)
+    console.print(
+        "\n[bold realm]᛭ Cambios preparadas[/]"
+        + (f" — {text}" if text and not use_stats else "")
+    )
+
+    if use_stats:
+        _render_diff_staged_stats(output)
+    else:
+        console.print(output, markup=False, highlight=False)
     console.print()
+
+
+def _render_diff_staged_stats(numstat_output: str) -> None:
+    """Render the `--numstat` output as a Rich table with file, +, -.
+
+    `git diff --cached --numstat` returns rows like ``12  3 src/foo.py``
+    or ``-\t-\timg.png`` for binary files. We split on tabs, accumulate
+    totals, and render a table that survives wrapping in an 80-column
+    terminal better than the raw git output.
+    """
+    from rich.table import Table
+
+    table = Table(
+        show_header=True,
+        header_style="bold cyan",
+        border_style="cyan",
+        expand=False,
+    )
+    table.add_column("Archivo", style="tool.name")
+    table.add_column("+", justify="right", style="green", width=6)
+    table.add_column("-", justify="right", style="red", width=6)
+
+    total_add = 0
+    total_del = 0
+    rows = 0
+    for line in numstat_output.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        added_raw, removed_raw, path = parts[0], parts[1], "\t".join(parts[2:])
+        # Binary files report '-' for both counts.
+        if added_raw == "-" and removed_raw == "-":
+            added = "-"
+            removed = "-"
+        else:
+            try:
+                added = int(added_raw)
+                removed = int(removed_raw)
+                total_add += added
+                total_del += removed
+            except ValueError:
+                added = added_raw
+                removed = removed_raw
+        rows += 1
+        table.add_row(path, str(added), str(removed))
+
+    console.print(table)
+    if rows:
+        console.print(
+            f"[dim]{rows} archivo(s) preparado(s) · "
+            f"+{total_add} -{total_del} líneas[/]"
+        )
 
 
 async def run_todos_command(session: AgentSession, args: str) -> None:  # noqa: ARG001

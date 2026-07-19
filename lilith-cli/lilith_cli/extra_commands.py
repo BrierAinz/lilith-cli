@@ -6332,7 +6332,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("reverse", "Invertir texto o líneas"),
             ("alias", "Aliases [set|get|remove|list]"),
             ("tip", "Tips de Lilith [N|list|add|count]"),
-            ("compare", "Comparar archivos [files|json|text] <a> <b>"),
+            ("compare", "Comparar archivos [files|json|text] <a> <b> | recent <modo>"),
             ("search", "Buscar en historial o archivos [history|files <patrón>]"),
             ("snippet", "Guardar/ejecutar snippets reutilizables"),
             ("model-info", "Detalles del modelo activo (precio, contexto, alias)"),
@@ -6973,6 +6973,7 @@ async def run_compare_command(session: AgentSession, args: str) -> None:  # noqa
         /compare files ruta/a.py ruta/b.py
         /compare json config_a.json config_b.json
         /compare text notas_a.md notas_b.md
+        /compare recent text         — compara los últimos 2 archivos editados
     """
     text = (args or "").strip()
     if not text:
@@ -6990,9 +6991,29 @@ async def run_compare_command(session: AgentSession, args: str) -> None:  # noqa
         _compare_print_help()
         return
 
+    # /compare recent <mode> — pick the last two files from session history.
+    if sub == "recent":
+        mode = rest[0].lower() if rest and rest[0] in ("files", "json", "text") else "text"
+        recent_paths = _compare_recent_paths(session, count=2)
+        if len(recent_paths) < 2:
+            render_error(
+                f"Se necesitan al menos 2 archivos editados en la sesión; "
+                f"hay {len(recent_paths)}."
+            )
+            return
+        path_a = Path(recent_paths[0])
+        path_b = Path(recent_paths[1])
+        if mode == "files":
+            _compare_diff_files(path_a, path_b)
+        elif mode == "json":
+            _compare_json_files(path_a, path_b)
+        else:
+            _compare_text_stats(path_a, path_b)
+        return
+
     if sub not in ("files", "json", "text"):
         render_error(
-            f"Subcomando desconocido: {sub}. Use: files | json | text (o /compare help)"
+            f"Subcomando desconocido: {sub}. Use: files | json | text | recent (o /compare help)"
         )
         _compare_print_help()
         return
@@ -7019,6 +7040,29 @@ async def run_compare_command(session: AgentSession, args: str) -> None:  # noqa
         _compare_json_files(path_a, path_b)
     else:  # text
         _compare_text_stats(path_a, path_b)
+
+
+def _compare_recent_paths(session: AgentSession, count: int = 2) -> list[str]:
+    """Return up to ``count`` distinct paths from the session's
+    _file_edit_history, most-recent-first.
+
+    Reads ``session._file_edit_history`` (populated by agent.py when
+    file_write / file_edit tools succeed). Mirrors the dedup logic
+    used by /recent so the same path counted multiple times only
+    contributes one entry. Falls back to empty list when telemetry
+    is not active.
+    """
+    history = getattr(session, "_file_edit_history", None)
+    if history is None:
+        return []
+    seen: dict[str, None] = {}
+    for entry in reversed(history):
+        path = entry.get("path", "")
+        if path and path not in seen:
+            seen[path] = None
+        if len(seen) >= count:
+            break
+    return list(seen.keys())
 
 
 # ── /log command ───────────────────────────────────────────────────────

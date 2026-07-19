@@ -1957,17 +1957,23 @@ async def run_export_command(session: AgentSession, args: str) -> None:
 
 def _capture_usage() -> str:
     """Devuelve la línea de uso de /capture en español."""
-    return "Uso: /capture [nombre] [--output <ruta>] [--include-tools] [--no-usage]"
+    return "Uso: /capture [nombre] [--output <ruta>] [--include-tools] [--no-usage] [--tags <tag1,tag2,...>]"
 
 
-def _capture_parse_args(args: str) -> tuple[str | None, str | None, bool, bool] | None:
-    """Parsea argumentos de /capture sin shlex para preservar rutas Windows."""
+def _capture_parse_args(args: str) -> tuple[str | None, str | None, bool, bool, list[str]] | None:
+    """Parsea argumentos de /capture sin shlex para preservar rutas Windows.
+
+    Returns (name, output_path, include_tools, include_usage, tags).
+    ``tags`` is the parsed --tags list (e.g. ['work','urgent']); empty
+    list when --tags wasn't given.
+    """
     output_path: str | None = None
     include_tools = False
     include_usage = True
+    tags: list[str] = []
     positional: list[str] = []
     tokens = (args or "").split()
-    flags = {"--output", "--include-tools", "--no-usage"}
+    flags = {"--output", "--include-tools", "--no-usage", "--tags"}
 
     i = 0
     while i < len(tokens):
@@ -1977,6 +1983,35 @@ def _capture_parse_args(args: str) -> tuple[str | None, str | None, bool, bool] 
             i += 1
         elif tok == "--no-usage":
             include_usage = False
+            i += 1
+        elif tok == "--tags":
+            i += 1
+            # Collect tags until the next flag.
+            tag_parts: list[str] = []
+            while i < len(tokens) and tokens[i] not in flags:
+                tag_parts.append(tokens[i])
+                i += 1
+            # Strip leading '#' (so users can write '#work' as on social
+            # media) AND drop pieces that are empty or consist only of
+            # commas / whitespace (e.g. '--tags ,,, work ,,, urgent ,,').
+            tags = [
+                t.lstrip("#").strip(",").strip()
+                for t in tag_parts
+            ]
+            tags = [t for t in tags if t]
+            if not tags:
+                render_error(_capture_usage())
+                return None
+        elif tok.startswith("--tags="):
+            value = tok.split("=", 1)[1]
+            tags = [
+                t.lstrip("#").strip(",").strip()
+                for t in value.split(",")
+            ]
+            tags = [t for t in tags if t]
+            if not tags:
+                render_error(_capture_usage())
+                return None
             i += 1
         elif tok == "--output":
             i += 1
@@ -2002,7 +2037,7 @@ def _capture_parse_args(args: str) -> tuple[str | None, str | None, bool, bool] 
             i += 1
 
     name = " ".join(positional).strip() or None
-    return name, output_path, include_tools, include_usage
+    return name, output_path, include_tools, include_usage, tags
 
 
 def _capture_usage_dict(session: AgentSession) -> dict[str, Any]:
@@ -2063,6 +2098,7 @@ async def run_capture_command(session: AgentSession, args: str) -> None:
         console.print("  [cyan]/capture --output <ruta>[/]         [dim]# ruta exacta[/dim]")
         console.print("  [cyan]/capture --include-tools[/]         [dim]# incluye herramientas[/dim]")
         console.print("  [cyan]/capture --no-usage[/]              [dim]# omite uso de tokens[/dim]")
+        console.print("  [cyan]/capture --tags <tags>[/]          [dim]# ej. --tags work,urgent[/dim]")
         return
 
     history = getattr(session, "history", None) or []
@@ -2073,7 +2109,7 @@ async def run_capture_command(session: AgentSession, args: str) -> None:
     parsed = _capture_parse_args(text)
     if parsed is None:
         return
-    name, output_path, include_tools, include_usage = parsed
+    name, output_path, include_tools, include_usage, tags = parsed
 
     transcripts_dir = CONFIG_DIR / "transcripts"
     if output_path:
@@ -2096,10 +2132,10 @@ async def run_capture_command(session: AgentSession, args: str) -> None:
         f"- **Proveedor:** {getattr(session.config, 'provider', '?')}",
         f"- **Mensajes:** {len(history)}",
         f"- **Tokens:** {total_tokens} (prompt {prompt_tokens} + completion {completion_tokens})",
-        "",
-        "---",
-        "",
     ]
+    if tags:
+        lines.append(f"- **Tags:** {', '.join('#' + t for t in tags)}")
+    lines.extend(["", "---", ""])
 
     for msg in history:
         if isinstance(msg, dict):
@@ -6183,7 +6219,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("copy", "Copiar al portapapeles"),
             ("quit", "Salir"),
             ("log", "Resumen de sesión [stats|clear|path|N]"),
-            ("capture", "Transcripción Markdown [--output path --include-tools]"),
+            ("capture", "Transcripción Markdown [--output <ruta> | --include-tools | --no-usage | --tags <tags>]"),
             ("load", "Restaurar conversación exportada"),
             ("continue", "Reanudar conversación guardada"),
             ("last-tool", "Detalles de la última tool call"),

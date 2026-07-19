@@ -3037,6 +3037,8 @@ class MacroCommand(BaseCommand):
         /macro stop           — stop recording
         /macro play <name>    — execute the recorded commands in order
         /macro list           — list saved macros
+        /macro show <name>    — display the recorded commands
+        /macro edit <name>    — open the macro in $EDITOR for inline editing
         /macro delete <name>  — delete a macro
     """
 
@@ -3066,6 +3068,12 @@ class MacroCommand(BaseCommand):
         if subcmd in ("list", "ls"):
             await self._list()
             return
+        if subcmd in ("show", "view", "cat"):
+            await self._show(rest)
+            return
+        if subcmd == "edit":
+            await self._edit(rest)
+            return
         if subcmd in ("delete", "rm", "remove"):
             await self._delete(rest)
             return
@@ -3079,6 +3087,8 @@ class MacroCommand(BaseCommand):
         console.print("  [bold cyan]/macro stop[/]           — Finalizar la grabación")
         console.print("  [bold cyan]/macro play <nombre>[/]  — Reproducir la macro")
         console.print("  [bold cyan]/macro list[/]           — Listar macros guardadas")
+        console.print("  [bold cyan]/macro show <nombre>[/]  — Ver comandos de la macro")
+        console.print("  [bold cyan]/macro edit <nombre>[/]  — Editar en \$EDITOR")
         console.print("  [bold cyan]/macro delete <nombre>[/] — Eliminar una macro")
         console.print()
 
@@ -3200,6 +3210,111 @@ class MacroCommand(BaseCommand):
         del macros[name]
         _save_macros(macros)
         console.print(f"[success]✓ Macro '[model]{name}[/]' eliminada.[/]")
+
+    async def _show(self, name: str) -> None:
+        """/macro show <name> prints the recorded commands so the user can
+        review what a macro does without playing it back."""
+        name = name.strip()
+        if not name:
+            render_error("Uso: /macro show <nombre>")
+            return
+        macros = _load_macros()
+        if name not in macros:
+            render_error(f"Macro no encontrada: [model]{name}[/]")
+            return
+        commands = macros[name]
+        if not commands:
+            console.print(f"[dim]Macro '[model]{name}[/]' está vacía.[/]")
+            return
+        console.print(
+            f"\n[bold realm]᛭ Macro '[model]{name}[/]' — {len(commands)} comando(s)[/]\n"
+        )
+        for i, cmd in enumerate(commands, start=1):
+            console.print(f"  [cyan]{i:2}[/]. {cmd}")
+        console.print()
+
+    async def _edit(self, name: str) -> None:
+        """/macro edit <name> dumps the macro's commands to a temp file
+        (one command per line), opens $EDITOR (or falls back to
+        notepad on Windows / vi elsewhere), and on editor exit replaces
+        the saved macro with the edited content.
+
+        Lines starting with ``#`` are preserved as comments. Empty
+        lines are skipped. This lets the user clean up a recording by
+        hand without losing the macro entirely via /macro delete +
+        /macro record.
+        """
+        import os
+        import subprocess
+        import tempfile
+
+        name = name.strip()
+        if not name:
+            render_error("Uso: /macro edit <nombre>")
+            return
+        macros = _load_macros()
+        if name not in macros:
+            render_error(f"Macro no encontrada: [model]{name}[/]")
+            return
+
+        # Build an editable temp file with a header so the user knows
+        # what they're editing.
+        header_lines = [
+            f"# Macro: {name}",
+            "# Editá los comandos (uno por línea). Líneas vacías y que",
+            "# empiecen con # se ignoran al guardar. Borrá todo para",
+            "# dejar la macro vacía. Guardá y cerrá el editor para",
+            "# aplicar los cambios.",
+            "",
+        ]
+        body_lines = list(macros[name])
+        content = "\n".join(header_lines + body_lines) + "\n"
+
+        # Pick an editor: $VISUAL > $EDITOR > notepad (Win) / vi (*nix).
+        editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
+        if not editor:
+            editor = "notepad" if os.name == "nt" else "vi"
+
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".lilith-macro",
+            delete=False,
+            encoding="utf-8",
+            newline="\n",
+        ) as tf:
+            tf.write(content)
+            tmp_path = Path(tf.name)
+
+        try:
+            console.print(f"[dim]Abriendo {editor} en {tmp_path}...[/]")
+            result = subprocess.run(
+                [editor, str(tmp_path)],
+                shell=False,
+            )
+            if result.returncode != 0:
+                render_error(
+                    f"El editor salió con código {result.returncode}; macro sin cambios."
+                )
+                return
+
+            # Re-read and parse: skip blanks and comment lines.
+            new_text = tmp_path.read_text(encoding="utf-8")
+            new_commands = [
+                line.strip()
+                for line in new_text.splitlines()
+                if line.strip() and not line.lstrip().startswith("#")
+            ]
+            macros[name] = new_commands
+            _save_macros(macros)
+            console.print(
+                f"[success]✓ Macro '[model]{name}[/]' actualizada: "
+                f"{len(new_commands)} comando(s).[/]"
+            )
+        finally:
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
 
 
 class FeedbackCommand(BaseCommand):

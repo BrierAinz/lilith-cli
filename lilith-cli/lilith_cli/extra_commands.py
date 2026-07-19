@@ -683,6 +683,62 @@ def _render_diff_staged_stats(numstat_output: str) -> None:
         )
 
 
+async def run_diff_unstaged_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+    """Show unstaged working-tree changes (/diff-unstaged).
+
+    The mirror of /diff-staged but for changes that are NOT yet
+    `git add`-ed. Useful when the user has been editing files and wants
+    to see what they have pending without confusing it with what's
+    already staged for the next commit.
+
+    Examples:
+        /diff-unstaged              — full patch
+        /diff-unstaged stats        — table with archivos + +/- counts
+        /diff-unstaged <archivo>    — diff del archivo no-staged
+    """
+    text = args.strip()
+    use_stats = text.lower() == "stats"
+
+    if use_stats:
+        cmd = ["git", "diff", "--numstat"]
+    elif text:
+        cmd = ["git", "diff", "--", text]
+    else:
+        cmd = ["git", "diff"]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception as exc:
+        render_error(f"Error ejecutando git diff: {exc}")
+        return
+
+    if result.returncode != 0:
+        error = result.stderr.strip() or "Error desconocido ejecutando git diff"
+        render_error(error)
+        return
+
+    output = result.stdout.strip()
+    if not output:
+        console.print("[dim]No hay cambios sin preparar.[/]")
+        return
+
+    console.print(
+        "\n[bold realm]᛭ Cambios sin preparar[/]"
+        + (f" — {text}" if text and not use_stats else "")
+    )
+
+    if use_stats:
+        _render_diff_staged_stats(output)  # same renderer; format is identical
+    else:
+        console.print(output, markup=False, highlight=False)
+    console.print()
+
+
 async def run_todos_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
     """Ejecuta /todos [add|done|remove|list|clear] usando las herramientas de todo.
 
@@ -5980,7 +6036,8 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("git", "Operaciones git"),
             ("diff", "Diff (legacy)"),
             ("diff-config", "Diff de configuración"),
-            ("diff-staged", "Cambios preparados"),
+            ("diff-staged", "Cambios preparadas en git [stats | <archivo>]"),
+            ("diff-unstaged", "Cambios sin preparar en git [stats | <archivo>]"),
             ("tree", "Árbol de archivos"),
             ("multi-file", "Edit multi-archivo atómico"),
             ("hooks", "Listar/instalar/desinstalar hooks de git"),

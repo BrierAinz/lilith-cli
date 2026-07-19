@@ -402,15 +402,17 @@ def _print_env_json(result) -> None:
 
 
 async def run_env_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
-    """Ejecuta /env [name|info|prefix <PREFIX>|unset <name>] [--json].
+    """Ejecuta /env [name|info|prefix <PREFIX>|unset <name>|snapshot|diff] [--json].
 
     Examples:
         /env PATH
         /env info
         /env prefix PYTHON
         /env unset FOO
-        /env --json               — all env vars as JSON
-        /env prefix PYTHON --json — filtered JSON output
+        /env snapshot                       — capture current env to disk
+        /env diff                           — show changes since snapshot
+        /env --json                         — all env vars as JSON
+        /env prefix PYTHON --json           — filtered JSON output
     """
 
     text = args.strip()
@@ -469,6 +471,14 @@ async def run_env_command(session: AgentSession, args: str) -> None:  # noqa: AR
         console.print("[dim]No se realiza ningún cambio por seguridad.[/]")
         return
 
+    if subcmd == "snapshot":
+        _env_snapshot_save()
+        return
+
+    if subcmd == "diff":
+        await _env_diff_snapshot(_print_env_diff)
+        return
+
     # /env <name> (single env var)
     tool = EnvGetTool()
     result = tool.execute(name=text)
@@ -476,6 +486,138 @@ async def run_env_command(session: AgentSession, args: str) -> None:  # noqa: AR
         render_error(result.error or f"No se pudo leer {text}")
         return
     _print_env_get(result)
+
+
+# Path to the persisted env snapshot used by /env snapshot + /env diff.
+_ENV_SNAPSHOT_PATH = CONFIG_DIR / "env_snapshot.json"
+
+
+def _env_snapshot_save() -> None:
+    """/env snapshot — capture the current process env to
+    ~/.yggdrasil/env_snapshot.json. Used as the baseline for /env diff.
+
+    Only the keys that already have values are written (no empties);
+    the file is JSON-encoded for readability and round-trip parity.
+    """
+    import json as _json
+
+    payload = {k: v for k, v in os.environ.items()}
+    try:
+        _ENV_SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _ENV_SNAPSHOT_PATH.write_text(
+            _json.dumps(payload, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        console.print(
+            f"[success]✓ Snapshot guardado:[/] {len(payload)} variable(s) en "
+            f"[tool.result]{_ENV_SNAPSHOT_PATH}[/]"
+        )
+    except Exception as exc:
+        render_error(f"No pude guardar el snapshot: {exc}")
+
+
+async def _env_diff_snapshot(renderer) -> None:
+    """/env diff — show what's changed in os.environ since the last snapshot.
+
+    Compares the live process env against the file written by
+    /env snapshot. Reports three buckets:
+
+    - Added: variables that exist now but weren't in the snapshot.
+    - Removed: variables that were in the snapshot but no longer set.
+    - Changed: variables whose value differs from the snapshot.
+
+    Returns the diff to the renderer (which formats as a Rich Table).
+    If no snapshot exists yet, instructs the user to run
+    /env snapshot first.
+    """
+    import json as _json
+
+    if not _ENV_SNAPSHOT_PATH.exists():
+        render_error(
+            f"No hay snapshot previo. Ejecutá /env snapshot primero "
+            f"(guardaría {_ENV_SNAPSHOT_PATH})."
+        )
+        return
+
+    try:
+        snapshot = _json.loads(_ENV_SNAPSHOT_PATH.read_text(encoding="utf-8"))
+        if not isinstance(snapshot, dict):
+            raise ValueError("snapshot no es un dict")
+    except Exception as exc:
+        render_error(
+            f"Snapshot corrupto en {_ENV_SNAPSHOT_PATH}: {exc}. "
+            f"Borrá el archivo o ejecutá /env snapshot de nuevo."
+        )
+        return
+
+    live = dict(os.environ)
+    snapshot_keys = set(snapshot.keys())
+    live_keys = set(live.keys())
+
+    added = sorted(live_keys - snapshot_keys)
+    removed = sorted(snapshot_keys - live_keys)
+    common = snapshot_keys & live_keys
+    changed = sorted(k for k in common if snapshot[k] != live[k])
+
+    renderer(added=added, removed=removed, changed=changed, snapshot=snapshot, live=live)
+
+
+def _print_env_diff(*, added: list, removed: list, changed: list, snapshot: dict, live: dict) -> None:
+    """Render the /env diff output as three grouped Rich tables."""
+    from rich.table import Table
+
+    if not (added or removed or changed):
+        console.print("[dim]Sin cambios respecto al snapshot.[/]")
+        return
+
+    def _truncate(s: str, n: int = 80) -> str:
+        return s if len(s) <= n else s[: n - 1] + "…"
+
+    if added:
+        t = Table(
+            title=f"[bold green]+ Añadidas ({len(added)})[/]",
+            show_header=True,
+            header_style="bold cyan",
+            border_style="green",
+            expand=False,
+        )
+        t.add_column("Variable", style="tool.name")
+        t.add_column("Valor actual", style="green")
+        for k in added:
+            t.add_row(k, _truncate(live[k]))
+        console.print(t)
+        console.print()
+
+    if removed:
+        t = Table(
+            title=f"[bold red]- Eliminadas ({len(removed)})[/]",
+            show_header=True,
+            header_style="bold cyan",
+            border_style="red",
+            expand=False,
+        )
+        t.add_column("Variable", style="tool.name")
+        t.add_column("Valor anterior", style="red")
+        for k in removed:
+            t.add_row(k, _truncate(snapshot[k]))
+        console.print(t)
+        console.print()
+
+    if changed:
+        t = Table(
+            title=f"[bold yellow]~ Cambiadas ({len(changed)})[/]",
+            show_header=True,
+            header_style="bold cyan",
+            border_style="yellow",
+            expand=False,
+        )
+        t.add_column("Variable", style="tool.name")
+        t.add_column("Anterior", style="red")
+        t.add_column("Actual", style="green")
+        for k in changed:
+            t.add_row(k, _truncate(snapshot[k]), _truncate(live[k]))
+        console.print(t)
+        console.print()
 
 
 def _print_env_get(result) -> None:
@@ -6063,7 +6205,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("lint-fix", "Auto-fix con ruff/black"),
         ],
         "Environment": [
-            ("env", "Variables de entorno [--json]"),
+            ("env", "Variables de entorno [NAME | prefix X | snapshot | diff | info | --json]"),
             ("secret", "Secretos de sesión"),
         ],
         "System": [

@@ -8914,3 +8914,102 @@ async def run_timer_command(session: AgentSession, args: str) -> None:  # noqa: 
     console.print("    /timer cancel             [dim]# descartar cronómetro activo[/dim]")
     console.print("    /timer count <segundos>   [dim]# cuenta atrás con progreso[/dim]")
     console.print("  [dim]Sólo puede haber un cronómetro activo a la vez; el estado vive hasta que se detiene o se reinicia el REPL.[/dim]")
+
+
+# ── /random command ─────────────────────────────────────────────────────────
+
+
+def _render_random_usage() -> None:
+    """Muestra la ayuda concisa de /random."""
+    console.print("[bold cyan]/random[/bold cyan] — valores aleatorios seguros")
+    console.print("  /random [int [mínimo máximo]]")
+    console.print("  /random choice <opción1> <opción2> [...]  [dim]# acepta comillas[/dim]")
+    console.print("  /random hex [bytes]  [dim]# 1..1024; por defecto 16[/dim]")
+    console.print("  /random uuid")
+    console.print("  /random coin")
+    console.print("  /random dice [NdM]  [dim]# N: 1..100; M: 2..1000000[/dim]")
+
+
+async def run_random_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+    """Comando /random: genera valores aleatorios criptográficamente seguros."""
+    import secrets
+    import uuid
+
+    try:
+        tokens = shlex.split(args)
+    except ValueError as exc:
+        render_error(f"Argumentos inválidos: {exc}")
+        return
+
+    subcommand = tokens[0].lower() if tokens else "int"
+
+    if subcommand == "int":
+        if len(tokens) == 1:
+            minimum, maximum = 1, 100
+        elif len(tokens) == 3:
+            try:
+                minimum, maximum = int(tokens[1]), int(tokens[2])
+            except ValueError:
+                render_error("Los límites de /random int deben ser enteros.")
+                return
+            if minimum > maximum:
+                render_error("El mínimo no puede ser mayor que el máximo.")
+                return
+        else:
+            render_error("Uso: /random int [mínimo máximo]")
+            return
+        value = minimum + secrets.randbelow(maximum - minimum + 1)
+        console.print(f"[bold cyan]{value}[/bold cyan]")
+        return
+
+    if subcommand == "choice":
+        choices = tokens[1:]
+        if len(choices) < 2:
+            render_error("Uso: /random choice <opción1> <opción2> [...] (mínimo 2)")
+            return
+        console.print(f"[bold cyan]{secrets.choice(choices)}[/bold cyan]")
+        return
+
+    if subcommand == "hex":
+        if len(tokens) > 2:
+            render_error("Uso: /random hex [bytes]")
+            return
+        try:
+            byte_count = int(tokens[1]) if len(tokens) == 2 else 16
+        except ValueError:
+            render_error("La cantidad de bytes debe ser un entero entre 1 y 1024.")
+            return
+        if not 1 <= byte_count <= 1024:
+            render_error("La cantidad de bytes debe estar entre 1 y 1024.")
+            return
+        console.print(f"[bold cyan]{secrets.token_hex(byte_count)}[/bold cyan]")
+        return
+
+    if subcommand == "uuid" and len(tokens) == 1:
+        console.print(f"[bold cyan]{uuid.uuid4()}[/bold cyan]")
+        return
+
+    if subcommand == "coin" and len(tokens) == 1:
+        console.print(f"[bold cyan]{secrets.choice(('cara', 'cruz'))}[/bold cyan]")
+        return
+
+    if subcommand == "dice":
+        if len(tokens) > 2:
+            render_error("Uso: /random dice [NdM]")
+            return
+        notation = tokens[1] if len(tokens) == 2 else "1d6"
+        match = re.fullmatch(r"(\d+)[dD](\d+)", notation)
+        if match is None:
+            render_error("Notación de dados inválida. Usa NdM, por ejemplo 2d6.")
+            return
+        count, sides = (int(value) for value in match.groups())
+        if not 1 <= count <= 100 or not 2 <= sides <= 1_000_000:
+            render_error("Dados fuera de rango: N debe ser 1..100 y M 2..1000000.")
+            return
+        rolls = [1 + secrets.randbelow(sides) for _ in range(count)]
+        rendered_rolls = ", ".join(str(roll) for roll in rolls)
+        console.print(f"[info]Tiradas:[/info] [bold cyan]{rendered_rolls}[/bold cyan]")
+        console.print(f"[info]Total:[/info] [bold cyan]{sum(rolls)}[/bold cyan]")
+        return
+
+    _render_random_usage()

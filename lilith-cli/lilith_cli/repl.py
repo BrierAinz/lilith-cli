@@ -76,6 +76,7 @@ from .extra_commands import (
     run_pin_command,
     run_profile_command,
     run_qr_command,
+    run_random_command,
     run_test_command,
     run_recap_command,
     run_redact_command,
@@ -250,6 +251,7 @@ _SLASH_COMMANDS = [
     "/now",
     "/plan",
     "/qr",
+    "/random",
     "/release",
     "/replay",
     "/reverse",
@@ -845,6 +847,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "qr":
                     await run_qr_command(session, cmd_args)
+                    continue
+                if cmd_name == "random":
+                    await run_random_command(session, cmd_args)
                     continue
                 if cmd_name == "alias":
                     await run_alias_command(session, cmd_args)

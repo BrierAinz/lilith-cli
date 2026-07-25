@@ -6,9 +6,9 @@ import lilith_skills
 import lilith_skills.cross_context as cc
 
 
-def test_version_is_1_6_0():
-    """lilith_skills 1.6.0 ships card_validator + the cross-cutting context facade."""
-    assert lilith_skills.__version__ == "1.6.0"
+def test_version_is_1_7_0():
+    """lilith_skills 1.7.0 ships card_validator + the cross-cutting context facade."""
+    assert lilith_skills.__version__ == "1.7.0"
 
 
 def test_cross_context_is_exported():

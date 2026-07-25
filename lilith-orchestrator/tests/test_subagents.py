@@ -458,7 +458,7 @@ class TestPackageExports:
         ):
             assert hasattr(L, name), f"missing export: {name}"
 
-    def test_version_is_1_12_0(self):
+    def test_version_is_1_13_0(self):
         import lilith_orchestrator as L
 
-        assert L.__version__ == "1.12.0"
+        assert L.__version__ == "1.13.0"

@@ -1,6 +1,6 @@
 """Skill management and discovery for Lilith."""
 
-__version__ = "1.6.0"
+__version__ = "1.7.0"
 
 from lilith_skills.project_context import LogEntry, ProjectContext, Task
 from lilith_skills.heimdall_auditor import (

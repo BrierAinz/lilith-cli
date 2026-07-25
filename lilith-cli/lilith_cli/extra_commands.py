@@ -886,24 +886,35 @@ async def run_diff_unstaged_command(session: AgentSession, args: str) -> None:  
 
 
 async def run_todos_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
-    """Ejecuta /todos [add|done|remove|list|clear] usando las herramientas de todo.
+    """Ejecuta /todos [add|done|remove|list|due|clear] usando las herramientas de todo.
 
     Examples:
         /todos
         /todos add comprar leche
         /todos done 1
         /todos remove 2
+        /todos due
     """
     text = args.strip()
 
     if not text or text.lower() in ("list", "ls"):
-        tool = TodoListTool()
-        result = tool.execute()
+        result = TodoListTool().execute()
         if not result.success:
             render_error(result.error or "No se pudo listar las tareas")
             return
-        todos = result.data if isinstance(result.data, list) else []
-        _render_todos_table(todos)
+        data = result.data
+        todos = data.get("todos", []) if isinstance(data, dict) else data
+        _render_todos_table(todos if isinstance(todos, list) else [])
+        return
+
+    if text.lower() in ("due", "overdue"):
+        result = TodoListTool().execute()
+        if not result.success:
+            render_error(result.error or "No se pudo listar las tareas")
+            return
+        data = result.data
+        todos = data.get("todos", []) if isinstance(data, dict) else data
+        _render_todos_due_table(todos if isinstance(todos, list) else [])
         return
 
     if text.lower() == "clear":
@@ -921,24 +932,21 @@ async def run_todos_command(session: AgentSession, args: str) -> None:  # noqa: 
         if not rest:
             render_error("Uso: /todos add <texto>")
             return
-        tool = TodoAddTool()
-        result = tool.execute(text=rest)
+        result = TodoAddTool().execute(text=rest)
     elif subcmd in ("done", "complete"):
         try:
             index = int(rest)
         except ValueError:
             render_error("Uso: /todos done <número>")
             return
-        tool = TodoDoneTool()
-        result = tool.execute(index=index)
+        result = TodoDoneTool().execute(index=index)
     elif subcmd in ("remove", "rm", "delete"):
         try:
             index = int(rest)
         except ValueError:
             render_error("Uso: /todos remove <número>")
             return
-        tool = TodoRemoveTool()
-        result = tool.execute(index=index)
+        result = TodoRemoveTool().execute(index=index)
     else:
         render_error(f"Subcomando de /todos desconocido: {subcmd}")
         return
@@ -3822,8 +3830,8 @@ def _render_todos_table(todos: list) -> None:
 
     for i, todo in enumerate(todos, start=1):
         if isinstance(todo, dict):
-            content = str(todo.get("content", todo.get("task", str(todo))))
-            status = str(todo.get("status", "pending"))
+            content = str(todo.get("text", todo.get("content", todo.get("task", str(todo)))))
+            status = str(todo.get("status", "done" if todo.get("done") else "pending"))
         else:
             content = str(todo)
             status = "pending"

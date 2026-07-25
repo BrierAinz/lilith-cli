@@ -52,6 +52,7 @@ from .extra_commands import (
     run_doctor_command,
     run_editor_command,
     run_env_command,
+    run_epoch_command,
     run_explain_command,
     run_feedback_command,
     run_fork_command,
@@ -140,6 +141,7 @@ _SLASH_COMMANDS = [
     "/clear",
     "/status",
     "/env",
+    "/epoch",
     "/git",
     "/todos",
     "/search",
@@ -844,6 +846,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "env":
                     await run_env_command(session, cmd_args)
+                    continue
+                if cmd_name == "epoch":
+                    await run_epoch_command(session, cmd_args)
                     continue
                 if cmd_name == "replay":
                     await run_replay_command(session, cmd_args)

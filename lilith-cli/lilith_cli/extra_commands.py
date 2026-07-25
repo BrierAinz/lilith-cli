@@ -6341,6 +6341,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
                     ("doctor", "Diagnóstico [--fix --deep --json]"),
                     ("deps", "Dependencias del proyecto [path|outdated|licenses|help]"),
                     ("now", "Timestamp actual"),
+                    ("epoch", "Conversor Unix timestamp ↔ fecha [ts | YYYY-MM-DD]"),
                     ("calc", "Calculadora segura <expresión>"),
                     ("state", "Plan de orquestación persistente [show|clear]"),
                     ("costs", "Telemetría de delegaciones por preset [reset]"),
@@ -8712,3 +8713,65 @@ async def run_calc_command(session: AgentSession, args: str) -> None:  # noqa: A
         rendered = str(result)
 
     console.print(f"[tool.name]{expr}[/] = [bold cyan]{rendered}[/]")
+
+
+# ── /epoch command ────────────────────────────────────────────────────────────
+
+
+async def run_epoch_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+    """Convierte entre timestamps Unix y fechas legibles (/epoch [ts | YYYY-MM-DD[ HH:MM:SS]] | now).
+
+    Examples:
+        /epoch                     — timestamp Unix actual
+        /epoch now                 — idem (explícito)
+        /epoch 1700000000          — convierte a fecha UTC y local
+        /epoch 2024-01-15          — convierte la fecha a timestamp (medianoche local)
+        /epoch 2024-01-15 08:30:00 --utc — interpreta la fecha como UTC
+    """
+    from datetime import datetime, timezone
+
+    text = args.strip()
+    utc_mode = "--utc" in text.split()
+    text = text.replace("--utc", "").strip()
+
+    if not text or text.lower() == "now":
+        ts = int(datetime.now(timezone.utc).timestamp())
+        dt_utc = datetime.fromtimestamp(ts, tz=timezone.utc)
+        dt_local = datetime.fromtimestamp(ts).astimezone()
+        console.print(f"[info]Unix:[/info]   [bold cyan]{ts}[/bold cyan]")
+        console.print(f"[info]UTC:[/info]    [bold cyan]{dt_utc.strftime('%Y-%m-%d %H:%M:%S')}[/bold cyan]")
+        console.print(f"[info]Local:[/info]  [bold cyan]{dt_local.strftime('%Y-%m-%d %H:%M:%S %Z (%z)')}[/bold cyan]")
+        return
+
+    # Caso 1: timestamp Unix → fechas legibles.
+    if text.isdigit():
+        try:
+            ts = int(text)
+            dt_utc = datetime.fromtimestamp(ts, tz=timezone.utc)
+        except (ValueError, OverflowError, OSError) as exc:
+            render_error(f"Timestamp fuera de rango: {text} ({exc})")
+            return
+        dt_local = datetime.fromtimestamp(ts).astimezone()
+        console.print(f"[info]Unix:[/info]   [bold cyan]{ts}[/bold cyan]")
+        console.print(f"[info]UTC:[/info]    [bold cyan]{dt_utc.strftime('%Y-%m-%d %H:%M:%S')}[/bold cyan]")
+        console.print(f"[info]Local:[/info]  [bold cyan]{dt_local.strftime('%Y-%m-%d %H:%M:%S %Z (%z)')}[/bold cyan]")
+        return
+
+    # Caso 2: fecha legible → timestamp Unix.
+    dt: datetime | None = None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            dt = datetime.strptime(text, fmt)
+            break
+        except ValueError:
+            continue
+    if dt is None:
+        render_error(f"Fecha no reconocida: {text!r}. Formato: YYYY-MM-DD[ HH:MM[:SS]]")
+        return
+
+    if utc_mode:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone()  # interpreta como hora local
+    console.print(f"[info]Unix:[/info]   [bold cyan]{int(dt.timestamp())}[/bold cyan]")
+    console.print(f"[dim](interpretado como {'UTC' if utc_mode else 'hora local'})[/dim]")

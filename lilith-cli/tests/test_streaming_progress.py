@@ -33,6 +33,38 @@ async def _fake_stream(events):
         yield event
 
 
+@pytest.mark.parametrize("first_event", ["reasoning", "text", "tool_call"])
+@pytest.mark.asyncio
+async def test_spinner_stops_before_assistant_separator(fake_session, first_event):
+    """The first console print must happen after the spinner releases Rich Live."""
+    from lilith_cli.repl import _process_with_streaming
+
+    event = {"type": first_event}
+    if first_event == "tool_call":
+        event.update(name="read_file", arguments={})
+    else:
+        event["content"] = "respuesta"
+    events = [event, {"type": "done", "usage": {}}]
+    fake_session.process_message_stream = lambda text, cancel_event=None: _fake_stream(events)
+    order = []
+    spinner_status = MagicMock()
+
+    with patch(
+        "lilith_cli.repl.make_thinking_spinner",
+        return_value={"status": spinner_status},
+    ), patch(
+        "lilith_cli.repl.render_assistant_separator",
+        side_effect=lambda: order.append("separator"),
+    ), patch.object(
+        spinner_status,
+        "__exit__",
+        side_effect=lambda *args: order.append("spinner_exit"),
+    ):
+        await _process_with_streaming(fake_session, "hola")
+
+    assert order[:2] == ["spinner_exit", "separator"]
+
+
 @pytest.mark.asyncio
 async def test_process_with_streaming_tracks_tool_progress(fake_session, capsys):
     """The REPL handler tracks running/completed tools and renders a summary."""

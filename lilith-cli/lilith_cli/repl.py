@@ -1066,14 +1066,15 @@ async def _process_with_streaming(
                     if event_type == "reasoning":
                         chunk = event.get("content", "")
                         if chunk:
+                            # Stop spinner before printing anything; otherwise Rich
+                            # may leave its active Status frame in scrollback.
+                            if not first_token_received:
+                                first_token_received = True
+                                spinner_status.__exit__(None, None, None)
                             # Show assistant separator before first output.
                             if not _assistant_sep_shown:
                                 _assistant_sep_shown = True
                                 render_assistant_separator()
-                            # Stop spinner: the live panel takes over.
-                            if not first_token_received:
-                                first_token_received = True
-                                spinner_status.__exit__(None, None, None)
 
                             reasoning_text += chunk
                             in_reasoning = True
@@ -1088,14 +1089,15 @@ async def _process_with_streaming(
                     elif event_type == "text":
                         chunk = event.get("content", "")
                         if chunk:
+                            # Stop spinner before printing anything; otherwise Rich
+                            # may leave its active Status frame in scrollback.
+                            if not first_token_received:
+                                first_token_received = True
+                                spinner_status.__exit__(None, None, None)
                             # Show assistant separator before first output.
                             if not _assistant_sep_shown:
                                 _assistant_sep_shown = True
                                 render_assistant_separator()
-                            # Stop spinner on first real token.
-                            if not first_token_received:
-                                first_token_received = True
-                                spinner_status.__exit__(None, None, None)
 
                             # Close reasoning panel if transitioning to content.
                             if in_reasoning:
@@ -1112,12 +1114,12 @@ async def _process_with_streaming(
 
                     # ── Tool call start ───────────────────────────────────
                     elif event_type == "tool_call":
-                        if not _assistant_sep_shown:
-                            _assistant_sep_shown = True
-                            render_assistant_separator()
                         if not first_token_received:
                             first_token_received = True
                             spinner_status.__exit__(None, None, None)
+                        if not _assistant_sep_shown:
+                            _assistant_sep_shown = True
+                            render_assistant_separator()
 
                         # Close reasoning panel before showing tool progress.
                         if in_reasoning:

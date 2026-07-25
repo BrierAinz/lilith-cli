@@ -10,9 +10,12 @@ antes de la logica de despacho normal del CommandRegistry.
 from __future__ import annotations
 
 import argparse
+import ast
 import asyncio
 import json
 import logging
+import math
+import operator
 import os
 import random
 import re
@@ -6338,6 +6341,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
                     ("doctor", "Diagnóstico [--fix --deep --json]"),
                     ("deps", "Dependencias del proyecto [path|outdated|licenses|help]"),
                     ("now", "Timestamp actual"),
+                    ("calc", "Calculadora segura <expresión>"),
                     ("state", "Plan de orquestación persistente [show|clear]"),
                     ("costs", "Telemetría de delegaciones por preset [reset]"),
                     ("skills", "Catálogo de skills de delegación [show|save|delete <name>]"),
@@ -8573,3 +8577,138 @@ def _render_learn_table() -> None:
 
     console.print(table)
     console.print()
+
+
+# ── /calc command ───────────────────────────────────────────
+
+# Operadores binarios permitidos (suma, resta, multiplicación, división real,
+# división entera, módulo y potencia). Se evalúan con funciones explícitas en
+# lugar de ``eval`` para que el comando sea seguro ante entrada arbitraria.
+_CALC_BINOPS: dict[type, Any] = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+}
+
+# Operadores unarios permitidos (signo positivo/negativo).
+_CALC_UNARYOPS: dict[type, Any] = {
+    ast.UAdd: operator.pos,
+    ast.USub: operator.neg,
+}
+
+# Constantes matemáticas reconocidas por nombre.
+_CALC_CONSTANTS: dict[str, float] = {
+    "pi": math.pi,
+    "e": math.e,
+    "tau": math.tau,
+}
+
+# Funciones matemáticas permitidas (de un argumento, salvo las marcadas).
+_CALC_FUNCTIONS: dict[str, Any] = {
+    "abs": abs,
+    "round": round,
+    "sqrt": math.sqrt,
+    "floor": math.floor,
+    "ceil": math.ceil,
+    "sin": math.sin,
+    "cos": math.cos,
+    "tan": math.tan,
+    "log": math.log,
+    "log2": math.log2,
+    "log10": math.log10,
+    "exp": math.exp,
+    "min": min,
+    "max": max,
+}
+
+
+def _calc_eval_node(node: ast.AST) -> float:
+    """Evalúa recursivamente un nodo del AST de una expresión aritmética.
+
+    Solo acepta números, constantes conocidas, operadores binarios/unarios
+    permitidos y llamadas a funciones matemáticas de la lista blanca. Cualquier
+    otra construcción (nombres desconocidos, atributos, índices, etc.) lanza
+    ``ValueError`` para que el llamador muestre un error amigable.
+    """
+    if isinstance(node, ast.Expression):
+        return _calc_eval_node(node.body)
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
+            raise ValueError(f"literal no soportado: {node.value!r}")
+        return node.value
+    if isinstance(node, ast.Name):
+        if node.id in _CALC_CONSTANTS:
+            return _CALC_CONSTANTS[node.id]
+        raise ValueError(f"nombre desconocido: {node.id!r}")
+    if isinstance(node, ast.BinOp):
+        op_type = type(node.op)
+        if op_type not in _CALC_BINOPS:
+            raise ValueError(f"operador no soportado: {op_type.__name__}")
+        left = _calc_eval_node(node.left)
+        right = _calc_eval_node(node.right)
+        return _CALC_BINOPS[op_type](left, right)
+    if isinstance(node, ast.UnaryOp):
+        op_type = type(node.op)
+        if op_type not in _CALC_UNARYOPS:
+            raise ValueError(f"operador unario no soportado: {op_type.__name__}")
+        return _CALC_UNARYOPS[op_type](_calc_eval_node(node.operand))
+    if isinstance(node, ast.Call):
+        if not isinstance(node.func, ast.Name) or node.func.id not in _CALC_FUNCTIONS:
+            raise ValueError("función no permitida")
+        if node.keywords:
+            raise ValueError("argumentos por nombre no soportados")
+        func = _CALC_FUNCTIONS[node.func.id]
+        args = [_calc_eval_node(a) for a in node.args]
+        return func(*args)
+    raise ValueError(f"expresión no soportada: {type(node).__name__}")
+
+
+def calc_eval(expr: str) -> float:
+    """Evalúa una expresión aritmética de forma segura (sin ``eval``).
+
+    Acepta números, ``+ - * / // % **``, paréntesis, las constantes
+    ``pi``, ``e``, ``tau`` y funciones como ``sqrt``, ``sin``, ``log``,
+    ``min``, ``max``, ``abs`` y ``round``.
+
+    Raises:
+        ValueError: si la expresión es inválida o usa construcciones no
+            permitidas.
+        ArithmeticError: ante errores aritméticos (división por cero, etc.).
+    """
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError as exc:
+        raise ValueError(f"sintaxis inválida: {expr!r}") from exc
+    return _calc_eval_node(tree)
+
+
+async def run_calc_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+    """Ejecuta /calc para evaluar expresiones aritméticas de forma segura.
+
+    Examples:
+        /calc 2 + 3 * 4
+        /calc sqrt(2) ** 2
+        /calc (10 % 3) + pi
+    """
+    expr = args.strip()
+    if not expr:
+        render_error("Uso: /calc <expresión> — por ejemplo /calc 2 + 3 * 4")
+        return
+
+    try:
+        result = calc_eval(expr)
+    except (ValueError, ArithmeticError) as exc:
+        render_error(f"No pude evaluar la expresión: {exc}")
+        return
+
+    # Formateo amigable: los enteros se muestran sin parte decimal.
+    if isinstance(result, float) and result.is_integer() and abs(result) < 1e15:
+        rendered = str(int(result))
+    else:
+        rendered = str(result)
+
+    console.print(f"[tool.name]{expr}[/] = [bold cyan]{rendered}[/]")

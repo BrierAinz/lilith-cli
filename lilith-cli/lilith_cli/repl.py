@@ -37,6 +37,7 @@ from .extra_commands import (
     run_alias_command,
     run_base64_command,
     run_bench_command,
+    run_calc_command,
     run_capture_command,
     run_changelog_command,
     run_compact_command,
@@ -753,6 +754,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "bench":
                     await run_bench_command(session, cmd_args)
+                    continue
+                if cmd_name == "calc":
+                    await run_calc_command(session, cmd_args)
                     continue
                 if cmd_name == "pipeline":
                     await run_pipeline_command(session, cmd_args)

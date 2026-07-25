@@ -6361,6 +6361,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
         ],
         "Utilities": [
             ("hash", "MD5/SHA de texto/archivo"),
+            ("timer", "Cronómetro y cuenta atrás [start|stop|status|cancel|count N]"),
             ("uuid", "Generar UUIDs v1/v4/v7"),
             ("qr", "Generar códigos QR [--save ruta.png --last]"),
             ("json", "Validar/pretty-print JSON"),
@@ -8775,3 +8776,133 @@ async def run_epoch_command(session: AgentSession, args: str) -> None:  # noqa: 
         dt = dt.astimezone()  # interpreta como hora local
     console.print(f"[info]Unix:[/info]   [bold cyan]{int(dt.timestamp())}[/bold cyan]")
     console.print(f"[dim](interpretado como {'UTC' if utc_mode else 'hora local'})[/dim]")
+
+
+# ── /timer command ──────────────────────────────────────────────────────────
+#
+# Cronómetro y cuenta atrás en memoria (un solo timer activo a la vez).
+# Estado por proceso: se pierde al reiniciar el REPL, pero es suficiente para
+# medir bloques cortos de trabajo durante la sesión.
+
+
+def _format_elapsed(seconds: float) -> str:
+    """Formatea segundos como ``HH:MM:SS.mmm`` (o ``MM:SS.mmm`` si <1h)."""
+    if seconds < 0:
+        seconds = 0.0
+    total_ms = int(round(seconds * 1000))
+    hours, rem_ms = divmod(total_ms, 3_600_000)
+    minutes, rem_ms = divmod(rem_ms, 60_000)
+    secs, ms = divmod(rem_ms, 1000)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}.{ms:03d}"
+    return f"{minutes:02d}:{secs:02d}.{ms:03d}"
+
+
+# Estado módulo: {"started_at": float, "label": str | None} | None.
+# Asignación explícita (PEP 526 con `from __future__ import annotations`
+# mantiene el valor runtime, pero hacemos la asignación directa para que sea
+# inequívoco y ``global`` dentro de ``run_timer_command`` la encuentre sin
+# sorpresas).
+_TIMER_STATE = None  # type: dict[str, Any] | None
+
+
+async def run_timer_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+    """Cronómetro y cuenta atrás en memoria.
+
+    Examples:
+        /timer                  — muestra ayuda
+        /timer start [etiqueta] — arranca cronómetro (etiqueta opcional)
+        /timer stop             — detiene cronómetro y muestra tiempo total
+        /timer status           — muestra estado actual sin detener
+        /timer count <segundos> — cuenta atrás N segundos con progreso
+        /timer cancel           — descarta cronómetro activo sin mostrar total
+    """
+    global _TIMER_STATE
+
+    text = args.strip()
+    tokens = text.split()
+    sub = tokens[0].lower() if tokens else "help"
+
+    if sub == "start":
+        label = " ".join(tokens[1:]) if len(tokens) > 1 else None
+        _TIMER_STATE = {"started_at": time.monotonic(), "label": label}
+        msg = "Cronómetro iniciado."
+        if label:
+            msg += f"  [dim]Etiqueta: {label}[/dim]"
+        console.print(f"[success]{msg}[/success]")
+        console.print(f"[dim]Usa /timer stop para detenerlo y ver el total.[/dim]")
+        return
+
+    if sub == "stop":
+        if _TIMER_STATE is None:
+            render_error("No hay cronómetro activo. Usa /timer start primero.")
+            return
+        started_at = _TIMER_STATE["started_at"]
+        label = _TIMER_STATE.get("label")
+        elapsed = time.monotonic() - started_at
+        _TIMER_STATE = None
+        formatted = _format_elapsed(elapsed)
+        suffix = f"  [dim]({label})[/dim]" if label else ""
+        console.print(f"[info]Tiempo total:[/info]  [bold cyan]{formatted}[/bold cyan]{suffix}")
+        return
+
+    if sub == "status":
+        if _TIMER_STATE is None:
+            console.print("[dim]No hay cronómetro activo.[/dim]")
+            return
+        started_at = _TIMER_STATE["started_at"]
+        label = _TIMER_STATE.get("label")
+        elapsed = time.monotonic() - started_at
+        formatted = _format_elapsed(elapsed)
+        label_txt = f"  [dim]({label})[/dim]" if label else ""
+        console.print(f"[info]Cronómetro activo:[/info]  [bold cyan]{formatted}[/bold cyan]{label_txt}")
+        return
+
+    if sub == "cancel":
+        if _TIMER_STATE is None:
+            render_error("No hay cronómetro activo que cancelar.")
+            return
+        _TIMER_STATE = None
+        console.print("[dim]Cronómetro descartado.[/dim]")
+        return
+
+    if sub == "count":
+        if len(tokens) < 2:
+            render_error("Uso: /timer count <segundos>  (entero o decimal, ej. 90, 0.5)")
+            return
+        try:
+            seconds = float(tokens[1])
+        except ValueError:
+            render_error(f"Duración inválida: {tokens[1]!r}")
+            return
+        if seconds <= 0:
+            render_error("La duración debe ser > 0.")
+            return
+        # Cancelamos cualquier cronómetro activo antes de empezar la cuenta atrás.
+        _TIMER_STATE = None
+        console.print(f"[info]Cuenta atrás:[/info]  [bold cyan]{seconds:g}s[/bold cyan]  [dim](Ctrl+C para cancelar)[/dim]")
+        try:
+            # Bucle con pasos de 0.5s para mostrar progreso sin spam.
+            step = 0.5
+            remaining = seconds
+            while remaining > 0:
+                await asyncio.sleep(min(step, remaining))
+                remaining -= step
+                remaining = max(remaining, 0.0)
+                console.print(f"  [dim]{remaining:5.1f}s restantes[/dim]", end=chr(13))
+            console.print()
+            console.print("[success]⏰  ¡Tiempo cumplido![/success]")
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            console.print()
+            console.print("[dim]Cuenta atrás cancelada.[/dim]")
+        return
+
+    # Default: ayuda (incluye sub == "help" o cualquier entrada desconocida).
+    console.print("[bold cyan]/timer[/bold cyan] — cronómetro y cuenta atrás en memoria")
+    console.print("  [dim]Uso:[/dim]")
+    console.print("    /timer start [etiqueta]   [dim]# arrancar cronómetro[/dim]")
+    console.print("    /timer stop               [dim]# detener y mostrar total (mm:ss.mmm)[/dim]")
+    console.print("    /timer status             [dim]# ver tiempo parcial sin detener[/dim]")
+    console.print("    /timer cancel             [dim]# descartar cronómetro activo[/dim]")
+    console.print("    /timer count <segundos>   [dim]# cuenta atrás con progreso[/dim]")
+    console.print("  [dim]Sólo puede haber un cronómetro activo a la vez; el estado vive hasta que se detiene o se reinicia el REPL.[/dim]")

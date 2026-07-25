@@ -89,6 +89,7 @@ from .extra_commands import (
     run_secret_command,
     run_stream_command,
     run_tip_command,
+    run_timer_command,
     run_tokens_command,
     run_usage_command,
     run_uuid_command,
@@ -225,6 +226,7 @@ _SLASH_COMMANDS = [
     "/template",
     "/templates",
     "/tpl",
+    "/timer",
     "/auto",
     "/json-mode",
     "/metrics",
@@ -783,6 +785,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "tip":
                     await run_tip_command(session, cmd_args)
+                    continue
+                if cmd_name == "timer":
+                    await run_timer_command(session, cmd_args)
                     continue
                 if cmd_name == "voice":
                     await run_voice_command(session, cmd_args)

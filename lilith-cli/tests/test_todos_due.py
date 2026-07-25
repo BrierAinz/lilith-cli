@@ -67,3 +67,28 @@ async def test_todos_due_falls_back_when_storage_has_no_due_dates(fake_session, 
     assert "no admite fechas de vencimiento" in rendered
     assert "Revisar contrato" in rendered
     assert "2026-07-24" in rendered
+
+
+@pytest.mark.asyncio
+async def test_todos_due_fallback_hides_completed(fake_session, monkeypatch):
+    """El ramal legacy es el único que corre con el storage actual: no debe listar hechas."""
+    import lilith_cli.extra_commands as commands
+    from lilith_tools.base import ToolResult
+
+    data = {"todos": [
+        {"index": 1, "text": "Revisar contrato", "done": False},
+        {"index": 2, "text": "Ya entregado", "done": True},
+    ]}
+
+    class FakeList:
+        def execute(self):
+            return ToolResult(success=True, data=data)
+
+    monkeypatch.setattr(commands, "TodoListTool", FakeList)
+    prints = []
+    with patch.object(commands.console, "print", side_effect=lambda *args, **_kw: prints.append(args)):
+        await commands.run_todos_command(fake_session, "due")
+
+    rendered = _render(prints)
+    assert "Revisar contrato" in rendered
+    assert "Ya entregado" not in rendered

@@ -3846,6 +3846,69 @@ def _render_todos_table(todos: list) -> None:
 
     console.print(table)
     console.print()
+
+
+def _render_todos_due_table(todos: list) -> None:
+    """Render tasks due today or earlier, with a legacy-storage fallback."""
+    from rich.table import Table
+
+    today = datetime.now().astimezone().date()
+    has_due_dates = any(
+        isinstance(todo, dict) and (todo.get("due_date") or todo.get("due"))
+        for todo in todos
+    )
+
+    if has_due_dates:
+        visible = []
+        for todo in todos:
+            if not isinstance(todo, dict) or todo.get("done") is True:
+                continue
+            raw_due = todo.get("due_date") or todo.get("due")
+            if not raw_due:
+                continue
+            try:
+                due = datetime.fromisoformat(str(raw_due).replace("Z", "+00:00")).date()
+            except ValueError:
+                continue
+            if due <= today:
+                visible.append((todo, str(raw_due)[:10]))
+        empty_message = "No hay tareas vencidas ni con vencimiento hoy."
+        date_heading = "Vence"
+    else:
+        visible = [
+            (todo, str(todo.get("created_at", "—"))[:10])
+            for todo in todos
+            if isinstance(todo, dict) and todo.get("done") is not True
+        ]
+        empty_message = "No hay tareas para revisar."
+        date_heading = "Creada"
+        if visible:
+            console.print(
+                "[warning]El almacenamiento actual no admite fechas de vencimiento; "
+                "se muestran todas las tareas para revisión manual.[/]"
+            )
+
+    if not visible:
+        console.print(f"[dim]{empty_message}[/]")
+        return
+
+    table = Table(
+        title="[bold realm]᛭ Tareas por revisar[/]",
+        show_header=True,
+        header_style="bold cyan",
+        border_style="cyan",
+    )
+    table.add_column("#", justify="right", style="bold cyan")
+    table.add_column("Tarea")
+    table.add_column(date_heading, style="dim", no_wrap=True)
+    for fallback_index, (todo, date_text) in enumerate(visible, start=1):
+        index = todo.get("index", fallback_index)
+        text = todo.get("text", todo.get("content", str(todo)))
+        table.add_row(str(index), str(text), date_text or "—")
+    console.print(table)
+    console.print()
+
+
 async def run_json_mode_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
     """Ejecuta /json-mode para alternar la salida estructurada JSON del LLM.
 

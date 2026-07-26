@@ -59,3 +59,38 @@ async def test_theme_command_current_and_switch(capsys):
 
     # Restore default for subsequent tests.
     set_theme("norse")
+
+
+def test_set_theme_no_reemplaza_el_objeto_console():
+    """Media docena de módulos hacen ``from .render import console``.
+
+    Ese import copia la referencia, así que reasignar la global dejaba a todos
+    ellos escribiendo por la Console vieja: el tema no se aplicaba a la mayor
+    parte de la salida y, en los tests, el mock del console dejaba de recibir
+    los prints (contaminaba suites enteras). El objeto debe mutarse, no
+    reemplazarse.
+    """
+    from lilith_cli import extra_commands
+    from lilith_cli import render
+
+    original = render.console
+    try:
+        set_theme("cyberpunk")
+        assert render.console is original, "set_theme no debe reemplazar el console"
+        assert extra_commands.console is original, "los importadores quedarían desconectados"
+        assert get_theme().name == "cyberpunk"
+    finally:
+        set_theme("norse")
+
+
+def test_cambiar_de_tema_varias_veces_no_apila_indefinidamente():
+    """Cada cambio saca el tema anterior antes de apilar el nuevo."""
+    from lilith_cli import render
+
+    try:
+        for nombre in ("cyberpunk", "norse", "cyberpunk", "norse"):
+            set_theme(nombre)
+        # Un solo tema nuestro sobre el base.
+        assert len(render.console._theme_stack._entries) <= 2
+    finally:
+        set_theme("norse")

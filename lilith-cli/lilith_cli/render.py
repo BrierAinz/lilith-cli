@@ -307,6 +307,8 @@ THEMES: dict[str, CLITheme] = {
 # ── Active theme management ────────────────────────────────────────
 
 _active_theme_name: str = "norse"
+# Si ya apilamos un tema sobre el de base (ver set_theme).
+_theme_pushed: bool = False
 
 
 def get_theme() -> CLITheme:
@@ -318,14 +320,24 @@ def set_theme(name: str) -> CLITheme:
     """Switch the active theme by name. Returns the new theme.
 
     Raises ``KeyError`` if the theme name is not found.
+
+    Se MUTA el ``console`` existente en vez de reemplazarlo. Media docena de
+    modulos hacen ``from .render import console``, que copia la referencia al
+    importar: reasignar la global dejaba a todos ellos escribiendo por la
+    Console vieja, asi que el tema nuevo no se aplicaba a la mayor parte de la
+    salida (y en los tests el mock del console dejaba de recibir los prints).
     """
-    global _active_theme_name, console
+    global _active_theme_name, _theme_pushed
     if name not in THEMES:
         raise KeyError(name)
-    _active_theme_name = name
     theme_obj = THEMES[name]
-    # Recreate the global Console with the new Rich Theme.
-    console = Console(theme=Theme(theme_obj.theme))
+    if _theme_pushed:
+        # Solo hay un tema nuestro en la pila: se saca antes de apilar el
+        # siguiente para que no crezca sin limite al cambiar varias veces.
+        console.pop_theme()
+    console.push_theme(Theme(theme_obj.theme))
+    _theme_pushed = True
+    _active_theme_name = name
     return theme_obj
 
 

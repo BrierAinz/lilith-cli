@@ -6386,7 +6386,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("plan", "Plan numerado de tareas"),
             ("init", "Inicializar proyecto"),
             ("file", "Operaciones de archivo"),
-            ("macro", "Macros [record|stop|play|list|show|edit|rename|delete]"),
+            ("macro", "Macros [record|stop|play|list|show|edit|copy|rename|delete]"),
             ("template", "Plantillas de prompts"),
             ("lint", "Linting"),
             ("lint-fix", "Auto-fix lints con ruff/black"),

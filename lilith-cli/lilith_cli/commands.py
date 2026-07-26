@@ -3039,6 +3039,7 @@ class MacroCommand(BaseCommand):
         /macro list           — list saved macros
         /macro show <name>    — display the recorded commands
         /macro edit <name>    — open the macro in $EDITOR for inline editing
+        /macro copy <source> <copy> — duplicate a saved macro
         /macro rename <old> <new> — rename a saved macro
         /macro delete <name>  — delete a macro
     """
@@ -3075,6 +3076,9 @@ class MacroCommand(BaseCommand):
         if subcmd == "edit":
             await self._edit(rest)
             return
+        if subcmd in ("copy", "cp"):
+            await self._copy(rest)
+            return
         if subcmd in ("rename", "mv"):
             await self._rename(rest)
             return
@@ -3093,6 +3097,7 @@ class MacroCommand(BaseCommand):
         console.print("  [bold cyan]/macro list[/]           — Listar macros guardadas")
         console.print("  [bold cyan]/macro show <nombre>[/]  — Ver comandos de la macro")
         console.print("  [bold cyan]/macro edit <nombre>[/]  — Editar en \$EDITOR")
+        console.print("  [bold cyan]/macro copy <origen> <copia>[/] — Copiar una macro")
         console.print("  [bold cyan]/macro rename <actual> <nuevo>[/] — Renombrar una macro")
         console.print("  [bold cyan]/macro delete <nombre>[/] — Eliminar una macro")
         console.print()
@@ -3215,6 +3220,32 @@ class MacroCommand(BaseCommand):
         del macros[name]
         _save_macros(macros)
         console.print(f"[success]✓ Macro '[model]{name}[/]' eliminada.[/]")
+
+    async def _copy(self, args: str) -> None:
+        parts = args.split(maxsplit=1)
+        if len(parts) != 2:
+            render_error("Uso: /macro copy <origen> <copia>")
+            return
+
+        source, destination = parts
+        if "/" in destination or " " in destination:
+            render_error("El nombre de la macro no puede contener '/' ni espacios.")
+            return
+
+        macros = _load_macros()
+        if source not in macros:
+            render_error(f"Macro no encontrada: [model]{source}[/]")
+            return
+        if destination in macros:
+            render_error(f"La macro '[model]{destination}[/]' ya existe.")
+            return
+
+        macros[destination] = list(macros[source])
+        _save_macros(macros)
+        console.print(
+            f"[success]✓ Macro copiada:[/] [model]{source}[/] → "
+            f"[bold cyan]{destination}[/]"
+        )
 
     async def _rename(self, args: str) -> None:
         parts = args.split(maxsplit=1)

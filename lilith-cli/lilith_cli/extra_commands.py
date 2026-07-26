@@ -5551,55 +5551,111 @@ async def run_whereami_command(session: AgentSession, args: str) -> None:  # noq
 
 
 async def run_lint_fix_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
-    """Auto-fix lint issues with ruff or black (/lint-fix [path])."""
+    """Audita lint sin modificar archivos (/lint-fix <ruta>).
+
+    El nombre histórico se conserva para no romper scripts, pero este comando
+    es deliberadamente de solo lectura: nunca ejecuta ``--fix`` ni un formatter
+    que escriba archivos. Requiere una ruta explícita, relativa al directorio
+    actual y existente, para evitar auditar por accidente un árbol completo.
+    """
+    import shlex
     import shutil
     import subprocess
 
-    text = args.strip()
-    target = text or "."
+    text = (args or "").strip()
+    if not text:
+        render_error("Uso: /lint-fix <ruta-relativa> — modo reporte; no modifica archivos")
+        return
 
-    # Try ruff first (faster, more fixes)
+    try:
+        tokens = shlex.split(text)
+    except ValueError as exc:
+        render_error(f"Argumentos inválidos: {exc}")
+        return
+
+    if len(tokens) != 1:
+        render_error("Uso: /lint-fix <ruta-relativa> — escribí una sola ruta explícita")
+        return
+
+    target = tokens[0]
+    candidate = Path(target).expanduser()
+    if candidate.is_absolute() or target in (".", "./"):
+        render_error("La ruta debe ser explícita y relativa; no se acepta '.' ni una ruta absoluta")
+        return
+
+    try:
+        cwd = Path.cwd().resolve()
+        resolved = candidate.resolve()
+        resolved.relative_to(cwd)
+    except (OSError, RuntimeError, ValueError):
+        render_error("La ruta debe permanecer dentro del repositorio de trabajo")
+        return
+
+    if not resolved.exists():
+        render_error(f"Ruta no encontrada: {target}")
+        return
+
+    # Ruff is preferred because ``check`` is an audit operation. Do not add
+    # ``--fix`` here: library re-exports and public APIs must never be edited
+    # implicitly by a slash command.
     ruff = shutil.which("ruff")
     if ruff:
-        console.print(f"[info]Running:[/info] [bold cyan]ruff check --fix {target}[/bold cyan]")
+        command = [ruff, "check", target]
+        console.print(
+            "[info]Auditoría:[/info] [bold cyan]"
+            + " ".join(command)
+            + "[/bold cyan] [dim](solo reporte; sin cambios)[/dim]"
+        )
         try:
             proc = subprocess.run(
-                [ruff, "check", "--fix", target],
-                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+                command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=60,
             )
-            if proc.stdout:
-                console.print(proc.stdout)
-            if proc.stderr:
-                console.print(f"[dim]{proc.stderr}[/dim]")
-            if proc.returncode == 0:
-                console.print("[success]✓ ruff: all issues fixed[/success]")
-            else:
-                console.print(f"[info]ruff exit {proc.returncode} (some issues unfixable)[/info]")
         except subprocess.TimeoutExpired:
-            render_error("ruff timed out after 60s")
+            render_error("ruff agotó el tiempo después de 60s")
+            return
+        if proc.stdout:
+            console.print(proc.stdout, markup=False)
+        if proc.stderr:
+            console.print(proc.stderr, markup=False)
+        label = "sin problemas" if proc.returncode == 0 else f"exit {proc.returncode}"
+        console.print(f"[success]✓ ruff: reporte completado ({label}); no se modificaron archivos[/success]")
         return
 
-    # Fallback to black
+    # Black must use --check; invoking it bare would rewrite files.
     black = shutil.which("black")
     if black:
-        console.print(f"[info]Running:[/info] [bold cyan]black {target}[/bold cyan]")
+        command = [black, "--check", target]
+        console.print(
+            "[info]Auditoría:[/info] [bold cyan]"
+            + " ".join(command)
+            + "[/bold cyan] [dim](solo reporte; sin cambios)[/dim]"
+        )
         try:
             proc = subprocess.run(
-                [black, target],
-                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+                command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=60,
             )
-            if proc.stdout:
-                console.print(proc.stdout)
-            if proc.returncode == 0:
-                console.print("[success]✓ black: all files reformatted[/success]")
-            else:
-                render_error(f"black exited with code {proc.returncode}")
         except subprocess.TimeoutExpired:
-            render_error("black timed out after 60s")
+            render_error("black agotó el tiempo después de 60s")
+            return
+        if proc.stdout:
+            console.print(proc.stdout, markup=False)
+        if proc.stderr:
+            console.print(proc.stderr, markup=False)
+        label = "sin problemas" if proc.returncode == 0 else f"exit {proc.returncode}"
+        console.print(f"[success]✓ black: reporte completado ({label}); no se modificaron archivos[/success]")
         return
 
-    # Neither available
-    render_error("Neither ruff nor black is installed. Install with: pip install ruff")
+    render_error("Ni ruff ni black están instalados; la auditoría no ejecutó ningún cambio")
 
 from .doctor import apply_fixes, run_diagnostics
 from lilith_tools.env import EnvGetTool, EnvListTool, SysInfoTool

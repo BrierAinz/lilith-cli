@@ -1150,12 +1150,25 @@ async def run_review_command(session: AgentSession, args: str) -> None:  # noqa:
         /review
         /review --files
         /review --staged
+        /review --agent [--staged] [nota]
+        /review --agent [status|result|cancel]
     """
+    try:
+        tokens = shlex.split(args, posix=False)
+    except ValueError as exc:
+        render_error(f"Argumentos inválidos: {exc}")
+        return
+    if "--agent" in tokens:
+        tokens.remove("--agent")
+        await _run_review_agent_command(session, tokens)
+        return
+
     try:
         from lilith_tools.git_tools import ReviewPullRequestTool as _ReviewPT
         result = _ReviewPT().execute(args=args)
     except ImportError:
         from lilith_tools.git_tools import GitOperationTool
+
         # Map the documented /review flags onto allowed git operations.
         sub = args.strip().lstrip("-") or "diff"
         op, op_args = {
@@ -1165,6 +1178,149 @@ async def run_review_command(session: AgentSession, args: str) -> None:  # noqa:
         }.get(sub, (sub, ""))
         result = GitOperationTool().execute(op=op, args=op_args)
     _print_tool_result(result)
+
+
+async def _run_review_agent_task(
+    session: AgentSession,
+    *,
+    diff_text: str,
+    staged: bool,
+    note: str,
+) -> None:
+    """Ejecuta una revisión aislada sin agregar mensajes al historial del chat."""
+    state = getattr(session, "_review_agent_result", None)
+    if not isinstance(state, dict):
+        state = {}
+        session._review_agent_result = state
+
+    scope = "cambios staged" if staged else "cambios sin commit"
+    clipped_diff = diff_text[:50_000]
+    omitted = len(diff_text) - len(clipped_diff)
+    truncated = f"\n\n[Diff truncado: {omitted} caracteres omitidos.]" if omitted else ""
+    note_block = f"\nNota del usuario: {note}" if note else ""
+    prompt = (
+        "Revisá el siguiente diff como revisor senior. No tenés herramientas y no debés "
+        "modificar archivos. Priorizá bugs, regresiones, vulnerabilidades, condiciones de "
+        "carrera y tests faltantes; evitá comentarios cosméticos. Para cada hallazgo indicá "
+        "severidad, archivo y línea cuando sea posible, y una corrección concreta. Si no hay "
+        "problemas sustanciales, decilo explícitamente.\n"
+        f"Alcance: {scope}.{note_block}\n\n```diff\n{clipped_diff}\n```{truncated}"
+    )
+
+    try:
+        from lilith_tools.delegate import DelegateSubagentTool
+
+        result = await asyncio.to_thread(
+            DelegateSubagentTool().execute,
+            preset="investigador-minimax",
+            prompt=prompt,
+            max_tokens=3000,
+        )
+        if result.success:
+            data = result.data if isinstance(result.data, dict) else {}
+            content = data.get("content") or data.get("raw_content") or result.data or ""
+            state.update(status="done", content=str(content), error="")
+        else:
+            state.update(
+                status="error",
+                content="",
+                error=result.error or "La revisión del sub-agente falló",
+            )
+    except asyncio.CancelledError:
+        state.update(status="cancelled", content="", error="")
+        raise
+    except Exception as exc:  # pragma: no cover - defensa ante providers externos
+        state.update(status="error", content="", error=f"{type(exc).__name__}: {exc}")
+
+
+async def _run_review_agent_command(session: AgentSession, tokens: list[str]) -> None:
+    """Inicia, consulta o cancela una revisión de código en segundo plano."""
+    action = tokens[0].lower() if len(tokens) == 1 else ""
+    task = getattr(session, "_review_agent_task", None)
+    state = getattr(session, "_review_agent_result", None)
+    if not isinstance(state, dict):
+        state = {}
+
+    if action in {"status", "result"}:
+        status = str(state.get("status") or ("running" if task and not task.done() else "none"))
+        if action == "status":
+            labels = {
+                "running": "en curso",
+                "done": "completada",
+                "error": "fallida",
+                "cancelled": "cancelada",
+                "none": "sin revisión",
+            }
+            console.print(f"[info]Revisión de sub-agente:[/] {labels.get(status, status)}")
+            return
+        if status == "running":
+            console.print("[dim]La revisión sigue en curso. Usá `/review --agent status`.[/dim]")
+            return
+        if status == "error":
+            render_error(str(state.get("error") or "La revisión del sub-agente falló"))
+            return
+        if status != "done":
+            console.print("[dim]No hay una revisión terminada para mostrar.[/dim]")
+            return
+        console.print("\n[bold realm]᛭ Revisión del sub-agente[/]")
+        console.print(str(state.get("content") or "(sin contenido)"), markup=False)
+        console.print()
+        return
+
+    if action == "cancel":
+        if task is None or task.done():
+            console.print("[dim]No hay una revisión activa para cancelar.[/dim]")
+            return
+        task.cancel()
+        state.update(status="cancelled", content="", error="")
+        session._review_agent_result = state
+        console.print("[success]✓ Revisión cancelada.[/]")
+        return
+
+    if task is not None and not task.done():
+        console.print("[warning]Ya hay una revisión en curso. Usá `/review --agent status`.[/]")
+        return
+
+    staged = "--staged" in tokens
+    if staged:
+        tokens.remove("--staged")
+    unknown_flags = [token for token in tokens if token.startswith("--")]
+    if unknown_flags:
+        render_error(f"Opción desconocida: {unknown_flags[0]}")
+        return
+    note = " ".join(tokens).strip()
+
+    diff_result = GitOperationTool().execute(
+        op="diff",
+        args="--cached" if staged else "",
+        workdir=str(Path.cwd()),
+    )
+    if not diff_result.success:
+        render_error(diff_result.error or "No se pudo obtener el diff para revisar")
+        return
+    data = diff_result.data if isinstance(diff_result.data, dict) else {}
+    diff_text = str(data.get("stdout") or "")
+    if not diff_text.strip():
+        scope = "staged" if staged else "sin commit"
+        console.print(f"[dim]No hay cambios {scope} para revisar.[/dim]")
+        return
+
+    state = {
+        "status": "running",
+        "content": "",
+        "error": "",
+        "staged": staged,
+        "started_at": datetime.now(UTC).isoformat(),
+    }
+    session._review_agent_result = state
+    session._review_agent_task = asyncio.create_task(
+        _run_review_agent_task(session, diff_text=diff_text, staged=staged, note=note),
+        name="lilith-review-agent",
+    )
+    console.print(
+        "[success]✓ Revisión iniciada en segundo plano con investigador-minimax.[/] "
+        "[dim]Consultá `/review --agent result`.[/dim]"
+    )
 
 
 async def run_template_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
@@ -6821,7 +6977,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("agent", "Subagent asíncrono"),
             ("auto", "Modo autónomo"),
             ("todos", "Lista de TODOs persistente"),
-            ("review", "Pre-commit review con quality gates"),
+            ("review", "Revisión local o sub-agente en segundo plano [--agent status|result]"),
             ("stream", "Estado del streaming de tokens"),
             ("json-mode", "Toggle modo JSON forzado"),
             ("watch", "Re-run de un comando al cambiar archivos"),

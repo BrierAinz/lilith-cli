@@ -3037,6 +3037,7 @@ class MacroCommand(BaseCommand):
         /macro stop           — stop recording
         /macro play <name>    — execute the recorded commands in order
         /macro list           — list saved macros
+        /macro stats          — show aggregate macro statistics
         /macro show <name>    — display the recorded commands
         /macro edit <name>    — open the macro in $EDITOR for inline editing
         /macro copy <source> <copy> — duplicate a saved macro
@@ -3073,6 +3074,9 @@ class MacroCommand(BaseCommand):
         if subcmd in ("list", "ls"):
             await self._list()
             return
+        if subcmd in ("stats", "statistics"):
+            await self._stats()
+            return
         if subcmd in ("show", "view", "cat"):
             await self._show(rest)
             return
@@ -3107,6 +3111,7 @@ class MacroCommand(BaseCommand):
         console.print("  [bold cyan]/macro stop[/]           — Finalizar la grabación")
         console.print("  [bold cyan]/macro play <nombre>[/]  — Reproducir la macro")
         console.print("  [bold cyan]/macro list[/]           — Listar macros guardadas")
+        console.print("  [bold cyan]/macro stats[/]          — Ver estadísticas agregadas")
         console.print("  [bold cyan]/macro show <nombre>[/]  — Ver comandos de la macro")
         console.print("  [bold cyan]/macro edit <nombre>[/]  — Editar en \$EDITOR")
         console.print("  [bold cyan]/macro copy <origen> <copia>[/] — Copiar una macro")
@@ -3221,6 +3226,37 @@ class MacroCommand(BaseCommand):
         table.add_column("Creada", style="dim")
         for name, commands in sorted(macros.items()):
             table.add_row(name, str(len(commands)), "—")
+        console.print()
+        console.print(table)
+        console.print()
+
+    async def _stats(self) -> None:
+        """Show aggregate stats about the saved macros (read-only)."""
+        macros = _load_macros()
+        if not macros:
+            console.print("[dim]No hay macros guardadas.[/]")
+            return
+
+        total_macros = len(macros)
+        total_commands = sum(len(cmds) for cmds in macros.values())
+        average = total_commands / total_macros if total_macros else 0.0
+        longest_name, longest_cmds = max(
+            macros.items(), key=lambda kv: len(kv[1])
+        )
+
+        table = Table(
+            title="[bold realm]᛭ Macros guardadas — resumen[/]",
+            show_header=False,
+        )
+        table.add_column("Métrica", style="cyan", justify="left")
+        table.add_column("Valor", justify="right")
+        table.add_row("Macros guardadas", str(total_macros))
+        table.add_row("Comandos totales", str(total_commands))
+        table.add_row("Promedio por macro", f"{average:.2f}")
+        table.add_row(
+            "Más larga",
+            f"{longest_name} ({len(longest_cmds)} comando(s))",
+        )
         console.print()
         console.print(table)
         console.print()

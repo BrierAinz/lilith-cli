@@ -364,7 +364,7 @@ def _print_watch_events(result, *, limit: int = 20) -> None:
 
 
 async def run_macro_command(session: AgentSession, args: str) -> None:
-    """Ejecuta /macro [record|stop|play|list|show|edit|copy|rename|import|validate|delete].
+    """Ejecuta /macro [record|stop|play|list|stats|show|edit|copy|rename|import|validate|delete].
 
     Las macros se guardan en ~/.yggdrasil/macros.json como secuencias de
     comandos de barra. El REPL se encarga de almacenar los comandos mientras
@@ -6386,7 +6386,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("plan", "Plan numerado de tareas"),
             ("init", "Inicializar proyecto"),
             ("file", "Operaciones de archivo"),
-            ("macro", "Macros [record|stop|play|list|show|edit|copy|rename|import|export|validate|delete]"),
+            ("macro", "Macros [record|stop|play|list|stats|show|edit|copy|rename|import|export|validate|delete]"),
             ("template", "Plantillas de prompts"),
             ("lint", "Linting"),
             ("lint-fix", "Auto-fix lints con ruff/black"),

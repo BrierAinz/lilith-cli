@@ -6421,6 +6421,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
                 ],
         "Files & Git": [
             ("cd", "Mostrar/cambiar directorio de trabajo [ruta]"),
+            ("pwd", "Mostrar el directorio de trabajo actual"),
             ("git", "Operaciones git"),
             ("diff", "Diff (legacy)"),
             ("diff-config", "Diff de configuración"),
@@ -8789,6 +8790,15 @@ async def run_calc_command(session: AgentSession, args: str) -> None:  # noqa: A
 
 
 # ── /cd command ───────────────────────────────────────────────────────────────
+
+
+async def run_pwd_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+    """Muestra el directorio de trabajo actual sin modificarlo."""
+    if args.strip():
+        render_error("Uso: /pwd")
+        return
+
+    console.print(f"[info]Directorio actual:[/] [bold cyan]{Path.cwd()}[/]")
 
 
 async def run_cd_command(session: AgentSession, args: str) -> None:  # noqa: ARG001

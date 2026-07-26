@@ -78,6 +78,7 @@ from .extra_commands import (
     run_profile_command,
     run_qr_command,
     run_random_command,
+    run_pwd_command,
     run_test_command,
     run_recap_command,
     run_redact_command,
@@ -143,6 +144,7 @@ _SLASH_COMMANDS = [
     "/skills",
     "/clear",
     "/cd",
+    "/pwd",
     "/status",
     "/env",
     "/epoch",
@@ -768,6 +770,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "cd":
                     await run_cd_command(session, cmd_args)
+                    continue
+                if cmd_name == "pwd":
+                    await run_pwd_command(session, cmd_args)
                     continue
                 if cmd_name == "pipeline":
                     await run_pipeline_command(session, cmd_args)

@@ -39,6 +39,7 @@ from .extra_commands import (
     run_bench_command,
     run_calc_command,
     run_capture_command,
+    run_cd_command,
     run_changelog_command,
     run_compact_command,
     run_clear_screen_command,
@@ -141,6 +142,7 @@ _SLASH_COMMANDS = [
     "/state",
     "/skills",
     "/clear",
+    "/cd",
     "/status",
     "/env",
     "/epoch",
@@ -763,6 +765,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "calc":
                     await run_calc_command(session, cmd_args)
+                    continue
+                if cmd_name == "cd":
+                    await run_cd_command(session, cmd_args)
                     continue
                 if cmd_name == "pipeline":
                     await run_pipeline_command(session, cmd_args)

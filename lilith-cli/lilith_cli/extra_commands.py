@@ -6420,6 +6420,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
                     ("learn", "Minar post-mortems de delegación y sugerir skills [save N]"),
                 ],
         "Files & Git": [
+            ("cd", "Mostrar/cambiar directorio de trabajo [ruta]"),
             ("git", "Operaciones git"),
             ("diff", "Diff (legacy)"),
             ("diff-config", "Diff de configuración"),
@@ -8785,6 +8786,43 @@ async def run_calc_command(session: AgentSession, args: str) -> None:  # noqa: A
         rendered = str(result)
 
     console.print(f"[tool.name]{expr}[/] = [bold cyan]{rendered}[/]")
+
+
+# ── /cd command ───────────────────────────────────────────────────────────────
+
+
+async def run_cd_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+    """Muestra o cambia el directorio de trabajo de la sesión.
+
+    Examples:
+        /cd              — mostrar el directorio actual
+        /cd <ruta>       — cambiar al directorio indicado
+        /cd ~            — ir al directorio personal
+    """
+    raw_path = args.strip()
+    if not raw_path:
+        console.print(f"[info]Directorio actual:[/] [bold cyan]{Path.cwd()}[/]")
+        return
+
+    target = Path(raw_path).expanduser()
+    if not target.is_absolute():
+        target = Path.cwd() / target
+    target = target.resolve()
+
+    if not target.exists():
+        render_error(f"El directorio no existe: {target}")
+        return
+    if not target.is_dir():
+        render_error(f"La ruta no es un directorio: {target}")
+        return
+
+    try:
+        os.chdir(target)
+    except OSError as exc:
+        render_error(f"No pude cambiar de directorio: {exc}")
+        return
+
+    console.print(f"[success]✓ Directorio actual:[/] [bold cyan]{Path.cwd()}[/]")
 
 
 # ── /epoch command ────────────────────────────────────────────────────────────

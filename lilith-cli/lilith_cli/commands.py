@@ -3042,6 +3042,7 @@ class MacroCommand(BaseCommand):
         /macro copy <source> <copy> — duplicate a saved macro
         /macro rename <old> <new> — rename a saved macro
         /macro import <file> [name] — import commands from a text file
+        /macro export <name> [file] — export commands to a text file
         /macro validate <name> — check that every recorded command exists
         /macro delete <name>  — delete a macro
     """
@@ -3087,6 +3088,9 @@ class MacroCommand(BaseCommand):
         if subcmd == "import":
             await self._import(rest)
             return
+        if subcmd == "export":
+            await self._export(rest)
+            return
         if subcmd in ("delete", "rm", "remove"):
             await self._delete(rest)
             return
@@ -3109,6 +3113,8 @@ class MacroCommand(BaseCommand):
         console.print("  [bold cyan]/macro rename <actual> <nuevo>[/] — Renombrar una macro")
         console.print("  [bold cyan]/macro import <archivo> [nombre][/]")
         console.print("                           — Importar comandos desde un archivo")
+        console.print("  [bold cyan]/macro export <nombre> [archivo][/]")
+        console.print("                           — Exportar comandos a un archivo")
         console.print("  [bold cyan]/macro validate <nombre>[/] — Verificar que los comandos existan")
         console.print("  [bold cyan]/macro delete <nombre>[/] — Eliminar una macro")
         console.print()
@@ -3458,6 +3464,57 @@ class MacroCommand(BaseCommand):
                 tmp_path.unlink()
             except OSError:
                 pass
+
+
+    async def _export(self, args: str) -> None:
+        """Export a saved macro as one command per line.
+
+        The destination defaults to ``<macro>.txt`` in the current working
+        directory. Existing files are never overwritten.
+        """
+        import os
+        import shlex
+
+        try:
+            parts = shlex.split(args, posix=os.name != "nt")
+        except ValueError as exc:
+            render_error(f"Argumentos inválidos: {exc}")
+            return
+
+        # On Windows, posix=False preserves quote characters around paths.
+        parts = [
+            part[1:-1]
+            if len(part) >= 2 and part[0] == part[-1] and part[0] in ("'", '"')
+            else part
+            for part in parts
+        ]
+        if not parts or len(parts) > 2:
+            render_error("Uso: /macro export <nombre> [archivo]")
+            return
+
+        name = parts[0].strip()
+        macros = _load_macros()
+        if name not in macros:
+            render_error(f"Macro no encontrada: [model]{name}[/]")
+            return
+
+        destination = Path(parts[1]).expanduser() if len(parts) == 2 else Path(f"{name}.txt")
+        if destination.exists():
+            render_error(f"El archivo de destino ya existe: {destination}")
+            return
+
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            content = "\n".join(str(command).strip() for command in macros[name]) + "\n"
+            destination.write_text(content, encoding="utf-8")
+        except OSError as exc:
+            render_error(f"No se pudo escribir el archivo {destination}: {exc}")
+            return
+
+        console.print(
+            f"[success]✓ Macro exportada:[/] [bold cyan]{name}[/] "
+            f"({len(macros[name])} comando(s) a {destination})"
+        )
 
 
     async def _validate(self, name: str) -> None:

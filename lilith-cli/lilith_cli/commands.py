@@ -3041,6 +3041,7 @@ class MacroCommand(BaseCommand):
         /macro edit <name>    — open the macro in $EDITOR for inline editing
         /macro copy <source> <copy> — duplicate a saved macro
         /macro rename <old> <new> — rename a saved macro
+        /macro validate <name> — check that every recorded command exists
         /macro delete <name>  — delete a macro
     """
 
@@ -3085,6 +3086,9 @@ class MacroCommand(BaseCommand):
         if subcmd in ("delete", "rm", "remove"):
             await self._delete(rest)
             return
+        if subcmd in ("validate", "check"):
+            await self._validate(rest)
+            return
 
         render_error(f"Subcomando desconocido: /macro {subcmd}")
         await self._show_usage()
@@ -3099,6 +3103,7 @@ class MacroCommand(BaseCommand):
         console.print("  [bold cyan]/macro edit <nombre>[/]  — Editar en \$EDITOR")
         console.print("  [bold cyan]/macro copy <origen> <copia>[/] — Copiar una macro")
         console.print("  [bold cyan]/macro rename <actual> <nuevo>[/] — Renombrar una macro")
+        console.print("  [bold cyan]/macro validate <nombre>[/] — Verificar que los comandos existan")
         console.print("  [bold cyan]/macro delete <nombre>[/] — Eliminar una macro")
         console.print()
 
@@ -3379,6 +3384,81 @@ class MacroCommand(BaseCommand):
                 tmp_path.unlink()
             except OSError:
                 pass
+
+
+    async def _validate(self, name: str) -> None:
+        """/macro validate <name> walks the macro's recorded commands and
+        verifies each one is a known slash command (built-in or alias).
+        Reports a per-line breakdown so the user can clean up recordings
+        that include typos or commands that have since been renamed.
+
+        This is a read-only operation: it never rewrites ``macros.json``.
+        Comments (lines starting with ``#``) and blank lines are ignored,
+        matching the conventions used by ``/macro edit``.
+        """
+        name = name.strip()
+        if not name:
+            render_error("Uso: /macro validate <nombre>")
+            return
+        macros = _load_macros()
+        if name not in macros:
+            render_error(f"Macro no encontrada: [model]{name}[/]")
+            return
+
+        registry = CommandRegistry(self.session)
+        registry.discover()
+        valid_names = set(registry._commands.keys())
+        for alias, target in registry._aliases.items():
+            valid_names.add(alias)
+            valid_names.add(target)
+
+        valid_lines: list[tuple[int, str]] = []
+        invalid_lines: list[tuple[int, str, str]] = []
+        skipped = 0
+        for line_no, raw in enumerate(macros[name], start=1):
+            if not isinstance(raw, str):
+                invalid_lines.append(
+                    (line_no, str(raw), "la línea no es texto")
+                )
+                continue
+            stripped = raw.strip()
+            if not stripped or stripped.startswith("#"):
+                skipped += 1
+                continue
+            if not stripped.startswith("/"):
+                invalid_lines.append(
+                    (line_no, stripped, "falta el '/' inicial")
+                )
+                continue
+            token = stripped[1:].split(maxsplit=1)[0].lower()
+            if token in valid_names:
+                valid_lines.append((line_no, stripped))
+            else:
+                invalid_lines.append(
+                    (line_no, stripped, "comando desconocido")
+                )
+
+        if not invalid_lines:
+            console.print(
+                f"[success]✓ Macro '[model]{name}[/]' es válida:[/] "
+                f"{len(valid_lines)} comando(s) reconocido(s)"
+                + (f" ({skipped} línea(s) ignorada(s))" if skipped else "")
+            )
+            return
+
+        console.print(
+            f"[warning]Macro '[model]{name}[/]' tiene "
+            f"{len(invalid_lines)} línea(s) inválida(s):[/]"
+        )
+        for line_no, raw, reason in invalid_lines:
+            console.print(
+                f"  [error]línea {line_no}[/] — {raw!r}  [dim]({reason})[/]"
+            )
+        if valid_lines:
+            console.print(
+                f"[dim]{len(valid_lines)} comando(s) OK, "
+                f"{skipped} línea(s) ignorada(s).[/]"
+            )
 
 
 class FeedbackCommand(BaseCommand):

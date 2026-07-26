@@ -9296,3 +9296,115 @@ async def run_pr_command(session: AgentSession, args: str) -> None:  # noqa: ARG
         return
     pr_url = gh.stdout.strip().splitlines()[-1] if gh.stdout.strip() else compare
     console.print(f"[success]✓ PR abierto:[/success] [link={pr_url}]{pr_url}[/link]")
+
+
+def _quote_usage() -> str:
+    """Devuelve la ayuda de uso de /quote en español."""
+    return (
+        "Uso: /quote <last|user|N>\n"
+        "  /quote          — cita el último mensaje del asistente.\n"
+        "  /quote last     — cita el último mensaje del asistente.\n"
+        "  /quote user     — cita el último mensaje del usuario.\n"
+        "  /quote N        — cita el N-ésimo mensaje más reciente (1 = último).\n"
+        "  /quote help     — muestra esta ayuda."
+    )
+
+
+def _extract_text_from_message(message: dict[str, Any]) -> str:
+    """Extrae únicamente el texto visible de un mensaje del historial."""
+    content = message.get("content") if "content" in message else message.get("text")
+    if content is None:
+        return ""
+    if isinstance(content, list):
+        text_blocks: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                text_blocks.append(block)
+            elif isinstance(block, dict) and block.get("type") == "text":
+                text = block.get("text")
+                if text is not None:
+                    text_blocks.append(str(text))
+        return "\n".join(text_blocks)
+    if content == "":
+        return ""
+    return str(content)
+
+
+def _resolve_quote_target(
+    session: AgentSession,
+    target: str,
+) -> tuple[dict[str, Any] | None, int | None]:
+    """Resuelve el mensaje objetivo y su índice relativo (1 = el último)."""
+    history = getattr(session, "history", None) or []
+    if target in ("", "last"):
+        message = _resolve_last_assistant_message(session)
+        if message is None:
+            return None, None
+    elif target == "user":
+        message = None
+        for position in range(len(history) - 1, -1, -1):
+            candidate = history[position]
+            if isinstance(candidate, dict) and candidate.get("role") == "user":
+                message = candidate
+                break
+        if message is None:
+            return None, None
+    else:
+        try:
+            index = int(target)
+        except ValueError:
+            return None, None
+        message = _resolve_message_by_index(session, index)
+        if message is None:
+            return None, index
+
+    for position in range(len(history) - 1, -1, -1):
+        if history[position] is message:
+            return message, len(history) - position
+    return message, None
+
+
+async def run_quote_command(session: AgentSession, args: str) -> None:
+    """Cita un mensaje del historial como texto plano y copiable."""
+    usage_args = args.strip()
+    if usage_args.lower() in {"help", "--help", "-h", "?"}:
+        console.print(_quote_usage(), markup=False, highlight=False)
+        return
+
+    tokens = usage_args.split()
+    if len(tokens) > 1:
+        render_error(_quote_usage())
+        return
+    target = tokens[0].lower() if tokens else "last"
+    if target not in {"last", "user"}:
+        try:
+            index = int(target)
+        except ValueError:
+            render_error(_quote_usage())
+            return
+        if index < 1:
+            render_error(_quote_usage())
+            return
+
+    history = getattr(session, "history", None) or []
+    if not history:
+        render_error("No hay conversación todavía — `/quote` necesita al menos un mensaje.")
+        return
+
+    message, index = _resolve_quote_target(session, target)
+    if message is None:
+        if target == "user":
+            render_error("No hay mensajes del usuario para citar.")
+        elif target == "last":
+            render_error("No hay mensajes del asistente para citar.")
+        else:
+            render_error(f"Índice fuera de rango: {target} (la sesión tiene {len(history)} mensajes).")
+        return
+
+    if index is None:
+        index = 1
+    text = _extract_text_from_message(message)
+    if not text:
+        render_error(f"El mensaje #{index} no tiene texto visible para citar.")
+        return
+    console.print(text, markup=False, highlight=False)

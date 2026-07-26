@@ -77,6 +77,7 @@ from .extra_commands import (
     run_pin_command,
     run_profile_command,
     run_qr_command,
+    run_quote_command,
     run_random_command,
     run_pwd_command,
     run_pr_command,
@@ -189,10 +190,12 @@ _SLASH_COMMANDS = [
     "/history",
     "/hist",
     "/last-tool",
+    "/quote",
     "/compact",
     "/summarize",
     "/resume",
     "/load",
+
     "/theme",
     "/themes",
     "/file",
@@ -840,6 +843,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "last-tool":
                     await run_last_tool_command(session, cmd_args)
+                    continue
+                if cmd_name == "quote":
+                    await run_quote_command(session, cmd_args)
                     continue
                 if cmd_name == "compact":
                     await run_compact_command(session, cmd_args)

@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid as _uuid
 from datetime import UTC, datetime
 
 from pathlib import Path
@@ -3319,17 +3320,71 @@ def _print_pinned_messages(pinned: list[dict[str, Any]]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _pin_storage_path() -> Path:
+    """Ruta de ``~/.lilith/pins.json`` (la carpeta se crea al vuelo)."""
+    base = Path.home() / ".lilith"
+    base.mkdir(parents=True, exist_ok=True)
+    return base / "pins.json"
+
+
+def _get_session_id(session: AgentSession) -> str:
+    """Id estable de la sesión, generando un uuid si no lo tiene."""
+    sid = getattr(session, "session_id", None) or getattr(session, "_session_id", None)
+    if not sid:
+        sid = str(_uuid.uuid4())
+        try:
+            session._session_id = sid
+        except Exception:
+            pass
+    return str(sid)
+
+
 def _load_pin_entries(session: AgentSession) -> list[dict[str, Any]]:
-    """Obtiene una copia de los mensajes fijados en la sesión actual."""
+    """Mensajes fijados de la sesión: espejo en memoria y, si no, el de disco.
+
+    El espejo ``session._pinned_messages`` lo consumen la serialización de la
+    sesión, ``fork`` y el QR; el JSON en disco es lo que hace que los fijados
+    sobrevivan al reinicio del REPL.
+    """
     mirror = getattr(session, "_pinned_messages", None)
-    if not isinstance(mirror, list):
+    if isinstance(mirror, list) and mirror:
+        return [dict(entry) for entry in mirror if isinstance(entry, dict)]
+
+    path = _pin_storage_path()
+    if not path.exists():
         return []
-    return [dict(entry) for entry in mirror if isinstance(entry, dict)]
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8") or "{}")
+    except (json.JSONDecodeError, OSError):
+        return []
+    entries = payload.get(_get_session_id(session)) or []
+    if not isinstance(entries, list):
+        return []
+    return [entry for entry in entries if isinstance(entry, dict)]
 
 
 def _save_pin_entries(session: AgentSession, entries: list[dict[str, Any]]) -> None:
-    """Guarda los mensajes fijados únicamente en memoria de la sesión."""
+    """Guarda los fijados en el espejo de la sesión y en disco."""
     session._pinned_messages = [dict(entry) for entry in entries]
+
+    path = _pin_storage_path()
+    payload: dict[str, Any] = {}
+    if path.exists():
+        try:
+            existente = json.loads(path.read_text(encoding="utf-8") or "{}")
+            if isinstance(existente, dict):
+                payload = existente
+        except (json.JSONDecodeError, OSError):
+            payload = {}
+    payload[_get_session_id(session)] = list(entries)
+    try:
+        path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError:
+        # El fijado ya vale en memoria: no romper el comando por el disco.
+        pass
 
 
 def _make_pin_entry(message: dict[str, Any], index: int) -> dict[str, Any]:

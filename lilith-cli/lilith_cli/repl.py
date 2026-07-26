@@ -57,6 +57,7 @@ from .extra_commands import (
     run_explain_command,
     run_feedback_command,
     run_fork_command,
+    run_format_command,
     run_git_command,
     run_hash_command,
     run_help_command,
@@ -200,6 +201,7 @@ _SLASH_COMMANDS = [
     "/themes",
     "/file",
     "/f",
+    "/format",
     "/export",
     "/exp",
     "/capture",
@@ -852,6 +854,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "fork":
                     await run_fork_command(session, cmd_args)
+                    continue
+                if cmd_name == "format":
+                    await run_format_command(session, cmd_args)
                     continue
                 if cmd_name == "tree":
                     await run_tree_command(session, cmd_args)

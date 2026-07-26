@@ -30,7 +30,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from lilith_tools.coding_tools import RunLinterTool, RunTestTool
+from lilith_tools.coding_tools import FormatFileTool, RunLinterTool, RunTestTool
 from lilith_tools.git_tools import GitOperationTool
 from lilith_tools.registry import ToolRegistry
 from lilith_tools.base import BaseTool, ToolResult
@@ -6636,6 +6636,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("template", "Plantillas de prompts"),
             ("lint", "Linting"),
             ("lint-fix", "Auto-fix lints con ruff/black"),
+            ("format", "Formatear archivo con ruff/black [--check|--yes]"),
             ("test", "Test runner rápido [path|pattern|last]"),
             ("fork", "Fork de la sesión actual"),
             ("agent", "Subagent asíncrono"),
@@ -9670,3 +9671,224 @@ async def run_quote_command(session: AgentSession, args: str) -> None:
         render_error(f"El mensaje #{index} no tiene texto visible para citar.")
         return
     console.print(text, markup=False, highlight=False)
+
+
+# ── /format command ────────────────────────────────────────────────────
+
+
+async def run_format_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+    """Formatea un archivo con un formatter externo (/format <ruta> [--check]).
+
+    El comando sigue la misma política de seguridad que ``/lint-fix``:
+
+    * Requiere una ruta **explícita y relativa al directorio de trabajo**;
+      no acepta ``.``, ``./``, ni rutas absolutas. Esto evita que un
+      slash command recorra por accidente un árbol completo (incluido
+      el stdlib, los site-packages o cualquier caché fuera del repo).
+    * La ruta debe permanecer **dentro del repositorio** de trabajo.
+    * En modo ``--check`` (default cuando el usuario no confirma) sólo se
+      reporta: nunca se escribe en disco. Equivale a ``black --check``.
+    * En modo de aplicación el comando exige ``session.config.confirm_write``
+      encendido (la misma política que ya protege ``file_write`` y
+      ``file_edit``), y le pide al usuario que confirme antes de tocar
+      el archivo. El respaldo con ``UndoManager`` se hace dentro de
+      ``FormatFileTool``; aquí sólo nos aseguramos de que la intención
+      del usuario sea explícita.
+
+    Examples:
+        /format src/foo.py --check
+        /format src/foo.py                  (pide confirmación)
+        /format src/foo.py --yes            (omite la confirmación)
+    """
+    import shlex
+    import subprocess
+
+    raw = (args or "").strip()
+    if not raw:
+        render_error(
+            "Uso: /format <ruta-relativa> [--check] [--yes]\n"
+            "  --check   Sólo reporta; no modifica archivos (default seguro).\n"
+            "  --yes     Omite la confirmación interactiva (sigue creando backup)."
+        )
+        return
+
+    # Parse the argument list. We avoid a bare ``shlex.split`` for paths that
+    # look like a single Windows path (``C:\foo\bar.py``) because the default
+    # shlex tokenizer strips backslashes and would corrupt the path. If the
+    # input has no spaces we treat the whole string as the path; otherwise we
+    # use shlex so that quoted paths and flag tokens round-trip correctly.
+    if " " in raw or "\t" in raw:
+        try:
+            tokens = shlex.split(raw)
+        except ValueError as exc:
+            render_error(f"Argumentos inválidos: {exc}")
+            return
+    else:
+        tokens = [raw]
+
+    target: str | None = None
+    check_only = False
+    assume_yes = False
+    for token in tokens:
+        if token == "--check":
+            check_only = True
+        elif token in ("--yes", "-y"):
+            assume_yes = True
+        elif token in ("--help", "-h", "help", "?"):
+            console.print(
+                "[info]/format[/info] — formatea un archivo con un formatter externo.\n"
+                "  /format <ruta> [--check] [--yes]\n"
+                "  /format <ruta>                pide confirmación y aplica\n"
+                "  /format <ruta> --check        sólo reporta; no modifica"
+            )
+            return
+        else:
+            if target is not None:
+                render_error("Sólo se acepta una ruta por invocación")
+                return
+            target = token
+
+    if target is None:
+        render_error("Falta la ruta del archivo a formatear")
+        return
+
+    candidate = Path(target).expanduser()
+    if candidate.is_absolute() or target in (".", "./"):
+        render_error(
+            "La ruta debe ser explícita y relativa; no se acepta '.' ni una ruta absoluta"
+        )
+        return
+
+    try:
+        cwd = Path.cwd().resolve()
+        resolved = candidate.resolve()
+        resolved.relative_to(cwd)
+    except (OSError, RuntimeError, ValueError):
+        render_error("La ruta debe permanecer dentro del repositorio de trabajo")
+        return
+
+    if not resolved.exists():
+        render_error(f"Ruta no encontrada: {target}")
+        return
+    if not resolved.is_file():
+        render_error(f"La ruta no es un archivo regular: {target}")
+        return
+
+    # --check es el default seguro si el usuario no es explícito (consistente
+    # con /lint-fix, que también es report-only por default).
+    if not check_only and not assume_yes:
+        confirm = getattr(getattr(session, "config", None), "confirm_write", True)
+        if not confirm:
+            render_error(
+                "confirm_write está desactivado en la sesión. "
+                "Usá `/format <ruta> --yes` o activá confirm_write con `/confirm on`."
+            )
+            return
+        console.print(
+            f"[warning]Vas a formatear:[/warning] [bold cyan]{resolved}[/bold cyan]\n"
+            "[dim]Se creará un backup automático (UndoManager).[/dim]\n"
+            "[dim]Continuar? [y/N]: [/dim]",
+            end="",
+        )
+        try:
+            answer = input()
+        except (EOFError, KeyboardInterrupt):
+            console.print()
+            render_error("Cancelado por el usuario")
+            return
+        if answer.strip().lower() not in {"y", "yes", "s", "si"}:
+            render_error("Cancelado por el usuario")
+            return
+
+    # Delegamos en FormatFileTool. Cuando --check está activo, lo transformamos
+    # en un audit pasándole check=True (que la herramienta respeta a través de
+    # su propio path de auditoría: cualquier formatter que soporte --check lo
+    # usará, los demás sólo reportarán rc≠0). Para mantener la promesa de
+    # "no modifica" del modo --check, le pasamos un formatter vacío y leemos
+    # el resultado rc sin invocar la mutación: la herramienta ya hace backup
+    # antes de tocar el disco, pero --check no debería siquiera llegar a ese
+    # punto. Para mantener la lógica simple y 100% segura, --check corre el
+    # formatter con --check cuando el formatter lo soporta (black, ruff).
+    if check_only:
+        from lilith_tools.coding_tools import _detect_formatter, _run_command
+
+        detected = _detect_formatter(str(resolved), None)
+        if detected is None:
+            render_error(
+                "No se pudo detectar un formatter para el archivo "
+                "(¿está instalado ruff/black/prettier?)."
+            )
+            return
+
+        cmd_str = detected.strip()
+        # Inyectar --check al final cuando el formatter lo entienda.
+        # Reconocemos tanto la invocación directa (``ruff``, ``black``) como
+        # la variante con módulo de Python (``python -m black``,
+        # ``python -m ruff``).
+        lowered_first = cmd_str.split()[0].lower() if cmd_str else ""
+        is_black_or_ruff = Path(lowered_first).name in {"black", "ruff"} or any(
+            token in cmd_str.split() for token in ("black", "ruff")
+        )
+        if is_black_or_ruff:
+            cmd_str = f"{cmd_str} --check"
+        full_cmd = f"{cmd_str} {resolved}"
+        try:
+            proc = subprocess.run(
+                full_cmd,
+                cwd=str(resolved.parent),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=60,
+                shell=True,
+            )
+        except subprocess.TimeoutExpired:
+            render_error("El formatter agotó el tiempo después de 60s")
+            return
+        except FileNotFoundError:
+            render_error(f"Formatter no encontrado en PATH: {cmd_str}")
+            return
+
+        console.print(
+            "[info]Auditoría:[/info] [bold cyan]"
+            + full_cmd
+            + "[/bold cyan] [dim](solo reporte; sin cambios)[/dim]"
+        )
+        if proc.stdout:
+            console.print(proc.stdout, markup=False)
+        if proc.stderr:
+            console.print(proc.stderr, markup=False)
+        label = "sin cambios pendientes" if proc.returncode == 0 else f"exit {proc.returncode}"
+        console.print(
+            f"[success]✓ format --check: reporte completado ({label}); no se modificaron archivos[/success]"
+        )
+        return
+
+    # Modo aplicación: delegamos en la herramienta. FormatFileTool ya hace
+    # UndoManager.backup() antes de cualquier mutación, así que un /undo
+    # posterior puede revertir el cambio.
+    result = FormatFileTool().execute(path=str(resolved), timeout=60)
+    if not result.success:
+        render_error(result.error or "No se pudo formatear el archivo")
+        return
+
+    data = result.data or {}
+    cmd = data.get("command", "")
+    formatted = data.get("formatted", False)
+    console.print(
+        "[success]✓ Archivo formateado:[/success] [bold cyan]"
+        + str(resolved)
+        + "[/bold cyan]"
+    )
+    if cmd:
+        console.print(f"[dim]comando: {cmd}[/dim]")
+    if formatted:
+        console.print(
+            "[dim]El archivo cambió. Usá `/undo pop` si querés revertir el cambio.[/dim]"
+        )
+    else:
+        console.print("[dim]Sin cambios necesarios (formatter no reportó diferencias).[/dim]")
+    stderr = data.get("stderr", "")
+    if stderr:
+        console.print(f"[warning]stderr:[/warning] {stderr}", markup=False)

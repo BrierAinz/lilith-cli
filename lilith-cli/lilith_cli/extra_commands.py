@@ -10145,6 +10145,372 @@ async def run_context_command(session: AgentSession, args: str) -> None:
         console.print(f"  {plan_str}")
     console.print(
         f"  [dim]Ventana del modelo: {max_tokens:,} tokens. "
-        f"Para cambiar el umbral: `/context warn <0-100>`.[/dim]"
+        "Para cambiar el umbral: `/context warn <0-100>`.[/dim]"
+    )
+    console.print()
+
+
+# ── /security-review command ────────────────────────────────────────
+
+# Pattern set: each entry is (severity, label, regex, description). Kept
+# deterministic so the command is testable without an LLM and the findings
+# are reproducible across runs. Severities follow the same convention as
+# semgrep: HIGH = exploitable today, MEDIUM = risky pattern, LOW = smell.
+#
+# The patterns intentionally target Python, JavaScript/TypeScript, generic
+# shell, and JSON/YAML since most Lilith projects mix those. Adding a new
+# pattern is a one-line change; keep the regex anchored enough to avoid
+# noise but loose enough to catch the common cases.
+_SECURITY_PATTERNS: list[tuple[str, str, str, str]] = [
+    # ── HIGH: exploitable today ───────────────────────────────────
+    (
+        "HIGH",
+        "secret-asignado",
+        r"""(?ix)
+        (?:api[_-]?key|secret[_-]?key|access[_-]?token|auth[_-]?token|
+           private[_-]?key|password|passwd|pwd)\s*[=:]\s*['\"][^'"\s]{8,}['\"]""",
+        "Secreto hardcodeado en el código (literal entre comillas).",
+    ),
+    (
+        "HIGH",
+        "eval-input",
+        r"\beval\s*\(\s*(?:input|request\.|argv|sys\.argv)",
+        "eval() sobre entrada del usuario: ejecución arbitraria.",
+    ),
+    (
+        "HIGH",
+        "exec-input",
+        r"\bexec\s*\(\s*(?:input|request\.|argv|sys\.argv)",
+        "exec() sobre entrada del usuario: ejecución arbitraria.",
+    ),
+    (
+        "HIGH",
+        "pickle-load",
+        r"\bpickle\.loads?\s*\(\s*(?![\"']b?[\"'])[^)]*\)",
+        "pickle.load(s) sobre datos no confiables: RCE.",
+    ),
+    (
+        "HIGH",
+        "yaml-load",
+        r"\byaml\.load\s*\((?![^)]*Loader\s*=\s*yaml\.SafeLoader)[^)]*\)",
+        "yaml.load sin SafeLoader: RCE via YAML malformado.",
+    ),
+    (
+        "HIGH",
+        "shell-true",
+        r"\bsubprocess\.[A-Za-z_]+\s*\([^)]*shell\s*=\s*True",
+        "subprocess con shell=True sobre datos del usuario.",
+    ),
+    (
+        "HIGH",
+        "md5-para-seguridad",
+        r"\bhashlib\.(md5|sha1)\s*\(",
+        "MD5/SHA1 para hashing de seguridad: usar sha256/blake2.",
+    ),
+    # ── MEDIUM: risky pattern, contexto-dependiente ────────────────
+    (
+        "MEDIUM",
+        "sql-string-format",
+        r"""(?x)
+        (?:execute|cursor\.execute|query)\s*\(\s*
+            (?:f['\"][^'\"]*\{|['\"][^'\"]*%\s*\(|['\"][^'\"]*\+[^)]*['\"])""",
+        "Query SQL construída por concatenación/formato: riesgo de SQLi.",
+    ),
+    (
+        "MEDIUM",
+        "weak-random",
+        r"\brandom\.(random|randint|choice|shuffle)\s*\(",
+        "random.* en contexto de seguridad: usar secrets.token_*.",
+    ),
+    (
+        "MEDIUM",
+        "requests-verify-false",
+        r"requests\.[a-z]+\s*\([^)]*verify\s*=\s*False",
+        "TLS verification desactivada en requests.",
+    ),
+    (
+        "MEDIUM",
+        "debug-true",
+        r"(?i)\bdebug\s*=\s*True\b",
+        "Modo debug activado: suele exponer trazas y credenciales.",
+    ),
+    (
+        "MEDIUM",
+        "todo-secret",
+        r"(?i)\b(?:TODO|FIXME|XXX)\b[^\n]{0,40}\b(?:secret|password|key|token)\b",
+        "TODO/FIXME con referencia a secretos: revisar antes de release.",
+    ),
+    # ── LOW: smell que conviene anotar ────────────────────────────
+    (
+        "LOW",
+        "print-stacktrace",
+        r"\bprint\s*\(\s*(?:traceback|format_exc|exc_info)\b",
+        "Imprimir traceback en producción: leak de paths internos.",
+    ),
+    (
+        "LOW",
+        "binding-all-interfaces",
+        r"['\"]0\.0\.0\.0['\"]",
+        "Bind a 0.0.0.0: expone el servicio en todas las interfaces.",
+    ),
+]
+
+# Directories that should be excluded from any walk — these never
+# contain project source and would only slow the scan + produce false
+# positives (migrations, generated code, vendored libraries).
+_SECURITY_SKIP_DIRS: frozenset[str] = frozenset(
+    {
+        ".git",
+        ".venv",
+        "venv",
+        "env",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        "node_modules",
+        "dist",
+        "build",
+        ".tox",
+        ".nox",
+        "target",  # rust
+        "vendor",
+        "Pods",
+    }
+)
+
+# Hard cap on findings per pattern so a single bad file does not flood
+# the report. Keeps the output focused and the JSON payload small.
+_MAX_FINDINGS_PER_PATTERN = 25
+_MAX_FILE_BYTES = 1_000_000  # skip files > 1 MB (generated, vendored)
+
+
+def _security_scan_file(path: Path) -> list[dict]:
+    """Return findings (list of dicts) for *path*. Empty list on skip."""
+    try:
+        if not path.is_file():
+            return []
+        size = path.stat().st_size
+        if size == 0 or size > _MAX_FILE_BYTES:
+            return []
+        # Cheap binary-file detection: NUL byte in first 4 KB.
+        with path.open("rb") as f:
+            head = f.read(4096)
+        if b"\x00" in head:
+            return []
+        try:
+            text = head.decode("utf-8", errors="strict") + path.read_text(
+                encoding="utf-8", errors="replace"
+            )[len(head):]
+        except (UnicodeDecodeError, OSError):
+            return []
+    except OSError:
+        return []
+
+    findings: list[dict] = []
+    counters: dict[str, int] = {}
+    for severity, label, pattern, description in _SECURITY_PATTERNS:
+        try:
+            regex = re.compile(pattern)
+        except re.error:
+            continue
+        hits = list(regex.finditer(text))
+        if not hits:
+            continue
+        limit = _MAX_FINDINGS_PER_PATTERN
+        kept = 0
+        for m in hits:
+            if kept >= limit:
+                break
+            # Compute 1-based line number by counting newlines in the slice
+            # up to the match start. fast enough for files ≤ 1 MB.
+            line_no = text.count("\n", 0, m.start()) + 1
+            snippet = m.group(0)
+            if len(snippet) > 80:
+                snippet = snippet[:77] + "…"
+            findings.append(
+                {
+                    "severity": severity,
+                    "label": label,
+                    "file": str(path),
+                    "line": line_no,
+                    "snippet": snippet,
+                    "description": description,
+                }
+            )
+            kept += 1
+        counters[label] = kept
+    return findings
+
+
+def _security_walk(root: Path) -> list[dict]:
+    """Walk *root* and return all findings across scanned files."""
+    results: list[dict] = []
+    if root.is_file():
+        results.extend(_security_scan_file(root))
+        return results
+    if not root.exists():
+        return results
+    for dirpath, dirnames, filenames in os.walk(root):
+        # Prune in-place so os.walk skips these subtrees.
+        dirnames[:] = [d for d in dirnames if d not in _SECURITY_SKIP_DIRS]
+        for fname in filenames:
+            results.extend(_security_scan_file(Path(dirpath) / fname))
+    return results
+
+
+_SEVERITY_ORDER = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
+_SEVERITY_STYLE = {
+    "HIGH": "bold red",
+    "MEDIUM": "bold yellow",
+    "LOW": "dim",
+}
+
+
+async def run_security_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+    """Ejecuta /security-review para auditar patrones de seguridad.
+
+    Recorre un árbol de directorios aplicando un conjunto de regex
+    deterministas y reporta los hallazgos agrupados por severidad.
+    No usa el LLM — los resultados son reproducibles entre ejecuciones.
+
+    Examples:
+        /security-review
+        /security-review src/
+        /security-review path/al/archivo.py
+        /security-review . --json
+        /security-review src --max 50
+    """
+    text = args.strip()
+    # Manual flag parsing. We use a permissive approach so paths with
+    # backslashes (Windows) and embedded spaces survive: if the input
+    # parses cleanly with shlex we use it; otherwise we fall back to
+    # whitespace splitting, which works for space-free paths.
+    output_json = False
+    max_findings: int | None = None
+    positional: list[str] = []
+    try:
+        tokens = shlex.split(text, posix=False) if text else []
+    except ValueError:
+        tokens = text.split()
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok in ("--json", "-j"):
+            output_json = True
+            i += 1
+            continue
+        if tok == "--max" and i + 1 < len(tokens):
+            try:
+                max_findings = max(1, int(tokens[i + 1]))
+            except ValueError:
+                render_error("--max requiere un entero positivo")
+                return
+            i += 2
+            continue
+        if tok.startswith("--max="):
+            try:
+                max_findings = max(1, int(tok.split("=", 1)[1]))
+            except ValueError:
+                render_error("--max requiere un entero positivo")
+                return
+            i += 1
+            continue
+        positional.append(tok)
+        i += 1
+
+    target_arg = positional[0] if positional else "."
+    target = Path(target_arg).expanduser()
+    if not target.exists():
+        render_error(f"Ruta no encontrada: {target}")
+        return
+
+    findings = _security_walk(target.resolve())
+
+    # Apply --max cap across the whole report (after severity ordering
+    # so HIGH findings are not silently dropped first).
+    findings.sort(key=lambda f: (_SEVERITY_ORDER.get(f["severity"], 99), f["file"], f["line"]))
+    if max_findings is not None and len(findings) > max_findings:
+        findings = findings[:max_findings]
+
+    if output_json:
+        import sys as _sys
+
+        by_sev = {
+            sev: sum(1 for f in findings if f["severity"] == sev)
+            for sev in ("HIGH", "MEDIUM", "LOW")
+        }
+        # scanned_files is best-effort: we only count files that produced
+        # at least one finding (avoids a second walk over the whole tree
+        # just to count empty files).
+        summary = {
+            "target": str(target),
+            "scanned_files": len({f["file"] for f in findings}),
+            "total": len(findings),
+            "by_severity": by_sev,
+            "findings": findings,
+        }
+        _sys.stdout.write(json.dumps(summary, indent=2, ensure_ascii=False) + "\n")
+        _sys.stdout.flush()
+        return
+
+    if not findings:
+        console.print(
+            f"[success]✓ Sin hallazgos[/] — {target} pasó las "
+            f"{len(_SECURITY_PATTERNS)} reglas de seguridad."
+        )
+        console.print()
+        return
+
+    # Group by severity for the rendered report.
+    grouped: dict[str, list[dict]] = {"HIGH": [], "MEDIUM": [], "LOW": []}
+    for f in findings:
+        grouped.setdefault(f["severity"], []).append(f)
+
+    console.print(
+        f"\n[bold realm]᛭ Auditoría de seguridad[/] — "
+        f"[info]objetivo:[/] [bold cyan]{target}[/]"
+    )
+    for sev in ("HIGH", "MEDIUM", "LOW"):
+        n = len(grouped[sev])
+        if n == 0:
+            continue
+        console.print(
+            f"  [{_SEVERITY_STYLE[sev]}]{sev}[/]: {n} hallazgo(s)"
+        )
+    console.print(f"  [dim]Total: {len(findings)} · Reglas evaluadas: {len(_SECURITY_PATTERNS)}[/]")
+    console.print()
+
+    from rich.table import Table
+
+    table = Table(
+        show_header=True,
+        header_style="bold cyan",
+        border_style="cyan",
+        expand=False,
+    )
+    table.add_column("Sev", width=8, style="bold")
+    table.add_column("Regla", style="tool.name", width=24)
+    table.add_column("Archivo:línea", style="white", no_wrap=False)
+    table.add_column("Snippet", style="dim", max_width=60)
+
+    for sev in ("HIGH", "MEDIUM", "LOW"):
+        for f in grouped[sev]:
+            rel = f["file"]
+            # Make long paths friendlier in narrow terminals.
+            if len(rel) > 80:
+                rel = "…" + rel[-78:]
+            table.add_row(
+                f"[{_SEVERITY_STYLE[sev]}]{sev}[/]",
+                f["label"],
+                f"{rel}:{f['line']}",
+                f["snippet"],
+            )
+
+    console.print(table)
+    console.print(
+        "\n[dim]Estas reglas son heurísticas — revisá cada hallazgo antes de "
+        "tomar acción. Para un análisis profundo usá un SAST dedicado "
+        "(bandit, semgrep, codeql).[/dim]"
     )
     console.print()

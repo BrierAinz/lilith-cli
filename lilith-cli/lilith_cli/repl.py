@@ -91,6 +91,7 @@ from .extra_commands import (
     run_reverse_command,
     run_review_command,
     run_search_command,
+    run_security_command,
     run_snippet_command,
     run_summary_command,
     run_secret_command,
@@ -227,6 +228,7 @@ _SLASH_COMMANDS = [
     "/tree",
     "/recent",
     "/log",
+    "/security-review",
     "/fork",
     "/model-info",
     "/macro",
@@ -922,6 +924,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name in ("log", "l"):
                     await run_log_command(session, cmd_args)
+                    continue
+                if cmd_name in ("security-review", "sec"):
+                    await run_security_command(session, cmd_args)
                     continue
                 if cmd_name == "recap":
                     await run_recap_command(session, cmd_args)

@@ -319,7 +319,7 @@ class AgentSession:
         return self._memory
 
     def _load_project_instructions(self) -> str:
-        """Load local .lilith/CLAUDE.md or global ~/.lilith/CLAUDE.md.
+        """Load local Lilith instructions, the nearest AGENTS.md, or global defaults.
 
         The result is cached on the session so repeated calls are cheap.
         """
@@ -328,13 +328,24 @@ class AgentSession:
 
         from pathlib import Path
 
-        local_path = Path.cwd() / ".lilith" / "CLAUDE.md"
-        global_path = Path.home() / ".lilith" / "CLAUDE.md"
-
         try:
-            if local_path.exists():
+            cwd = Path.cwd()
+            local_path = cwd / ".lilith" / "CLAUDE.md"
+            global_path = Path.home() / ".lilith" / "CLAUDE.md"
+            agents_path = next(
+                (
+                    candidate
+                    for directory in (cwd, *cwd.parents)
+                    if (candidate := directory / "AGENTS.md").is_file()
+                ),
+                None,
+            )
+
+            if local_path.is_file():
                 instructions = local_path.read_text(encoding="utf-8")
-            elif global_path.exists():
+            elif agents_path is not None:
+                instructions = agents_path.read_text(encoding="utf-8")
+            elif global_path.is_file():
                 instructions = global_path.read_text(encoding="utf-8")
             else:
                 instructions = ""

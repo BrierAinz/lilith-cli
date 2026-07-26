@@ -9891,4 +9891,260 @@ async def run_format_command(session: AgentSession, args: str) -> None:  # noqa:
         console.print("[dim]Sin cambios necesarios (formatter no reportó diferencias).[/dim]")
     stderr = data.get("stderr", "")
     if stderr:
-        console.print(f"[warning]stderr:[/warning] {stderr}", markup=False)
+        console.print(
+            f"[warning]stderr:[/warning] {stderr}", markup=False
+        )
+
+
+# ── /context ───────────────────────────────────────────────────────────
+#
+# Orphan gap surfaced by the 2026-07-26 audit: ``render.render_context()``
+# already implements a Rich progress bar for the session's current context
+# window usage, and the docstring on ``providers.estimate_context_window``
+# literally says "Used for the /context progress bar" — but no slash
+# command ever wired the two together. Both Claude Code (``/context``) and
+# Gemini CLI (``/context``) ship a context-window progress command as a
+# de-facto standard, and Reddit r/ClaudeAI / r/LocalLLaMA threads
+# routinely ask "how much room do I have left?" mid-session. So this
+# command finally exposes it to the REPL.
+#
+# Usage:
+#   /context            — progress bar + one-line summary
+#   /context full       — breakdown of system / tools / history / plan
+#   /context json       — machine-readable snapshot (bypasses Rich)
+#   /context <n>%       — set the warning threshold for `/context` itself
+#                        (informational; the bar always uses the model
+#                        window from providers.estimate_context_window())
+
+
+# Default warning threshold; 0 disables the heads-up. Persists per-user
+# so users can dial it down once they learn their model's sweet spot.
+_CONTEXT_WARN_FILE = CONFIG_DIR / "context_warn.json"
+_DEFAULT_WARN_PCT = 80.0
+
+
+def _load_warn_pct() -> float:
+    """Return the persisted context-warn threshold (0 disables)."""
+    try:
+        if _CONTEXT_WARN_FILE.exists():
+            data = json.loads(_CONTEXT_WARN_FILE.read_text(encoding="utf-8"))
+            pct = float(data.get("warn_pct", _DEFAULT_WARN_PCT))
+            if 0.0 <= pct <= 100.0:
+                return pct
+    except (OSError, ValueError, json.JSONDecodeError):
+        pass
+    return _DEFAULT_WARN_PCT
+
+
+def _save_warn_pct(pct: float) -> None:
+    """Persist the context-warn threshold; clamped to [0, 100]."""
+    pct = max(0.0, min(100.0, float(pct)))
+    _CONTEXT_WARN_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _CONTEXT_WARN_FILE.write_text(
+        json.dumps({"warn_pct": pct}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _context_snapshot(session: AgentSession) -> dict:
+    """Build a snapshot of the session's current context usage.
+
+    Mirrors the logic in :func:`render.render_context` so the JSON path
+    and the rendered panel agree on numbers. Returns a plain dict with
+    the model window, the five usage buckets (system / tools / history /
+    pinned / total), the bar percentage, and a flag indicating whether
+    the configured warn threshold has been crossed.
+    """
+    from .providers import estimate_context_window
+
+    model = getattr(session.config, "model", "") or ""
+    max_tokens = estimate_context_window(model) or 0
+
+    usage = getattr(session, "_total_usage", {}) or {}
+    used = int(usage.get("total_tokens", 0) or usage.get("prompt_tokens", 0) or 0)
+
+    # Per-bucket estimates. We split based on the same heuristic
+    # render.render_context uses (system_prompt words, tool schema JSON
+    # words, history = remainder) so the rendered panel and JSON agree.
+    system_prompt = getattr(session, "system_prompt", "") or ""
+    system_size = len(system_prompt.split()) if isinstance(system_prompt, str) else 0
+
+    tools_cache = getattr(session, "_tools_cache", None) or []
+    if tools_cache:
+        tools_text = json.dumps(tools_cache, separators=(",", ":"))
+        tools_size = len(tools_text.split()) if tools_text else 0
+    else:
+        tools_size = 0
+
+    history_size = used - system_size - tools_size
+    if history_size < 0:
+        # Provider-reported usage can be smaller than the local heuristic
+        # when tools are disabled. Fall back to whatever is left.
+        history_size = max(0, used)
+
+    pinned = getattr(session, "_pinned_messages", None) or []
+    pinned_count = len(pinned)
+    pinned_size = sum(
+        len(str(m.get("content", "")).split()) for m in pinned if isinstance(m, dict)
+    )
+
+    percentage = (used / max_tokens) if max_tokens else 0.0
+    warn_pct = _load_warn_pct()
+    over_warn = bool(warn_pct and max_tokens and percentage * 100 >= warn_pct)
+
+    plan = getattr(session, "current_plan", None)
+    plan_done: int | None = None
+    plan_total: int | None = None
+    if plan is not None:
+        plan_total = len(getattr(plan, "steps", []) or [])
+        plan_done = sum(1 for s in getattr(plan, "steps", []) if getattr(s, "done", False))
+
+    return {
+        "model": model,
+        "max_tokens": max_tokens,
+        "used": used,
+        "remaining": max(0, max_tokens - used),
+        "percentage": round(percentage, 4),
+        "warn_pct": warn_pct,
+        "over_warn": over_warn,
+        "buckets": {
+            "system": system_size,
+            "tools": tools_size,
+            "history": history_size,
+            "pinned": pinned_size,
+        },
+        "pinned_count": pinned_count,
+        "plan": {
+            "done": plan_done,
+            "total": plan_total,
+        },
+    }
+
+
+async def run_context_command(session: AgentSession, args: str) -> None:
+    """Ejecuta /context para inspeccionar el uso de la ventana de contexto.
+
+    Examples:
+        /context                   — barra de progreso + resumen en una línea
+        /context full              — desglose por buckets (sistema / tools / historial / pins / plan)
+        /context json              — snapshot JSON (omite Rich markup)
+        /context warn <n>          — fija el umbral de aviso (0..100, 0 desactiva)
+    """
+    text = args.strip()
+
+    # /context warn <n>  ── configure the warning threshold and return.
+    if text.lower().startswith("warn"):
+        parts = text.split()
+        if len(parts) < 2:
+            current = _load_warn_pct()
+            console.print(
+                f"[info]Umbral actual:[/info] [bold cyan]{current:.0f}%[/bold cyan]  "
+                f"[dim](pasá `/context warn <0-100>` para cambiarlo)[/dim]"
+            )
+            return
+        try:
+            pct = float(parts[1])
+        except ValueError:
+            render_error("Uso: /context warn <0-100>  (número entre 0 y 100)")
+            return
+        _save_warn_pct(pct)
+        if pct <= 0:
+            console.print("[success]✓ Aviso de contexto desactivado.[/]")
+        else:
+            console.print(
+                f"[success]✓ Umbral fijado a {pct:.0f}% — "
+                f"un aviso aparecerá cuando /context supere esa fracción.[/]"
+            )
+        return
+
+    snap = _context_snapshot(session)
+
+    if text.lower() == "json":
+        import sys as _sys
+
+        _sys.stdout.write(
+            json.dumps(snap, ensure_ascii=False, indent=2) + "\n"
+        )
+        _sys.stdout.flush()
+        return
+
+    # Both "default" and "full" share the same progress bar; "full" adds
+    # the per-bucket table underneath. We render the bar ourselves so
+    # colour thresholds and post-line warnings stay consistent across
+    # the two paths (render.render_context has its own renderer but we
+    # need the JSON-mode contract to share these numbers exactly).
+    from rich.table import Table
+
+    max_tokens = snap["max_tokens"]
+    used = snap["used"]
+    pct = snap["percentage"]
+    pct_pct = pct * 100.0
+
+    bar_width = 30
+    filled = int(bar_width * pct)
+    empty = bar_width - filled
+    if pct < 0.5:
+        color = "green"
+    elif pct < 0.8:
+        color = "yellow"
+    else:
+        color = "red"
+    bar = "█" * filled + "░" * empty
+    pct_text = f"[{color}]{bar}[/]  {pct_pct:.1f}%"
+
+    console.print(pct_text)
+    console.print(
+        f"  [info]Usados:[/] [model]{used:,}[/] / [model]{max_tokens:,}[/] tokens  ·  "
+        f"[info]Restantes:[/] [model]{snap['remaining']:,}[/]  ·  "
+        f"[info]Modelo:[/] [model]{snap['model'] or '?'}[/]"
+    )
+
+    if snap["over_warn"]:
+        console.print(
+            f"\n  [warning]⚠ Contexto al {pct_pct:.0f}% — "
+            f"superó el umbral configurado ({snap['warn_pct']:.0f}%). "
+            f"Considerá /compact o /clear.[/]"
+        )
+
+    if text.lower() != "full":
+        return
+
+    # Full breakdown — same buckets as the JSON path.
+    buckets = snap["buckets"]
+    table = Table(
+        title="[bold realm]⚔ Desglose de contexto ⚔[/]",
+        show_header=True,
+        header_style="bold cyan",
+        border_style="cyan",
+        expand=False,
+    )
+    table.add_column("Bucket", style="tool.name")
+    table.add_column("Tokens", justify="right", style="model")
+    table.add_column("% del total", justify="right", style="dim")
+
+    total_accounted = sum(int(v) for v in buckets.values()) or 1
+    for label, key in (
+        ("Prompt del sistema", "system"),
+        ("Descripción de herramientas", "tools"),
+        ("Historial de mensajes", "history"),
+        ("Mensajes fijados (/pin)", "pinned"),
+    ):
+        value = int(buckets.get(key, 0))
+        share = (value / total_accounted) * 100 if total_accounted else 0.0
+        table.add_row(label, f"{value:,}", f"{share:.1f}%")
+
+    plan_info = snap["plan"]
+    plan_str = ""
+    if plan_info["total"]:
+        plan_str = f" · [info]Plan:[/] [model]{plan_info['done']}/{plan_info['total']}[/]"
+    if snap["pinned_count"]:
+        plan_str += f"  · [info]Pins:[/] [model]{snap['pinned_count']}[/]"
+
+    console.print(table)
+    if plan_str:
+        console.print(f"  {plan_str}")
+    console.print(
+        f"  [dim]Ventana del modelo: {max_tokens:,} tokens. "
+        f"Para cambiar el umbral: `/context warn <0-100>`.[/dim]"
+    )
+    console.print()

@@ -44,6 +44,7 @@ from .extra_commands import (
     run_compact_command,
     run_clear_screen_command,
     run_compare_command,
+    run_context_command,
     run_conclave_command,
     run_recent_command,
     run_learn_command,
@@ -196,6 +197,7 @@ _SLASH_COMMANDS = [
     "/summarize",
     "/resume",
     "/load",
+    "/context",
 
     "/theme",
     "/themes",
@@ -851,6 +853,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "compact":
                     await run_compact_command(session, cmd_args)
+                    continue
+                if cmd_name == "context":
+                    await run_context_command(session, cmd_args)
                     continue
                 if cmd_name == "fork":
                     await run_fork_command(session, cmd_args)

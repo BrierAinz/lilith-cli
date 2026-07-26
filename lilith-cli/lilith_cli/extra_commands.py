@@ -4277,6 +4277,63 @@ def _build_tree(
     return files_count, dirs_count
 
 
+def _repo_map_entries(root: Path) -> list[tuple[str, str, int]]:
+    """Collecta archivos Python con sus símbolos principales para /map."""
+    entries: list[tuple[str, str, int]] = []
+    for path in sorted(root.rglob("*.py"), key=lambda item: str(item).lower()):
+        if any(part in _TREE_IGNORED_DIRS for part in path.parts):
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        symbols = [
+            node.name
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            and not node.name.startswith("_")
+        ]
+        entries.append((str(path.relative_to(root)), ", ".join(symbols[:8]), len(symbols)))
+    return entries
+
+
+async def run_map_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+    """Muestra un mapa conciso de módulos Python y símbolos públicos.
+
+    Uso: /map [directorio] [--json]
+    """
+    text = args.strip()
+    json_output = "--json" in text.split()
+    tokens = [token for token in text.split() if token != "--json"]
+    root = Path(tokens[0]).expanduser() if tokens else Path.cwd()
+
+    if not root.exists():
+        render_error(f"Ruta no encontrada: {root}")
+        return
+    if not root.is_dir():
+        render_error(f"La ruta no es un directorio: {root}")
+        return
+
+    entries = _repo_map_entries(root)
+    if json_output:
+        console.print(json.dumps([
+            {"archivo": path, "símbolos": symbols, "cantidad": count}
+            for path, symbols, count in entries
+        ], ensure_ascii=False, indent=2))
+        return
+
+    if not entries:
+        console.print("[dim]No se encontraron módulos Python en la ruta indicada.[/]")
+        return
+
+    console.print(f"\n[bold realm]᛭ Mapa del código[/] [dim]{root.resolve()}[/]")
+    for path, symbols, count in entries:
+        symbol_text = symbols or "(sin símbolos públicos)"
+        suffix = f" · {count} símbolos" if count else ""
+        console.print(f"  [bold cyan]{path}[/]{suffix} — [dim]{symbol_text}[/]")
+    console.print(f"\n[dim]Módulos: {len(entries)}[/]")
+
+
 # ── /recent command ──────────────────────────────────────────────────
 
 
@@ -4424,6 +4481,12 @@ async def run_tree_command(session: AgentSession, args: str) -> None:  # noqa: A
         /tree src depth=2           — profundidad personalizada
     """
     text = args.strip()
+    if text:
+        first = text.split(maxsplit=1)[0].lower()
+        if first in ("symbols", "map"):
+            await run_map_command(session, text[len(first):].strip())
+            return
+
     target = Path.cwd()
     max_depth = 3
 

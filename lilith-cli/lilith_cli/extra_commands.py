@@ -1856,6 +1856,19 @@ async def run_file_command(session: AgentSession, args: str) -> None:
     """
     text = args.strip()
 
+    # Accept one quoted path so projects in directories with spaces work on
+    # Windows, while preserving ordinary unquoted paths.
+    if text and text.lower() not in ("list", "ls", "--list", "clear", "reset"):
+        try:
+            parsed = shlex.split(text, posix=False)
+        except ValueError as exc:
+            render_error(f"Ruta entre comillas inválida: {exc}")
+            return
+        if len(parsed) == 1:
+            text = parsed[0]
+            if len(text) >= 2 and text[0] == text[-1] and text[0] in ("'", '"'):
+                text = text[1:-1]
+
     if not text or text.lower() in ("list", "ls", "--list"):
         files: list[str] = getattr(session, "_user_files", [])
         if not files:

@@ -6072,6 +6072,7 @@ def _run_deep_checks(session: AgentSession) -> list[dict]:
     - Active provider latency probe (no LLM call, just round-trip setup)
     - Network connectivity (DNS lookup of api.openai.com)
     - Number of tool calls recorded in current session
+    - Language-server availability for every language supported by Lilith IDE
     """
     import shutil
     import socket
@@ -6079,6 +6080,40 @@ def _run_deep_checks(session: AgentSession) -> list[dict]:
     import time
 
     results: list[dict] = []
+
+    # Language servers used by the IDE. This check is intentionally read-only:
+    # it reports availability and never installs packages or edits config.
+    try:
+        from .ide.lsp.languages import PREFERRED_SERVERS, language_server_command
+
+        available: list[str] = []
+        missing: list[str] = []
+        for language in PREFERRED_SERVERS:
+            command = language_server_command(language)
+            if command:
+                available.append(f"{language} ({Path(command[0]).name})")
+            else:
+                missing.append(language)
+
+        if available:
+            message = f"Disponibles: {', '.join(available)}"
+            if missing:
+                message += f"; faltan: {', '.join(missing)}"
+            status = "ok"
+        else:
+            message = (
+                "No se detectó ningún servidor; instalá uno de: "
+                "pyright, rust-analyzer, typescript-language-server, gopls, "
+                "vscode-json-language-server o yaml-language-server"
+            )
+            status = "warn"
+        results.append({"check": "Language servers", "status": status, "message": message})
+    except Exception as exc:
+        results.append({
+            "check": "Language servers",
+            "status": "warn",
+            "message": f"No se pudo verificar: {exc}",
+        })
 
     # Disk free space
     try:

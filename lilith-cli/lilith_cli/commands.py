@@ -3041,6 +3041,7 @@ class MacroCommand(BaseCommand):
         /macro edit <name>    — open the macro in $EDITOR for inline editing
         /macro copy <source> <copy> — duplicate a saved macro
         /macro rename <old> <new> — rename a saved macro
+        /macro import <file> [name] — import commands from a text file
         /macro validate <name> — check that every recorded command exists
         /macro delete <name>  — delete a macro
     """
@@ -3083,6 +3084,9 @@ class MacroCommand(BaseCommand):
         if subcmd in ("rename", "mv"):
             await self._rename(rest)
             return
+        if subcmd == "import":
+            await self._import(rest)
+            return
         if subcmd in ("delete", "rm", "remove"):
             await self._delete(rest)
             return
@@ -3103,6 +3107,8 @@ class MacroCommand(BaseCommand):
         console.print("  [bold cyan]/macro edit <nombre>[/]  — Editar en \$EDITOR")
         console.print("  [bold cyan]/macro copy <origen> <copia>[/] — Copiar una macro")
         console.print("  [bold cyan]/macro rename <actual> <nuevo>[/] — Renombrar una macro")
+        console.print("  [bold cyan]/macro import <archivo> [nombre][/]")
+        console.print("                           — Importar comandos desde un archivo")
         console.print("  [bold cyan]/macro validate <nombre>[/] — Verificar que los comandos existan")
         console.print("  [bold cyan]/macro delete <nombre>[/] — Eliminar una macro")
         console.print()
@@ -3276,6 +3282,74 @@ class MacroCommand(BaseCommand):
         console.print(
             f"[success]✓ Macro renombrada:[/] [model]{old_name}[/] → "
             f"[bold cyan]{new_name}[/]"
+        )
+
+    async def _import(self, args: str) -> None:
+        """Import a macro from a UTF-8 text file.
+
+        The file contains one command per line; blank lines and comments are
+        ignored using the same format accepted by ``/macro edit``.  The
+        destination name defaults to the file stem and existing macros are
+        never overwritten.
+        """
+        import os
+        import shlex
+
+        try:
+            parts = shlex.split(args, posix=os.name != "nt")
+        except ValueError as exc:
+            render_error(f"Argumentos inválidos: {exc}")
+            return
+
+        if not parts or len(parts) > 2:
+            render_error("Uso: /macro import <archivo> [nombre]")
+            return
+
+        source_text = parts[0]
+        # ``posix=False`` preserves quote characters on Windows.  Remove a
+        # matching pair so paths containing spaces work on both platforms.
+        if (
+            len(source_text) >= 2
+            and source_text[0] == source_text[-1]
+            and source_text[0] in ("'", '"')
+        ):
+            source_text = source_text[1:-1]
+
+        source = Path(source_text).expanduser()
+        name = parts[1].strip() if len(parts) == 2 else source.stem
+        if not name or any(ch.isspace() for ch in name) or "/" in name or "\\" in name:
+            render_error("El nombre de la macro no puede contener '/' ni espacios.")
+            return
+
+        if not source.is_file():
+            render_error(f"Archivo de macro no encontrado: {source}")
+            return
+
+        try:
+            content = source.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            render_error(f"No se pudo leer el archivo {source}: {exc}")
+            return
+
+        commands = [
+            line.strip()
+            for line in content.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        if not commands:
+            render_error(f"El archivo {source} no contiene comandos para importar.")
+            return
+
+        macros = _load_macros()
+        if name in macros:
+            render_error(f"La macro '[model]{name}[/]' ya existe.")
+            return
+
+        macros[name] = commands
+        _save_macros(macros)
+        console.print(
+            f"[success]✓ Macro importada:[/] [model]{name}[/] "
+            f"({len(commands)} comando(s) desde {source.name})"
         )
 
     async def _show(self, name: str) -> None:

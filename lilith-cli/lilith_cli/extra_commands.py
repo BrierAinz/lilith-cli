@@ -4044,6 +4044,7 @@ _MODEL_CAPABILITIES: dict[str, list[str]] = {
     "fugu-ultra-20260615": ["chat", "tool-calling", "long-context", "streaming"],
     "claude-sonnet-4": ["chat", "tool-calling", "vision", "long-context", "streaming"],
     "claude-opus-4": ["chat", "tool-calling", "vision", "long-context", "streaming", "reasoning"],
+    "claude-opus-5": ["chat", "tool-calling", "vision", "long-context", "streaming", "reasoning"],
     "claude-haiku-4": ["chat", "tool-calling", "vision", "streaming"],
     "gpt-4o": ["chat", "tool-calling", "vision", "streaming"],
     "gpt-4o-mini": ["chat", "tool-calling", "vision", "streaming"],

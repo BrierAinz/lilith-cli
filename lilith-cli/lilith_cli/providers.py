@@ -51,6 +51,7 @@ _MODEL_PRICING: dict[str, tuple[float, float]] = {
     # Anthropic (in case litellm is used)
     "claude-sonnet-4":        (3.0, 15.0),
     "claude-opus-4":          (15.0, 75.0),
+    "claude-opus-5":          (10.0, 50.0),
     "claude-haiku-4":         (0.8, 4.0),
     # OpenAI (in case litellm is used)
     "gpt-4o":                 (2.5, 10.0),
@@ -142,6 +143,7 @@ _MODEL_CONTEXTS: dict[str, int] = {
     "fugu-ultra-20260615": 128_000,
     "claude-sonnet-4": 200_000,
     "claude-opus-4": 200_000,
+    "claude-opus-5": 1_000_000,
     "claude-haiku-4": 200_000,
     "gpt-4o": 128_000,
     "gpt-4o-mini": 128_000,

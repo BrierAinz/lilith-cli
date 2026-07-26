@@ -64,6 +64,21 @@ async def test_model_info_specific_known_model(fake_session, capsys):
 
 
 @pytest.mark.asyncio
+async def test_model_info_supports_claude_opus_5(fake_session, capsys):
+    """El catálogo muestra el contexto y precios publicados de Claude Opus 5."""
+    from lilith_cli.extra_commands import run_model_info_command
+
+    await run_model_info_command(fake_session, "claude-opus-5")
+
+    combined = capsys.readouterr().out
+    assert "claude-opus-5" in combined
+    assert "1.00M" in combined
+    assert "$10.00" in combined
+    assert "$50.00" in combined
+    assert "reasoning" in combined
+
+
+@pytest.mark.asyncio
 async def test_model_info_unknown_model_reports_error(fake_session, capsys):
     """/model-info <unknown> must print an error and not raise."""
     from lilith_cli.extra_commands import run_model_info_command

@@ -2289,11 +2289,13 @@ async def run_history_command(session: AgentSession, args: str) -> None:
         /history 10
         /history --tool file_read
         /history 20 --tool file_read
+        /history 20 --json
     """
-    # ── Parse args: optional <limit> and optional --tool <name> ──────────
+    # ── Parse args: optional <limit>, --tool <name>, and --json ──────────
     text = args.strip()
     limit: int | None = None
     tool_filter: str | None = None
+    json_mode = False
 
     if text:
         tokens = text.split()
@@ -2307,6 +2309,9 @@ async def run_history_command(session: AgentSession, args: str) -> None:
             elif tok.startswith("--tool="):
                 tool_filter = tok.split("=", 1)[1]
                 i += 1
+            elif tok == "--json":
+                json_mode = True
+                i += 1
             else:
                 remaining.append(tok)
                 i += 1
@@ -2317,7 +2322,7 @@ async def run_history_command(session: AgentSession, args: str) -> None:
                 if limit < 1:
                     raise ValueError
             except ValueError:
-                render_error("Uso: /history [número] [--tool <nombre>]")
+                render_error("Uso: /history [número] [--tool <nombre>] [--json]")
                 return
 
     history = session.history or []
@@ -2329,19 +2334,41 @@ async def run_history_command(session: AgentSession, args: str) -> None:
         )
         matching = [h for h in tool_history if h.get("name") == tool_filter]
         if not matching:
-            console.print(
-                f"[dim]No hay llamadas registradas para ‘{tool_filter}’.[/dim]"
-            )
+            if json_mode:
+                _print_history_json(
+                    {
+                        "kind": "tool_calls",
+                        "tool": tool_filter,
+                        "count": 0,
+                        "calls": [],
+                    }
+                )
+            else:
+                console.print(
+                    f"[dim]No hay llamadas registradas para ‘{tool_filter}’.[/dim]"
+                )
             return
         if limit is None:
             limit = len(matching)
         else:
             limit = min(limit, len(matching))
 
+        selected = matching[-limit:]
+        if json_mode:
+            _print_history_json(
+                {
+                    "kind": "tool_calls",
+                    "tool": tool_filter,
+                    "count": len(selected),
+                    "calls": selected,
+                }
+            )
+            return
+
         console.print(
             f"[info]Historial (filtrado por: {tool_filter})[/info]"
         )
-        for entry in matching[-limit:]:
+        for entry in selected:
             ts = _format_history_timestamp(entry.get("timestamp"))
             name = entry.get("name", "?")
             arguments = entry.get("arguments", {})
@@ -2361,6 +2388,9 @@ async def run_history_command(session: AgentSession, args: str) -> None:
         limit = 10
 
     if not history:
+        if json_mode:
+            _print_history_json({"kind": "messages", "count": 0, "messages": []})
+            return
         console.print("[dim]No hay historial para mostrar.[/dim]")
         return
 
@@ -2381,8 +2411,33 @@ async def run_history_command(session: AgentSession, args: str) -> None:
         "error": "✗",
     }
 
+    selected_messages = history[-limit:]
+    if json_mode:
+        _print_history_json(
+            {
+                "kind": "messages",
+                "count": len(selected_messages),
+                "messages": [
+                    {
+                        "index": index,
+                        "role": msg.get("role", "?"),
+                        "content": str(msg.get("content", "")),
+                        "timestamp": msg.get("timestamp"),
+                    }
+                    for index, msg in enumerate(
+                        selected_messages,
+                        start=max(0, len(history) - len(selected_messages)),
+                    )
+                ],
+            }
+        )
+        return
+
     console.print("[info]᛭ Historial[/info]")
-    for i, msg in enumerate(history[-limit:], start=len(history) - limit + 1):
+    for i, msg in enumerate(
+        selected_messages,
+        start=max(0, len(history) - len(selected_messages)) + 1,
+    ):
         role = msg.get("role", "?")
         content = str(msg.get("content", ""))[:200]
         if len(content) == 200:
@@ -2393,6 +2448,12 @@ async def run_history_command(session: AgentSession, args: str) -> None:
         console.print(
             f"[dim]{ts}[/dim] [{color}]{icon} {role}:[/{color}] {content}"
         )
+
+
+def _print_history_json(payload: dict[str, Any]) -> None:
+    """Escribe una respuesta JSON limpia para automatización y scripts."""
+    sys.stdout.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
+    sys.stdout.flush()
 
 
 def _format_history_timestamp(ts: Any) -> str:

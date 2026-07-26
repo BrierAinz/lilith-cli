@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 
 def _run(coro):
@@ -119,6 +120,48 @@ def test_history_role_labels_in_output(fake_session, capsys):
     assert len(lines) == 2
     assert any("user:" in l for l in lines)
     assert any("assistant:" in l for l in lines)
+
+
+def test_history_json_messages_is_machine_readable(fake_session, capsys):
+    """/history --json emits only a stable JSON message payload."""
+    from lilith_cli.extra_commands import run_history_command
+
+    fake_session.history = [
+        {"role": "user", "content": "hola", "timestamp": "2026-07-11T10:00:00"},
+        {"role": "assistant", "content": "buenas", "timestamp": "2026-07-11T10:00:05"},
+    ]
+    _run(run_history_command(fake_session, "1 --json"))
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "kind": "messages",
+        "count": 1,
+        "messages": [
+            {
+                "index": 1,
+                "role": "assistant",
+                "content": "buenas",
+                "timestamp": "2026-07-11T10:00:05",
+            }
+        ],
+    }
+
+
+def test_history_json_tool_filter_is_machine_readable(fake_session, capsys):
+    """/history --tool ... --json emits matching calls without Rich markup."""
+    from lilith_cli.extra_commands import run_history_command
+
+    fake_session._tool_call_history = [
+        {"name": "file_read", "arguments": {"path": "a.py"}, "timestamp": "2026-07-11T10:00:00"},
+        {"name": "shell", "arguments": {"command": "ls"}, "timestamp": "2026-07-11T10:00:05"},
+    ]
+    _run(run_history_command(fake_session, "--tool file_read --json"))
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["kind"] == "tool_calls"
+    assert payload["tool"] == "file_read"
+    assert payload["count"] == 1
+    assert payload["calls"][0]["arguments"] == {"path": "a.py"}
 
 
 def test_history_truncates_long_content(fake_session, capsys):

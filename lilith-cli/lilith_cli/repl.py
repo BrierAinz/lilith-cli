@@ -79,6 +79,7 @@ from .extra_commands import (
     run_qr_command,
     run_random_command,
     run_pwd_command,
+    run_pr_command,
     run_test_command,
     run_recap_command,
     run_redact_command,
@@ -737,6 +738,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "git":
                     await run_git_command(session, cmd_args)
+                    continue
+                if cmd_name == "pr":
+                    await run_pr_command(session, cmd_args)
                     continue
                 if cmd_name == "hash":
                     await run_hash_command(session, cmd_args)

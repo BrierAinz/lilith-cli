@@ -9124,3 +9124,175 @@ async def run_random_command(session: AgentSession, args: str) -> None:  # noqa:
         return
 
     _render_random_usage()
+
+
+# ── /pr — Push branch & open GitHub PR ─────────────────────────────
+
+
+def _pr_detect_branch() -> str | None:
+    """Lee la rama actual del repo anclado al CWD del proceso.
+
+    Devuelve ``None`` si no estamos en un repo git o si la rama está detached.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+    branch = result.stdout.strip()
+    if not branch or branch == "HEAD":
+        return None
+    return branch
+
+
+def _pr_remote_url(remote: str = "origin") -> str | None:
+    """Devuelve la URL del remoto (SSH o HTTPS) o ``None`` si no existe."""
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", remote],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+    url = result.stdout.strip()
+    return url or None
+
+
+def _pr_compare_url(remote_url: str, base: str, head: str) -> str | None:
+    """Convierte una URL de remoto de GitHub en un enlace de compare.
+
+    Soporta tanto ``git@github.com:owner/repo(.git)`` como
+    ``https://github.com/owner/repo(.git)``. Devuelve ``None`` si el remoto
+    no parece ser de GitHub.
+    """
+    m = re.match(r"git@github\.com[:/](?P<path>[^/]+/[^/]+?)(?:\.git)?$", remote_url)
+    if not m:
+        m = re.match(r"https?://github\.com/(?P<path>[^/]+/[^/]+?)(?:\.git)?/?$", remote_url)
+    if not m:
+        return None
+    path = m.group("path")
+    return f"https://github.com/{path}/compare/{base}...{head}?expand=1"
+
+
+def _pr_render_usage() -> None:
+    console.print(
+        "[info]Uso:[/info] [bold cyan]/pr [base] [--no-push] [--dry-run] [--draft]\n"
+        "    [dim]base[/dim]   Rama destino (default: [cyan]main[/cyan]).\n"
+        "    [dim]--no-push[/dim]  No subir al remoto.\n"
+        "    [dim]--dry-run[/dim]  Mostrar plan sin ejecutar nada.\n"
+        "    [dim]--draft[/dim]    Abrir el PR como borrador (requiere [cyan]gh[/cyan])."
+    )
+
+
+async def run_pr_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+    """Empuja la rama actual y abre un Pull Request en GitHub.
+
+    Examples:
+        /pr
+        /pr main
+        /pr develop --draft
+        /pr --dry-run
+        /pr main --no-push
+    """
+    tokens = args.split()
+    if not tokens:
+        tokens = ["main"]
+    base = tokens[0]
+    no_push = "--no-push" in tokens
+    dry_run = "--dry-run" in tokens
+    draft = "--draft" in tokens
+    # Si el primer token es un flag (ej: /pr --no-push), usamos main como base.
+    if base.startswith("--"):
+        base = "main"
+
+    branch = _pr_detect_branch()
+    if not branch:
+        render_error("No se pudo detectar la rama actual. ¿Estás dentro de un repo git?")
+        return
+    if branch == base:
+        render_error(f"La rama actual ({branch!r}) es la misma que el destino ({base!r}).")
+        return
+
+    remote_url = _pr_remote_url("origin")
+    if not remote_url:
+        render_error(
+            "No hay remoto 'origin' configurado. Configurá uno con `git remote add origin …`."
+        )
+        return
+    compare = _pr_compare_url(remote_url, base, branch)
+    if not compare:
+        render_error(
+            f"El remoto 'origin' ({remote_url!r}) no parece ser de GitHub. "
+            "Por ahora /pr solo soporta GitHub."
+        )
+        return
+
+    console.print(f"[info]Rama:[/info]   [bold cyan]{branch}[/bold cyan]")
+    console.print(f"[info]Hacia:[/info]  [bold cyan]{base}[/bold cyan]")
+    console.print(f"[info]Remoto:[/info] [dim]{remote_url}[/dim]")
+    console.print(f"[info]URL:[/info]    [link={compare}]{compare}[/link]")
+    if dry_run:
+        console.print(
+            "[info]Modo dry-run:[/info] no se ejecutó [bold]git push[/bold] "
+            "ni [bold]gh pr create[/bold]."
+        )
+        return
+
+    if not no_push:
+        push = subprocess.run(
+            ["git", "push", "-u", "origin", branch],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if push.returncode != 0:
+            render_error(
+                "git push falló:\n"
+                + (push.stderr.strip() or push.stdout.strip() or "sin salida")
+            )
+            return
+        if push.stdout.strip():
+            console.print(f"[dim]{push.stdout.strip()}[/dim]")
+
+    # Detectar `gh` para abrir el PR programáticamente.
+    gh_path = shutil.which("gh")
+    if not gh_path:
+        console.print(
+            "[info]No se encontró [bold]gh[/bold] en el PATH.[/info]\n"
+            "Subí la rama manualmente y abrí el PR desde la URL de arriba."
+        )
+        return
+
+    gh_cmd = [
+        gh_path,
+        "pr",
+        "create",
+        "--base",
+        base,
+        "--head",
+        branch,
+    ]
+    if draft:
+        gh_cmd.append("--draft")
+    # Sin título/cuerpo, --fill usa el commit/branch como base.
+    gh_cmd.append("--fill")
+
+    gh = subprocess.run(gh_cmd, capture_output=True, text=True, timeout=60)
+    if gh.returncode != 0:
+        # No abortamos: el push ya se hizo, el usuario puede abrir el PR manual.
+        console.print(
+            "[warning]gh pr create falló. La rama YA está en el remoto; "
+            "abrí el PR desde la URL.[/warning]\n"
+            f"[dim]{gh.stderr.strip() or gh.stdout.strip() or 'sin salida'}[/dim]"
+        )
+        return
+    pr_url = gh.stdout.strip().splitlines()[-1] if gh.stdout.strip() else compare
+    console.print(f"[success]✓ PR abierto:[/success] [link={pr_url}]{pr_url}[/link]")

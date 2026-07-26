@@ -4482,11 +4482,86 @@ def _list_forks() -> list[str]:
     )
 
 
+def _fork_editor_command(editor: str, draft_path: Path) -> list[str]:
+    """Build a blocking editor command for a conversation draft."""
+    if os.name == "nt":
+        raw_command = shlex.split(editor, posix=False)
+        command = [
+            token[1:-1]
+            if len(token) >= 2 and token[0] == token[-1] and token[0] in {'"', "'"}
+            else token
+            for token in raw_command
+        ]
+    else:
+        command = shlex.split(editor)
+    if not command:
+        raise ValueError("el comando del editor está vacío")
+    executable = Path(command[0]).name.lower()
+
+    wait_editors = {
+        "code",
+        "code.exe",
+        "code-oss",
+        "code-oss.exe",
+        "cursor",
+        "cursor.exe",
+        "subl",
+        "subl.exe",
+    }
+    if executable in wait_editors and "--wait" not in command and "-w" not in command:
+        command.append("--wait")
+    command.append(str(draft_path))
+    return command
+
+
+def _edit_fork_history(snapshot: dict[str, Any], draft_path: Path) -> str | None:
+    """Edit a snapshot's messages as JSON, returning an error or ``None``."""
+    editor = _get_editor()
+    if not editor:
+        return "No se encontró un editor. Definí $EDITOR o usá /editor set <comando>."
+
+    draft = {
+        "instructions": "Editá solo la lista messages; guardá JSON válido para continuar.",
+        "messages": snapshot["history"],
+    }
+    try:
+        draft_path.write_text(
+            json.dumps(draft, indent=2, ensure_ascii=False, default=str),
+            encoding="utf-8",
+        )
+        result = subprocess.run(_fork_editor_command(editor, draft_path), check=False)
+        if result.returncode != 0:
+            return f"El editor terminó con código {result.returncode}; no se guardó el fork."
+        edited = json.loads(draft_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return f"No se pudo editar la conversación: {exc}"
+    finally:
+        try:
+            draft_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    messages = edited.get("messages") if isinstance(edited, dict) else None
+    if not isinstance(messages, list) or any(
+        not isinstance(message, dict)
+        or message.get("role") not in {"system", "user", "assistant", "tool"}
+        or "content" not in message
+        for message in messages
+    ):
+        return (
+            "El borrador debe contener un objeto JSON con una lista messages; "
+            "cada mensaje requiere role válido y content."
+        )
+    snapshot["history"] = messages
+    return None
+
+
 async def run_fork_command(session: AgentSession, args: str) -> None:
     """Ejecuta /fork para ramificar la sesión actual.
 
     Examples:
         /fork <nombre>          — Guarda el estado actual en una nueva sesión y vuelve al original
+        /fork <nombre> --edit   — Permite editar mensajes antes de guardar la bifurcación
         /fork list              — Lista las sesiones bifurcadas
         /fork switch <nombre>   — Cambia a una sesión bifurcada
         /fork delete <nombre>   — Elimina una sesión bifurcada
@@ -4539,21 +4614,38 @@ async def run_fork_command(session: AgentSession, args: str) -> None:
         )
         return
 
-    # /fork <nombre> — save current state to a named fork and return to original
-    name = text if text and not subcmd else subcmd
+    # /fork <nombre> [--edit] — save a snapshot without mutating the active session
+    try:
+        create_tokens = shlex.split(text)
+    except ValueError as exc:
+        render_error(f"Argumentos inválidos: {exc}")
+        return
+    edit_history = "--edit" in create_tokens
+    create_tokens = [token for token in create_tokens if token != "--edit"]
+    unknown_flags = [token for token in create_tokens if token.startswith("--")]
+    if unknown_flags:
+        render_error(f"Opción desconocida: {unknown_flags[0]}")
+        return
+    name = " ".join(create_tokens).strip()
     if not name:
-        render_error("Uso: /fork <nombre> | /fork list | /fork switch <nombre> | /fork delete <nombre>")
+        render_error("Uso: /fork <nombre> [--edit] | /fork list | /fork switch <nombre> | /fork delete <nombre>")
         return
     path = _fork_path(name)
     _FORKS_DIR.mkdir(parents=True, exist_ok=True)
+    snapshot = _serialize_session(session)
+    if edit_history:
+        edit_error = _edit_fork_history(snapshot, path.with_suffix(".edit.tmp"))
+        if edit_error:
+            render_error(edit_error)
+            return
     try:
         path.write_text(
-            json.dumps(_serialize_session(session), indent=2, ensure_ascii=False, default=str),
+            json.dumps(snapshot, indent=2, ensure_ascii=False, default=str),
             encoding="utf-8",
         )
         console.print(
             f"[success]✓ Sesión bifurcada guardada: [bold cyan]{name}[/] "
-            f"({len(session.history)} mensajes)[/]"
+            f"({len(snapshot['history'])} mensajes)[/]"
         )
     except Exception as exc:
         render_error(f"Error guardando la sesión bifurcada: {exc}")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -117,3 +118,52 @@ async def test_fork_switch_and_delete(tmp_path, monkeypatch):
     await run_fork_command(session, "delete prueba")
     assert not _fork_path("prueba").exists()
     assert _list_forks() == ["alternativa"]
+
+
+@pytest.mark.asyncio
+async def test_fork_edit_rewrites_copy_without_mutating_active_session(tmp_path, monkeypatch):
+    """--edit abre un JSON temporal y guarda los mensajes editados solo en el fork."""
+    from lilith_cli import extra_commands as ec
+
+    monkeypatch.setattr(ec, "_FORKS_DIR", tmp_path)
+    monkeypatch.setattr(ec, "_get_editor", lambda: "code")
+    session = DummySession()
+    original_history = list(session.history)
+
+    def fake_run(command, **kwargs):
+        assert command[-2] == "--wait"
+        draft_path = Path(command[-1])
+        draft = json.loads(draft_path.read_text(encoding="utf-8"))
+        draft["messages"] = [{"role": "user", "content": "prompt corregido"}]
+        draft_path.write_text(json.dumps(draft), encoding="utf-8")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(ec.subprocess, "run", fake_run)
+
+    await run_fork_command(session, "alternativa --edit")
+
+    saved = json.loads((tmp_path / "alternativa.json").read_text(encoding="utf-8"))
+    assert saved["history"][0]["content"] == "prompt corregido"
+    assert session.history == original_history
+    assert not (tmp_path / "alternativa.edit.tmp").exists()
+
+
+@pytest.mark.asyncio
+async def test_fork_edit_rejects_invalid_json_and_cleans_draft(tmp_path, monkeypatch, capsys):
+    """Un borrador inválido no crea el fork ni deja el archivo temporal."""
+    from lilith_cli import extra_commands as ec
+
+    monkeypatch.setattr(ec, "_FORKS_DIR", tmp_path)
+    monkeypatch.setattr(ec, "_get_editor", lambda: "vim")
+
+    def fake_run(command, **kwargs):
+        Path(command[-1]).write_text("JSON inválido", encoding="utf-8")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(ec.subprocess, "run", fake_run)
+
+    await run_fork_command(DummySession(), "fallido --edit")
+
+    assert not (tmp_path / "fallido.json").exists()
+    assert not (tmp_path / "fallido.edit.tmp").exists()
+    assert "No se pudo editar la conversación" in capsys.readouterr().out

@@ -2294,6 +2294,177 @@ async def run_capture_command(session: AgentSession, args: str) -> None:
 # ── /history command ─────────────────────────────────────────────────
 
 
+def _select_saved_conversation(
+    conversations: list[dict[str, Any]], selector: str
+) -> dict[str, Any] | None:
+    """Resolve a saved conversation by 1-based index or unique text match."""
+    try:
+        index = int(selector) - 1
+    except ValueError:
+        needle = selector.casefold()
+        matches = [
+            conversation
+            for conversation in conversations
+            if needle in str(conversation.get("name", "")).casefold()
+            or needle in str(conversation.get("preview", "")).casefold()
+        ]
+        if not matches:
+            render_error(f"No encontré una sesión guardada que coincida con {selector!r}.")
+            return None
+        if len(matches) > 1:
+            render_error(
+                f"{selector!r} coincide con {len(matches)} sesiones; "
+                "usá el número mostrado por /history sessions."
+            )
+            return None
+        return matches[0]
+
+    if 0 <= index < len(conversations):
+        return conversations[index]
+    render_error(
+        f"Índice fuera de rango: {selector} "
+        f"(hay {len(conversations)} sesiones guardadas)."
+    )
+    return None
+
+
+def _saved_session_slug(name: str) -> str:
+    """Return a filesystem-safe, human-readable saved-session name."""
+    slug = re.sub(r"[^\w.-]+", "-", name, flags=re.UNICODE).strip("-._")
+    return slug[:60]
+
+
+def _saved_session_payload(conversations: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build the stable JSON response for ``/history sessions --json``."""
+    return {
+        "kind": "saved_sessions",
+        "count": len(conversations),
+        "sessions": [
+            {
+                "index": index,
+                "name": conversation.get("name", ""),
+                "timestamp": conversation.get("timestamp", ""),
+                "model": conversation.get("model", "unknown"),
+                "provider": conversation.get("provider", "unknown"),
+                "message_count": conversation.get("message_count", 0),
+                "preview": conversation.get("preview", ""),
+            }
+            for index, conversation in enumerate(conversations, start=1)
+        ],
+    }
+
+
+def _run_saved_sessions_command(args: str) -> None:
+    """List, rename, or delete persisted conversations from ``/history``."""
+    from .repl import _list_saved_conversations
+
+    try:
+        tokens = shlex.split(args)
+    except ValueError as exc:
+        render_error(f"Argumentos inválidos: {exc}")
+        return
+
+    action = tokens[0].lower() if tokens else "sessions"
+    conversations = _list_saved_conversations()
+
+    if action in ("sessions", "saved"):
+        unknown = [token for token in tokens[1:] if token != "--json"]
+        if unknown:
+            render_error("Uso: /history sessions [--json]")
+            return
+        if "--json" in tokens[1:]:
+            _print_history_json(_saved_session_payload(conversations))
+            return
+        if not conversations:
+            console.print("[dim]No hay sesiones guardadas.[/]")
+            return
+
+        from rich.table import Table
+
+        table = Table(
+            title="[bold realm]᛭ Sesiones guardadas[/]",
+            border_style="cyan",
+            header_style="bold cyan",
+        )
+        table.add_column("#", justify="right", style="dim")
+        table.add_column("Nombre", style="bold frost")
+        table.add_column("Modelo")
+        table.add_column("Mensajes", justify="right")
+        table.add_column("Vista previa", style="dim", max_width=50)
+        for index, conversation in enumerate(conversations, start=1):
+            table.add_row(
+                str(index),
+                str(conversation.get("name", "")),
+                str(conversation.get("model", "unknown")),
+                str(conversation.get("message_count", 0)),
+                str(conversation.get("preview", "")) or "(sin mensajes de usuario)",
+            )
+        console.print(table)
+        console.print(
+            "[dim]/history rename <número|texto> <nombre> · "
+            "/history delete <número|texto> --yes[/]"
+        )
+        return
+
+    if action not in ("rename", "delete"):
+        render_error(
+            "Uso: /history [número] [--tool <nombre>] [--json] | "
+            "sessions [--json] | rename <selector> <nombre> | "
+            "delete <selector> --yes"
+        )
+        return
+    if not conversations:
+        console.print("[dim]No hay sesiones guardadas.[/]")
+        return
+
+    if action == "rename":
+        if len(tokens) < 3:
+            render_error("Uso: /history rename <número|texto> <nuevo nombre>")
+            return
+        conversation = _select_saved_conversation(conversations, tokens[1])
+        if conversation is None:
+            return
+        slug = _saved_session_slug(" ".join(tokens[2:]))
+        if not slug:
+            render_error("El nuevo nombre debe contener letras o números.")
+            return
+
+        source = Path(conversation["file"])
+        base_match = re.match(r"^(conv_\d{8}_\d{6})", source.stem)
+        base = base_match.group(1) if base_match else source.stem.split("__", 1)[0]
+        target = source.with_name(f"{base}__{slug}{source.suffix}")
+        if target.exists() and target != source:
+            render_error(f"Ya existe una sesión llamada {target.stem!r}.")
+            return
+        try:
+            source.rename(target)
+        except OSError as exc:
+            render_error(f"No pude renombrar la sesión: {exc}")
+            return
+        console.print(f"[success]✓ Sesión renombrada: {target.stem}[/]")
+        return
+
+    selector_tokens = [token for token in tokens[1:] if token != "--yes"]
+    if len(selector_tokens) != 1:
+        render_error("Uso: /history delete <número|texto> --yes")
+        return
+    conversation = _select_saved_conversation(conversations, selector_tokens[0])
+    if conversation is None:
+        return
+    if "--yes" not in tokens[1:]:
+        console.print(
+            f"[warning]Se eliminará {conversation['name']!r}. "
+            f"Confirmá con /history delete {selector_tokens[0]} --yes[/]"
+        )
+        return
+    try:
+        Path(conversation["file"]).unlink()
+    except OSError as exc:
+        render_error(f"No pude eliminar la sesión: {exc}")
+        return
+    console.print(f"[success]✓ Sesión eliminada: {conversation['name']}[/]")
+
+
 async def run_history_command(session: AgentSession, args: str) -> None:
     """Ejecuta /history para mostrar los últimos mensajes de la conversación.
 
@@ -2303,9 +2474,17 @@ async def run_history_command(session: AgentSession, args: str) -> None:
         /history --tool file_read
         /history 20 --tool file_read
         /history 20 --json
+        /history sessions
+        /history rename 2 refactor-auth
+        /history delete refactor-auth --yes
     """
     # ── Parse args: optional <limit>, --tool <name>, and --json ──────────
     text = args.strip()
+    first = text.split(maxsplit=1)[0].lower() if text else ""
+    if first in ("sessions", "saved", "rename", "delete"):
+        _run_saved_sessions_command(text)
+        return
+
     limit: int | None = None
     tool_filter: str | None = None
     json_mode = False

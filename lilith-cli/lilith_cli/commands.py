@@ -3039,6 +3039,7 @@ class MacroCommand(BaseCommand):
         /macro list           — list saved macros
         /macro show <name>    — display the recorded commands
         /macro edit <name>    — open the macro in $EDITOR for inline editing
+        /macro rename <old> <new> — rename a saved macro
         /macro delete <name>  — delete a macro
     """
 
@@ -3074,6 +3075,9 @@ class MacroCommand(BaseCommand):
         if subcmd == "edit":
             await self._edit(rest)
             return
+        if subcmd in ("rename", "mv"):
+            await self._rename(rest)
+            return
         if subcmd in ("delete", "rm", "remove"):
             await self._delete(rest)
             return
@@ -3089,6 +3093,7 @@ class MacroCommand(BaseCommand):
         console.print("  [bold cyan]/macro list[/]           — Listar macros guardadas")
         console.print("  [bold cyan]/macro show <nombre>[/]  — Ver comandos de la macro")
         console.print("  [bold cyan]/macro edit <nombre>[/]  — Editar en \$EDITOR")
+        console.print("  [bold cyan]/macro rename <actual> <nuevo>[/] — Renombrar una macro")
         console.print("  [bold cyan]/macro delete <nombre>[/] — Eliminar una macro")
         console.print()
 
@@ -3210,6 +3215,32 @@ class MacroCommand(BaseCommand):
         del macros[name]
         _save_macros(macros)
         console.print(f"[success]✓ Macro '[model]{name}[/]' eliminada.[/]")
+
+    async def _rename(self, args: str) -> None:
+        parts = args.split(maxsplit=1)
+        if len(parts) != 2:
+            render_error("Uso: /macro rename <actual> <nuevo>")
+            return
+
+        old_name, new_name = parts
+        if "/" in new_name or " " in new_name:
+            render_error("El nombre de la macro no puede contener '/' ni espacios.")
+            return
+
+        macros = _load_macros()
+        if old_name not in macros:
+            render_error(f"Macro no encontrada: [model]{old_name}[/]")
+            return
+        if new_name in macros:
+            render_error(f"La macro '[model]{new_name}[/]' ya existe.")
+            return
+
+        macros[new_name] = macros.pop(old_name)
+        _save_macros(macros)
+        console.print(
+            f"[success]✓ Macro renombrada:[/] [model]{old_name}[/] → "
+            f"[bold cyan]{new_name}[/]"
+        )
 
     async def _show(self, name: str) -> None:
         """/macro show <name> prints the recorded commands so the user can

@@ -452,6 +452,8 @@ def run_spawn(
             stdout=log_fh,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         try:
             exit_code = proc.wait(timeout=max(1, timeout))

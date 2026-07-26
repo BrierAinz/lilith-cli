@@ -57,6 +57,8 @@ class GitMixin:
                 cwd=self.root,  # type: ignore[attr-defined]
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=0.5,
             )
             return result.stdout.strip() if result.returncode == 0 else ""

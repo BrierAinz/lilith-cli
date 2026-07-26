@@ -8814,6 +8814,16 @@ async def run_cd_command(session: AgentSession, args: str) -> None:  # noqa: ARG
         console.print(f"[info]Directorio actual:[/] [bold cyan]{Path.cwd()}[/]")
         return
 
+    # Las rutas con espacios se escriben entre comillas por costumbre de shell
+    # (y porque otros comandos del REPL, como /random, las parsean con shlex).
+    # Sin desenvolverlas la ruta se toma como relativa y en Windows falla
+    # siempre: "D:\Proyectos\Influencer IA" no existe dentro del cwd.
+    if len(raw_path) >= 2 and raw_path[0] == raw_path[-1] and raw_path[0] in ('"', "'"):
+        raw_path = raw_path[1:-1].strip()
+        if not raw_path:
+            render_error("Uso: /cd [ruta]")
+            return
+
     target = Path(raw_path).expanduser()
     if not target.is_absolute():
         target = Path.cwd() / target

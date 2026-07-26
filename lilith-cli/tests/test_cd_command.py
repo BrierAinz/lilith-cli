@@ -79,6 +79,44 @@ async def test_cd_rejects_files(fake_session, tmp_path, monkeypatch, capsys):
     assert "directorio" in capsys.readouterr().out.lower()
 
 
+@pytest.mark.asyncio
+async def test_cd_accepts_quoted_path_with_spaces(fake_session, tmp_path, monkeypatch, capsys):
+    """Rutas con espacios entre comillas: sin desenvolverlas se toman como relativas."""
+    start = tmp_path / "start"
+    target = tmp_path / "Influencer IA"
+    start.mkdir()
+    target.mkdir()
+    monkeypatch.chdir(start)
+
+    await run_cd_command(fake_session, f'"{target}"')
+
+    assert Path.cwd() == target
+    assert "Directorio actual" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_cd_accepts_single_quoted_path(fake_session, tmp_path, monkeypatch):
+    start = tmp_path / "start"
+    target = tmp_path / "otra carpeta"
+    start.mkdir()
+    target.mkdir()
+    monkeypatch.chdir(start)
+
+    await run_cd_command(fake_session, f"'{target}'")
+
+    assert Path.cwd() == target
+
+
+@pytest.mark.asyncio
+async def test_cd_with_only_quotes_is_an_error(fake_session, tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+
+    await run_cd_command(fake_session, '""')
+
+    assert Path.cwd() == tmp_path
+    assert "uso" in capsys.readouterr().out.lower()
+
+
 def test_cd_is_wired_in_repl():
     import lilith_cli.repl as repl_module
 

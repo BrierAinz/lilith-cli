@@ -6928,6 +6928,193 @@ def _truncate_content(content: str, *, max_lines: int = 15) -> str:
     return "\n".join(head) + f"\n[dim]… (+{hidden} líneas más)[/dim]"
 
 
+# ── /goal command ─────────────────────────────────────────────────────
+
+_GOAL_MARKER = "[LILITH_SESSION_GOAL]"
+_GOAL_STATES = {"active", "paused", "completed"}
+
+
+def _goal_from_session(session: AgentSession) -> dict[str, Any] | None:
+    """Return the session goal, recovering it from saved conversation history."""
+    # History is the source of truth: /resume and /fork replace it in-place,
+    # so consulting a cache first could leak the previous conversation's goal.
+    for message in getattr(session, "history", []) or []:
+        if not isinstance(message, dict) or message.get("role") != "system":
+            continue
+        content = str(message.get("content", ""))
+        first_line = content.splitlines()[0] if content else ""
+        if not first_line.startswith(_GOAL_MARKER):
+            continue
+        try:
+            goal = json.loads(first_line[len(_GOAL_MARKER) :].strip())
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if (
+            isinstance(goal, dict)
+            and goal.get("objective")
+            and goal.get("status") in _GOAL_STATES
+        ):
+            session._session_goal = goal
+            return goal
+    session._session_goal = None
+    return None
+
+
+def _sync_goal_message(session: AgentSession, goal: dict[str, Any] | None) -> None:
+    """Keep one model-visible goal message in history (and therefore in saves)."""
+    history = [
+        message
+        for message in (getattr(session, "history", []) or [])
+        if not (
+            isinstance(message, dict)
+            and message.get("role") == "system"
+            and str(message.get("content", "")).startswith(_GOAL_MARKER)
+        )
+    ]
+    session._session_goal = goal
+    if goal is not None:
+        budget = goal.get("budget_tokens")
+        budget_line = f"\nToken budget: {budget}" if budget else ""
+        instructions = {
+            "active": (
+                "Keep this objective in focus. Do not claim it is complete until "
+                "the relevant verification tools confirm the result."
+            ),
+            "paused": "This objective is paused. Do not continue it until it is resumed.",
+            "completed": "This objective is recorded as completed; do not restart it implicitly.",
+        }
+        content = (
+            f"{_GOAL_MARKER} {json.dumps(goal, ensure_ascii=False, separators=(',', ':'))}\n"
+            f"SESSION GOAL ({goal['status']}): {goal['objective']}"
+            f"{budget_line}\n{instructions[goal['status']]}"
+        )
+        history.insert(0, {"role": "system", "content": content})
+    session.history = history
+
+
+def _parse_goal_budget(value: str) -> int:
+    """Parse positive token budgets such as 8000, 8k, or 1.5m."""
+    match = re.fullmatch(r"(?i)(\d+(?:\.\d+)?)([km]?)", value.strip())
+    if not match:
+        raise ValueError("el presupuesto debe ser un número, por ejemplo 8000 o 8k")
+    multiplier = {"": 1, "k": 1_000, "m": 1_000_000}[match.group(2).lower()]
+    budget = int(float(match.group(1)) * multiplier)
+    if budget <= 0:
+        raise ValueError("el presupuesto debe ser mayor que cero")
+    return budget
+
+
+def _goal_snapshot(session: AgentSession, goal: dict[str, Any]) -> dict[str, Any]:
+    """Add current token accounting to a goal without mutating it."""
+    total = int((getattr(session, "_total_usage", {}) or {}).get("total_tokens", 0))
+    used = max(0, total - int(goal.get("started_tokens", 0)))
+    budget = goal.get("budget_tokens")
+    return {
+        **goal,
+        "used_tokens": used,
+        "remaining_tokens": max(0, int(budget) - used) if budget else None,
+        "over_budget": bool(budget and used > int(budget)),
+    }
+
+
+def _render_goal(session: AgentSession, goal: dict[str, Any] | None) -> None:
+    """Render the current goal and its lifecycle state in Spanish."""
+    if goal is None:
+        console.print("[dim]No hay un objetivo de sesión activo.[/]")
+        console.print(
+            "[dim]Uso: /goal <objetivo> [--budget 8k] · "
+            "/goal pause|resume|complete|clear|json[/]"
+        )
+        return
+
+    snapshot = _goal_snapshot(session, goal)
+    labels = {"active": "activo", "paused": "en pausa", "completed": "completado"}
+    console.print("\n[bold realm]᛭ Objetivo de sesión[/]")
+    console.print(f"  [bold cyan]{snapshot['objective']}[/]")
+    console.print(f"  [info]Estado:[/] {labels[snapshot['status']]}")
+    if snapshot.get("budget_tokens"):
+        console.print(
+            f"  [info]Tokens:[/] {snapshot['used_tokens']:,} / "
+            f"{snapshot['budget_tokens']:,} · restantes {snapshot['remaining_tokens']:,}"
+        )
+        if snapshot["over_budget"]:
+            console.print("  [warning]⚠ Se superó el presupuesto del objetivo.[/]")
+    console.print()
+
+
+async def run_goal_command(session: AgentSession, args: str) -> None:
+    """Gestiona un objetivo persistente y visible para el modelo por sesión."""
+    text = args.strip()
+    goal = _goal_from_session(session)
+    command = text.lower()
+
+    if not text or command in {"status", "show"}:
+        _render_goal(session, goal)
+        return
+    if command == "json":
+        payload = _goal_snapshot(session, goal) if goal else None
+        sys.stdout.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+        sys.stdout.flush()
+        return
+    if command in {"clear", "reset"}:
+        _sync_goal_message(session, None)
+        console.print("[success]✓ Objetivo de sesión eliminado.[/]")
+        return
+    if command in {"pause", "resume", "complete"}:
+        if goal is None:
+            render_error("No hay un objetivo de sesión. Usa /goal <objetivo>.")
+            return
+        target_state = {"pause": "paused", "resume": "active", "complete": "completed"}[
+            command
+        ]
+        goal = dict(goal)
+        goal["status"] = target_state
+        if target_state == "completed":
+            goal["completed_at"] = datetime.now(UTC).isoformat()
+        else:
+            goal.pop("completed_at", None)
+        _sync_goal_message(session, goal)
+        _render_goal(session, goal)
+        return
+
+    try:
+        tokens = shlex.split(text)
+    except ValueError as exc:
+        render_error(f"Argumentos inválidos: {exc}")
+        return
+    if tokens and tokens[0].lower() == "set":
+        tokens.pop(0)
+
+    budget: int | None = None
+    if "--budget" in tokens:
+        index = tokens.index("--budget")
+        if index + 1 >= len(tokens):
+            render_error("Uso: /goal <objetivo> [--budget 8k]")
+            return
+        try:
+            budget = _parse_goal_budget(tokens[index + 1])
+        except ValueError as exc:
+            render_error(str(exc))
+            return
+        del tokens[index : index + 2]
+
+    objective = " ".join(tokens).strip()
+    if not objective:
+        render_error("Uso: /goal <objetivo> [--budget 8k]")
+        return
+    total = int((getattr(session, "_total_usage", {}) or {}).get("total_tokens", 0))
+    goal = {
+        "objective": objective,
+        "status": "active",
+        "created_at": datetime.now(UTC).isoformat(),
+        "started_tokens": total,
+        "budget_tokens": budget,
+    }
+    _sync_goal_message(session, goal)
+    console.print("[success]✓ Objetivo de sesión fijado y compartido con el modelo.[/]")
+    _render_goal(session, goal)
+
+
 async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
     """Show available commands grouped by category (/help [category])."""
     from rich.table import Table
@@ -6954,6 +7141,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("pin", "Fijar mensaje al contexto siempre visible"),
             ("cls", "Limpiar la pantalla del terminal (sin tocar historial)"),
             ("recent", "Archivos editados recientemente [N | clear]"),
+            ("goal", "Objetivo persistente de sesión [pause|resume|complete|clear|json]"),
         ],
         "Configuration": [
             ("config", "Configuración actual"),

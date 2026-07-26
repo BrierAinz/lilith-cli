@@ -60,6 +60,7 @@ from .extra_commands import (
     run_fork_command,
     run_format_command,
     run_git_command,
+    run_goal_command,
     run_hash_command,
     run_help_command,
     run_history_command,
@@ -192,6 +193,7 @@ _SLASH_COMMANDS = [
     "/stream",
     "/history",
     "/hist",
+    "/goal",
     "/last-tool",
     "/quote",
     "/compact",
@@ -942,6 +944,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "history":
                     await run_history_command(session, cmd_args)
+                    continue
+                if cmd_name == "goal":
+                    await run_goal_command(session, cmd_args)
                     continue
                 if cmd_name == "explain":
                     await run_explain_command(session, cmd_args)

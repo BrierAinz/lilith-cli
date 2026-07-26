@@ -910,6 +910,27 @@ class AgentSession:
         """Build the full message list to send to the LLM."""
         messages: list[dict[str, Any]] = [Message.system(self.system_prompt)]
 
+        # /goal metadata lives in history so /save and /resume preserve it,
+        # while the model sees it as part of the root system prompt.
+        from .extra_commands import _GOAL_MARKER, _goal_from_session
+
+        session_goal = _goal_from_session(self)
+        goal_extra = ""
+        if session_goal is not None:
+            goal_status = session_goal["status"]
+            goal_instruction = {
+                "active": (
+                    "Keep this objective in focus. Do not claim completion "
+                    "until the relevant verification tools confirm the result."
+                ),
+                "paused": "This objective is paused; do not continue it until resumed.",
+                "completed": "This objective is completed; do not restart it implicitly.",
+            }[goal_status]
+            goal_extra = (
+                f"\n\nSESSION GOAL ({goal_status}): "
+                f"{session_goal['objective']}\n{goal_instruction}"
+            )
+
         # Add tool descriptions into the system prompt.
         tools_desc = self.get_tool_descriptions()
         if tools_desc and self._tools_enabled:
@@ -960,6 +981,7 @@ class AgentSession:
                         f"{pending.description}\n"
                         "Mark steps complete with /plan done <n>."
                     )
+            extras += goal_extra
             messages[0]["content"] += (
                 f"\n\nYou have access to the following tools:\n{tool_lines}"
                 f"{extras}\n\n"
@@ -971,6 +993,8 @@ class AgentSession:
                 "in a single response and the system will run them in parallel. "
                 "When you have enough information to answer directly, do so."
             )
+        elif goal_extra:
+            messages[0]["content"] += goal_extra
 
         # Inject project-local instructions from .lilith/CLAUDE.md.
         project_instructions = self._load_project_instructions()
@@ -979,9 +1003,19 @@ class AgentSession:
                 f"\n\nPROJECT INSTRUCTIONS:\n{project_instructions}"
             )
 
-        # Trim history to max_turns.
+        # Trim history to max_turns. The /goal metadata is persisted in history
+        # but already merged into the root system prompt above.
         max_turns = self.config.history.max_turns
-        history = self.history[-max_turns * 2 :]  # user+assistant = 2 messages per turn
+        visible_history = [
+            message
+            for message in self.history
+            if not (
+                isinstance(message, dict)
+                and message.get("role") == "system"
+                and str(message.get("content", "")).startswith(_GOAL_MARKER)
+            )
+        ]
+        history = visible_history[-max_turns * 2 :]  # user+assistant = 2 messages per turn
 
         messages.extend(history)
         return messages

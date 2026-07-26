@@ -3245,6 +3245,7 @@ class MacroCommand(BaseCommand):
         /macro record.
         """
         import os
+        import shlex
         import subprocess
         import tempfile
 
@@ -3287,8 +3288,9 @@ class MacroCommand(BaseCommand):
 
         try:
             console.print(f"[dim]Abriendo {editor} en {tmp_path}...[/]")
+            command = shlex.split(editor, posix=os.name != "nt")
             result = subprocess.run(
-                [editor, str(tmp_path)],
+                [*command, str(tmp_path)],
                 shell=False,
             )
             if result.returncode != 0:

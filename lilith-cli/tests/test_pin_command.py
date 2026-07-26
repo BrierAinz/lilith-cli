@@ -1,90 +1,68 @@
-"""Tests for /pin command in lilith_cli.extra_commands."""
+"""Pruebas del comando de barra /pin."""
 
 from __future__ import annotations
-
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 from lilith_cli.extra_commands import run_pin_command
 
 
-class DummyConfig:
-    def __init__(self):
-        self.model = "test"
-        self.provider = "test"
-        self.providers = {}
-        self.api_key = ""
-        self.system_prompt = ""
-
-    def model_dump(self):
-        return {
-            "model": self.model,
-            "provider": self.provider,
-            "providers": self.providers,
-            "api_key": self.api_key,
-        }
-
-
-class DummySession:
-    def __init__(self):
-        self.config = DummyConfig()
-        self.memory = None
-        self.history = []
-        self.provider = None
-        self.system_prompt = ""
-        self._pinned_messages: list[dict] = []
-
-
 @pytest.mark.asyncio
-async def test_pin_pinned_messages_list_and_clear():
-    """/pin list y /pin clear manejan la lista de mensajes pineados."""
-    session = DummySession()
-    session.history = [
+async def test_pin_fija_mensaje_por_indice_y_lo_lista(fake_session, capsys):
+    """El índice conserva la convención existente: 1 es el mensaje más reciente."""
+    fake_session.history = [
         {"role": "user", "content": "primero"},
         {"role": "assistant", "content": "segundo"},
         {"role": "user", "content": "tercero"},
     ]
 
-    prints = []
+    await run_pin_command(fake_session, "1")
+    await run_pin_command(fake_session, "list")
 
-    def capture(text: str = ""):
-        prints.append(str(text))
-
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
-        await run_pin_command(session, "1")
-        await run_pin_command(session, "3")
-        await run_pin_command(session, "list")
-        await run_pin_command(session, "clear")
-        await run_pin_command(session, "list")
-
-    assert len(session._pinned_messages) == 0
-    assert any("tercero" in p for p in prints)
-    assert any("Mensajes pineados" in p for p in prints)
-    assert any("No hay mensajes pineados" in p for p in prints)
+    salida = capsys.readouterr().out
+    assert len(fake_session._pinned_messages) == 1
+    assert fake_session._pinned_messages[0]["content"] == "tercero"
+    assert "Mensaje fijado en el índice 1: tercero" in salida
+    assert "1." in salida and "tercero" in salida
 
 
 @pytest.mark.asyncio
-async def test_pin_remove_nth_pinned_message():
-    """/pin remove <n> elimina el n-ésimo mensaje pineado."""
-    session = DummySession()
-    session.history = [
-        {"role": "user", "content": "primero"},
-        {"role": "assistant", "content": "segundo"},
-        {"role": "user", "content": "tercero"},
+async def test_pin_sin_argumentos_muestra_ayuda_y_clear_limpia(fake_session, capsys):
+    """Sin argumentos informa el estado sin fijar; clear vacía la sesión."""
+    fake_session.history = [{"role": "user", "content": "único"}]
+
+    await run_pin_command(fake_session, "")
+    ayuda = capsys.readouterr().out
+    assert "Uso de /pin" in ayuda
+    assert "/pin <n>" in ayuda
+    assert "No hay mensajes" in ayuda
+    assert fake_session._pinned_messages == []
+
+    await run_pin_command(fake_session, "1")
+    capsys.readouterr()
+    await run_pin_command(fake_session, "ClEaR")
+
+    salida = capsys.readouterr().out
+    assert fake_session._pinned_messages == []
+    assert "Mensajes fijados eliminados: 1" in salida
+
+
+@pytest.mark.asyncio
+async def test_pin_indice_fuera_de_rango_y_no_numerico_reportan_error(fake_session, capsys):
+    """Los índices fuera de rango y los argumentos no numéricos se reportan sin fijar nada."""
+    fake_session.history = [
+        {"role": "user", "content": "a"},
+        {"role": "assistant", "content": "b"},
     ]
 
-    prints = []
+    # Índice fuera de rango: no debe añadir nada a _pinned_messages.
+    await run_pin_command(fake_session, "99")
+    out_rango = capsys.readouterr().out
+    assert fake_session._pinned_messages == []
+    assert "fuera de rango" in out_rango
 
-    def capture(text: str = ""):
-        prints.append(str(text))
-
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
-        await run_pin_command(session, "3")
-        await run_pin_command(session, "2")
-        await run_pin_command(session, "remove 1")
-
-    assert len(session._pinned_messages) == 1
-    assert session._pinned_messages[0]["content"] == "segundo"
-    assert any("Despineado" in p for p in prints)
+    # Argumento no numérico: tampoco debe modificar el estado.
+    await run_pin_command(fake_session, "abc")
+    out_nan = capsys.readouterr().out
+    assert fake_session._pinned_messages == []
+    assert "Uso: /pin" in out_nan

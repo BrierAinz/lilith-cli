@@ -127,3 +127,63 @@ def test_default_profiles_structure():
     assert _DEFAULT_PROFILES["fast"]["model"] == "deepseek-v4-flash"
     assert _DEFAULT_PROFILES["reasoning"]["model"] == "claude-opus-4"
     assert _DEFAULT_PROFILES["local"]["model"] == "local-model"
+
+
+@pytest.mark.asyncio
+async def test_profile_save_persiste_tema_sin_secretos(profiles_file):
+    """/profile save guarda el tema activo, pero nunca credenciales ni prompts."""
+    session = DummySession()
+    session.config.provider = "proveedor-seguro"
+    session.config.model = "modelo-seguro"
+    session.config.api_key = "secreto-que-no-debe-guardarse"
+    session.config.system_prompt = "prompt privado"
+    previous_theme = extra_commands.get_theme().name
+
+    try:
+        extra_commands.set_theme("cyberpunk")
+        await run_profile_command(session, "save seguro")
+    finally:
+        extra_commands.set_theme(previous_theme)
+
+    saved = _load_profiles()["seguro"]
+    assert saved["provider"] == "proveedor-seguro"
+    assert saved["model"] == "modelo-seguro"
+    assert saved["theme"] == "cyberpunk"
+    assert "api_key" not in saved
+    assert "system_prompt" not in saved
+
+
+@pytest.mark.asyncio
+async def test_profile_list_y_load_incluyen_tema(profiles_file):
+    """/profile lista los tres campos y load aplica también el tema guardado."""
+    _save_profiles(
+        {
+            "minimalista": {
+                "provider": "local",
+                "model": "modelo-local",
+                "theme": "minimal",
+            }
+        }
+    )
+    session = DummySession()
+    prints = []
+    previous_theme = extra_commands.get_theme().name
+
+    def capture(text: str = ""):
+        prints.append(text)
+
+    try:
+        extra_commands.set_theme("norse")
+        with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+            await run_profile_command(session, "list")
+            await run_profile_command(session, "load minimalista")
+
+        output = "".join(str(item) for item in prints)
+        assert "provider=local" in output
+        assert "model=modelo-local" in output
+        assert "theme=minimal" in output
+        assert session.config.provider == "local"
+        assert session.config.model == "modelo-local"
+        assert extra_commands.get_theme().name == "minimal"
+    finally:
+        extra_commands.set_theme(previous_theme)

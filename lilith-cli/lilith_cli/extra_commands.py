@@ -749,6 +749,8 @@ async def run_diff_staged_command(session: AgentSession, args: str) -> None:  # 
             cmd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
     except Exception as exc:
@@ -857,6 +859,8 @@ async def run_diff_unstaged_command(session: AgentSession, args: str) -> None:  
             cmd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
     except Exception as exc:
@@ -1107,7 +1111,7 @@ async def run_lint_command(session: AgentSession, args: str) -> None:  # noqa: A
         try:
             staged_proc = subprocess.run(
                 ["git", "diff", "--cached", "--name-only"],
-                capture_output=True, text=True, check=False,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
             )
         except FileNotFoundError:
             render_error("git no está disponible en PATH")
@@ -3044,8 +3048,12 @@ async def run_profile_command(session: AgentSession, args: str) -> None:
         console.print("\n[bold realm]᛭ Perfiles de agente[/]\n")
         for name, profile in sorted(profiles.items()):
             desc = profile.get("description", "")
+            provider = profile.get("provider", "—")
+            model = profile.get("model", "—")
+            theme = profile.get("theme", "—")
             console.print(
                 f"  [bold cyan]{name}[/]"
+                f" — [dim]provider={provider} · model={model} · theme={theme}[/]"
                 f"{f' — [dim]{desc}[/]' if desc else ''}"
             )
         console.print()
@@ -3064,6 +3072,7 @@ async def run_profile_command(session: AgentSession, args: str) -> None:
         profiles[rest] = {
             "provider": session.config.provider,
             "model": session.config.model,
+            "theme": get_theme().name,
             "description": f"Basado en {session.config.provider}/{session.config.model}",
         }
         _save_profiles(profiles)
@@ -3090,6 +3099,15 @@ async def run_profile_command(session: AgentSession, args: str) -> None:
             render_error(f"Perfil no encontrado: {rest}")
             return
         profile = profiles[rest]
+        profile_theme = profile.get("theme")
+        if profile_theme:
+            try:
+                set_theme(str(profile_theme))
+            except KeyError:
+                render_error(
+                    f"El perfil {rest} referencia un tema desconocido: {profile_theme}"
+                )
+                return
         if hasattr(session.config, "provider"):
             session.config.provider = profile.get("provider", session.config.provider)
         if hasattr(session.config, "model"):
@@ -3201,56 +3219,45 @@ def _render_tour_step(step: int) -> None:
 # ── /pin command ─────────────────────────────────────────────────────────
 
 
-async def run_pin_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
-    """Fija un mensaje importante en la conversación actual.
+async def run_pin_command(session: AgentSession, args: str) -> None:
+    """Gestiona mensajes fijados de la conversación actual.
 
     Examples:
-        /pin                 — fija el último mensaje del asistente
+        /pin                 — muestra ayuda y estado
         /pin <n>             — fija el n-ésimo mensaje del historial (1-based)
         /pin list | --list   — lista los mensajes fijados
         /pin remove <n>      — elimina el fijado en el índice n
         /pin clear | --clear — elimina todos los fijados
     """
-    from lilith_tools import ToolRegistry
-
     text = args.strip()
     pins = _load_pin_entries(session)
-
-    # Parse simple flag-style arguments. Accept both --flag and bare subcommand
-    # forms (``list``/``clear``/``remove N``) so the REPL UX stays simple.
     parts = text.split()
 
     def _persist() -> None:
-        """Mirror pins into session attribute and persist to disk."""
-        # Keep the in-memory mirror (used by session serialization / fork / QR).
-        session._pinned_messages = list(pins)
+        """Guarda los fijados exclusivamente en la sesión actual."""
         _save_pin_entries(session, pins)
 
     if not parts:
-        result = _pin_default_message(session, pins)
-        if not result.get("ok"):
-            render_error(result.get("error", "Error fijando mensaje"))
-            return
-        _persist()
-        _print_pin_result(result, pins)
-        _register_pin_tool()
-        ToolRegistry.get("pin_message")  # ensure import side-effect only
+        console.print("[bold realm]Uso de /pin[/]")
+        console.print("  [cyan]/pin <n>[/]   — fija el mensaje n de la conversación")
+        console.print("  [cyan]/pin list[/]  — lista los mensajes fijados")
+        console.print("  [cyan]/pin clear[/] — elimina todos los mensajes fijados")
+        _print_pinned_messages(pins)
         return
 
     head = parts[0].lower()
     if head in ("--list", "-l", "list", "ls"):
         _print_pinned_messages(pins)
-        _register_pin_tool()
         return
 
     if head in ("--clear", "clear", "reset"):
         count = len(pins)
         pins.clear()
         _persist()
-        console.print(f"[success]✓ {count} mensaje(s) pineado(s) eliminado(s).[/]")
-        _register_pin_tool()
+        console.print(f"[success]✓ Mensajes fijados eliminados: {count}[/]")
         return
 
+    # Se conservan los alias históricos para no romper scripts existentes.
     if head in ("--unpin", "-u", "remove", "rm", "unpin"):
         if len(parts) < 2:
             render_error("Uso: /pin remove <índice>")
@@ -3260,29 +3267,23 @@ async def run_pin_command(session: AgentSession, args: str) -> None:  # noqa: AR
         except ValueError:
             render_error("remove requiere un índice entero")
             return
-        if not pins:
-            render_error("No hay mensajes pineados.")
-            return
         if index < 1 or index > len(pins):
-            render_error(f"Índice fuera de rango: {index} (hay {len(pins)} pineados)")
+            render_error(f"Índice fuera de rango: {index} (hay {len(pins)} fijados)")
             return
         removed = pins.pop(index - 1)
         _persist()
         role = removed.get("role", "?")
-        content_preview = str(removed.get("content") or removed.get("text", ""))[:40]
-        if len(content_preview) == 40:
-            content_preview += "…"
-        console.print(f"[warning]✗ Despineado [#{index}] {role}: {content_preview}[/]")
-        _register_pin_tool()
+        preview = str(removed.get("content") or removed.get("text", ""))[:40]
+        console.print(f"[warning]✗ Desfijado [#{index}] {role}: {preview}[/]")
         return
 
-    # Optional positional <index>: pin that 1-based message in history.
+    if len(parts) != 1:
+        render_error("Uso: /pin | /pin <n> | /pin list | /pin clear")
+        return
     try:
-        index = int(parts[0])
+        index = int(head)
     except ValueError:
-        render_error(
-            "Uso: /pin | /pin <n> | /pin list | /pin remove <n> | /pin clear"
-        )
+        render_error("Uso: /pin | /pin <n> | /pin list | /pin clear")
         return
 
     result = _pin_message_at_index(session, pins, index)
@@ -3292,19 +3293,16 @@ async def run_pin_command(session: AgentSession, args: str) -> None:  # noqa: AR
     _persist()
     msg = result["entry"]
     preview = str(msg.get("content") or msg.get("text", ""))[:80]
-    if len(preview) == 80:
-        preview += "…"
-    console.print(f"📌 Mensaje pineado en el índice {index}: {preview}")
-    _register_pin_tool()
+    console.print(f"📌 Mensaje fijado en el índice {index}: {preview}")
 
 
 def _print_pinned_messages(pinned: list[dict[str, Any]]) -> None:
-    """Renderiza los mensajes pineados con su índice."""
+    """Renderiza los mensajes fijados con su índice."""
     if not pinned:
-        console.print("[dim]No hay mensajes pineados.[/]")
+        console.print("[dim]No hay mensajes fijados.[/]")
         return
 
-    console.print("\n[bold realm]᛭ Mensajes pineados[/]")
+    console.print("\n[bold realm]᛭ Mensajes fijados[/]")
     for i, msg in enumerate(pinned, start=1):
         role = msg.get("role", "?")
         content = str(msg.get("content") or msg.get("text", ""))
@@ -3319,71 +3317,19 @@ def _print_pinned_messages(pinned: list[dict[str, Any]]) -> None:
 # ---------------------------------------------------------------------------
 # /pin storage + helpers + tool (pin_message)
 # ---------------------------------------------------------------------------
-import uuid as _uuid
-
-
-def _pin_storage_path() -> Path:
-    """Return the path to ``~/.lilith/pins.json`` (created lazily)."""
-    base = Path.home() / ".lilith"
-    base.mkdir(parents=True, exist_ok=True)
-    return base / "pins.json"
-
-
-def _get_session_id(session: AgentSession) -> str:
-    """Return a stable session id, generating a uuid if missing."""
-    sid = getattr(session, "session_id", None)
-    if not sid:
-        sid = getattr(session, "_session_id", None)
-    if not sid:
-        sid = str(_uuid.uuid4())
-        try:
-            session._session_id = sid
-        except Exception:
-            pass
-    return sid
 
 
 def _load_pin_entries(session: AgentSession) -> list[dict[str, Any]]:
-    """Load pinned-message entries for the current session.
-
-    Prefers the in-memory ``session._pinned_messages`` mirror (used by session
-    serialization / fork / QR) and falls back to the on-disk JSON store
-    when no in-memory copy exists yet.
-    """
+    """Obtiene una copia de los mensajes fijados en la sesión actual."""
     mirror = getattr(session, "_pinned_messages", None)
-    if isinstance(mirror, list) and mirror:
-        return [dict(e) for e in mirror if isinstance(e, dict)]
-    path = _pin_storage_path()
-    if not path.exists():
+    if not isinstance(mirror, list):
         return []
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8") or "{}")
-    except (json.JSONDecodeError, OSError):
-        return []
-    sid = _get_session_id(session)
-    entries = payload.get(sid) or []
-    if not isinstance(entries, list):
-        return []
-    return [e for e in entries if isinstance(e, dict)]
+    return [dict(entry) for entry in mirror if isinstance(entry, dict)]
 
 
 def _save_pin_entries(session: AgentSession, entries: list[dict[str, Any]]) -> None:
-    """Persist pinned-message entries for the current session to disk."""
-    path = _pin_storage_path()
-    payload: dict[str, Any] = {}
-    if path.exists():
-        try:
-            existing = json.loads(path.read_text(encoding="utf-8") or "{}")
-            if isinstance(existing, dict):
-                payload = existing
-        except (json.JSONDecodeError, OSError):
-            payload = {}
-    sid = _get_session_id(session)
-    payload[sid] = list(entries)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    """Guarda los mensajes fijados únicamente en memoria de la sesión."""
+    session._pinned_messages = [dict(entry) for entry in entries]
 
 
 def _make_pin_entry(message: dict[str, Any], index: int) -> dict[str, Any]:
@@ -4544,16 +4490,19 @@ _DEFAULT_PROFILES: dict[str, dict[str, Any]] = {
     "fast": {
         "provider": "deepseek",
         "model": "deepseek-v4-flash",
+        "theme": "norse",
         "description": "Rápido y económico",
     },
     "reasoning": {
         "provider": "anthropic",
         "model": "claude-opus-4",
+        "theme": "norse",
         "description": "Razonamiento profundo (costoso)",
     },
     "local": {
         "provider": "local",
         "model": "local-model",
+        "theme": "norse",
         "description": "Modelo local, sin costo de API",
     },
 }
@@ -4624,6 +4573,30 @@ _PYTEST_SUMMARY_RE = re.compile(
     re.IGNORECASE,
 )
 _DURATION_RE = re.compile(r"in\s+(?P<seconds>[0-9]+(?:\.[0-9]+)?)s", re.IGNORECASE)
+
+
+def _test_repo_root() -> Path:
+    """Devuelve la raíz desde la que se ejecuta el runner de pytest."""
+    return Path(__file__).resolve().parents[3]
+
+
+def _validate_test_target(target: str) -> str | None:
+    """Valida que el objetivo de pytest permanezca dentro de Asgard.
+
+    El objetivo puede incluir un node-id (``archivo.py::test_nombre``), pero
+    nunca se ejecutan rutas absolutas o traversal fuera de la raíz del repo.
+    """
+    path_part = target.split("::", 1)[0].strip()
+    if not path_part:
+        return "El objetivo de /test no puede estar vacío."
+
+    try:
+        candidate = Path(path_part).expanduser()
+        resolved = (candidate if candidate.is_absolute() else _test_repo_root() / candidate).resolve()
+        resolved.relative_to(_test_repo_root())
+    except (OSError, RuntimeError, ValueError):
+        return "La ruta de /test está fuera del repositorio o no es válida."
+    return None
 
 
 def _parse_pytest_summary(text: str) -> dict[str, Any]:
@@ -4726,7 +4699,20 @@ def _run_pytest_subprocess(
     """
     if cwd is None:
         # Asgard root sits two levels above lilith-stack/lilith-cli
-        cwd = Path(__file__).resolve().parents[3]
+        cwd = _test_repo_root()
+
+    target_error = _validate_test_target(target)
+    if target_error:
+        return {
+            "passed": 0,
+            "failed": 0,
+            "error": 0,
+            "duration": 0.0,
+            "last_failure": None,
+            "returncode": -1,
+            "command": [],
+            "error": target_error,
+        }
 
     venv_py = cwd / ".venv" / "Scripts" / "python.exe"
     if sys.platform != "win32":
@@ -4745,6 +4731,8 @@ def _run_pytest_subprocess(
             cwd=str(cwd),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=600,
         )
     except FileNotFoundError as exc:
@@ -4881,6 +4869,12 @@ async def run_test_command(session: AgentSession, args: str) -> None:  # noqa: A
         i += 1
     if path_tokens:
         target = " ".join(path_tokens)
+
+    target_error = _validate_test_target(target)
+    if target_error:
+        console.print(f"[error]{target_error}[/error]")
+        console.print()
+        return
 
     summary = _run_pytest_subprocess(target, keyword=keyword)
     if summary.get("error"):
@@ -5184,6 +5178,8 @@ async def run_release_command(session, args):  # noqa: ARG001
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         commit = subprocess.run(
             [
@@ -5200,6 +5196,8 @@ async def run_release_command(session, args):  # noqa: ARG001
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
     except FileNotFoundError:
         console.print("[error]git no está disponible en PATH[/error]")
@@ -5321,12 +5319,12 @@ async def run_whereami_command(session: AgentSession, args: str) -> None:  # noq
     try:
         branch_proc = _sp.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, timeout=5, cwd=cwd,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5, cwd=cwd,
         )
         branch = branch_proc.stdout.strip() or "(detached HEAD)"
         last_proc = _sp.run(
             ["git", "log", "-1", "--oneline"],
-            capture_output=True, text=True, timeout=5, cwd=cwd,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5, cwd=cwd,
         )
         last = last_proc.stdout.strip() or "(no commits)"
         grid.add_row("Git branch", f"[bold cyan]{branch}[/bold cyan]")
@@ -5375,7 +5373,7 @@ async def run_lint_fix_command(session: AgentSession, args: str) -> None:  # noq
         try:
             proc = subprocess.run(
                 [ruff, "check", "--fix", target],
-                capture_output=True, text=True, timeout=60,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
             )
             if proc.stdout:
                 console.print(proc.stdout)
@@ -5396,7 +5394,7 @@ async def run_lint_fix_command(session: AgentSession, args: str) -> None:  # noq
         try:
             proc = subprocess.run(
                 [black, target],
-                capture_output=True, text=True, timeout=60,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
             )
             if proc.stdout:
                 console.print(proc.stdout)
@@ -5544,7 +5542,7 @@ def _run_deep_checks(session: AgentSession) -> list[dict]:
     try:
         proc = subprocess.run(
             ["git", "remote", "-v"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
         )
         if proc.returncode == 0 and proc.stdout.strip():
             remote_count = len(proc.stdout.strip().split("\n"))
@@ -6727,7 +6725,7 @@ def _deps_render_outdated(deps) -> None:
         try:
             proc = subprocess.run(
                 [pip, "index", "versions", name],
-                capture_output=True, text=True, timeout=8,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=8,
             )
             out = (proc.stdout or "") + (proc.stderr or "")
         except (subprocess.TimeoutExpired, OSError):
@@ -9149,6 +9147,8 @@ def _pr_detect_branch() -> str | None:
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=True,
             timeout=10,
         )
@@ -9167,6 +9167,8 @@ def _pr_remote_url(remote: str = "origin") -> str | None:
             ["git", "remote", "get-url", remote],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=True,
             timeout=10,
         )
@@ -9261,6 +9263,8 @@ async def run_pr_command(session: AgentSession, args: str) -> None:  # noqa: ARG
             ["git", "push", "-u", "origin", branch],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=60,
         )
         if push.returncode != 0:
@@ -9295,7 +9299,7 @@ async def run_pr_command(session: AgentSession, args: str) -> None:  # noqa: ARG
     # Sin título/cuerpo, --fill usa el commit/branch como base.
     gh_cmd.append("--fill")
 
-    gh = subprocess.run(gh_cmd, capture_output=True, text=True, timeout=60)
+    gh = subprocess.run(gh_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
     if gh.returncode != 0:
         # No abortamos: el push ya se hizo, el usuario puede abrir el PR manual.
         console.print(

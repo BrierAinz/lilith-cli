@@ -165,7 +165,40 @@ async def test_test_command_with_target_path():
     assert args[0] == "lilith-stack/lilith-cli/tests/test_plan.py"
 
 
-# ── /test -k <expr> ───────────────────────────────────────────────────────
+@pytest.mark.asyncio
+async def test_test_command_rechaza_ruta_fuera_del_repositorio(tmp_path):
+    """/test no debe pasar rutas externas al runner."""
+    prints, stop = _capture_prints()
+    try:
+        with patch(
+            "lilith_cli.extra_commands._run_pytest_subprocess",
+            return_value={},
+        ) as run_mock:
+            await run_test_command(DummySession(), str(tmp_path / "externo.py"))
+    finally:
+        stop()
+
+    run_mock.assert_not_called()
+    output = "".join(str(p) for p in prints)
+    assert "fuera del repositorio" in output
+
+
+@pytest.mark.asyncio
+async def test_test_command_rechaza_traversal_de_ruta():
+    """/test bloquea traversal relativo fuera de la raíz de ejecución."""
+    prints, stop = _capture_prints()
+    try:
+        with patch(
+            "lilith_cli.extra_commands._run_pytest_subprocess",
+            return_value={},
+        ) as run_mock:
+            await run_test_command(DummySession(), "../fuera-del-repo/tests")
+    finally:
+        stop()
+
+    run_mock.assert_not_called()
+    output = "".join(str(p) for p in prints)
+    assert "fuera del repositorio" in output
 
 
 @pytest.mark.asyncio

@@ -177,6 +177,8 @@ _SLASH_COMMANDS = [
     "/diffstaged",
     "/diff-unstaged",
     "/diffunstaged",
+    "/diff-branch",
+    "/diffbranch",
     "/diff-config",
     "/quit",
     "/exit",

@@ -11326,3 +11326,138 @@ async def run_security_command(session: AgentSession, args: str) -> None:  # noq
         "(bandit, semgrep, codeql).[/dim]"
     )
     console.print()
+
+
+async def run_diff_branch_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+    """Muestra el diff entre HEAD y una referencia arbitraria (/diff-branch).
+
+    Acepta un branch, tag o commit arbitrario como ref y compara contra HEAD.
+    Por defecto usa ``git diff <ref>...HEAD`` (cambios introducidos en HEAD
+    desde <ref>) — el triple-punto estándar que ya entienden los usuarios de
+    git. Soporta el modo ``stats`` para una tabla compacta de archivos +/-
+    y un path opcional al final para acotar la salida a un archivo.
+
+    Examples:
+        /diff-branch main                — diff HEAD vs main
+        /diff-branch main stats          — tabla con archivos + +/- counts
+        /diff-branch v1.2.0              — diff contra un tag
+        /diff-branch origin/main src/foo.py  — un solo archivo
+    """
+    tokens = args.split()
+    if not tokens:
+        render_error(
+            "Uso: /diff-branch <ref> [stats] [<archivo>] — por ejemplo "
+            "/diff-branch main"
+        )
+        return
+
+    ref = tokens[0]
+    # ``stats`` se consume como flag, no como parte del ref. Si aparece
+    # más tarde (después de un path) la ignoramos para no romper el contrato.
+    rest = tokens[1:]
+    use_stats = bool(rest) and rest[0].lower() == "stats"
+    if use_stats:
+        rest = rest[1:]
+    file_filter = rest[0] if rest else ""
+
+    if use_stats:
+        if file_filter:
+            cmd = ["git", "diff", "--numstat", f"{ref}...HEAD", "--", file_filter]
+        else:
+            cmd = ["git", "diff", "--numstat", f"{ref}...HEAD"]
+    elif file_filter:
+        cmd = ["git", "diff", f"{ref}...HEAD", "--", file_filter]
+    else:
+        cmd = ["git", "diff", f"{ref}...HEAD"]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except Exception as exc:
+        render_error(f"Error ejecutando git diff {ref}...HEAD: {exc}")
+        return
+
+    if result.returncode != 0:
+        error = result.stderr.strip() or (
+            f"Error desconocido ejecutando git diff {ref}...HEAD"
+        )
+        render_error(error)
+        return
+
+    output = result.stdout.strip()
+    if not output:
+        console.print(
+            f"[dim]Sin cambios entre [bold cyan]{ref}[/] y HEAD.[/]"
+        )
+        return
+
+    console.print(
+        f"\n[bold realm]᛭ Diff[/] [bold cyan]{ref}[/] → "
+        f"[bold cyan]HEAD[/]"
+        + (f" — {file_filter}" if file_filter else "")
+    )
+
+    if use_stats:
+        _render_diff_branch_stats(output, ref)
+    else:
+        console.print(output, markup=False, highlight=False)
+    console.print()
+
+
+def _render_diff_branch_stats(numstat_output: str, ref: str) -> None:
+    """Render the ``--numstat`` output of ``git diff <ref>...HEAD``.
+
+    Reutiliza exactamente el mismo formato Rich Table que
+    ``_render_diff_staged_stats`` para que el usuario vea el mismo look
+    en ``/diff-staged stats`` y ``/diff-branch <ref> stats``. La única
+    diferencia visible es el footer, que incluye la referencia contra
+    la que se compara.
+    """
+    from rich.table import Table
+
+    table = Table(
+        show_header=True,
+        header_style="bold cyan",
+        border_style="cyan",
+        expand=False,
+    )
+    table.add_column("Archivo", style="tool.name")
+    table.add_column("+", justify="right", style="green", width=6)
+    table.add_column("-", justify="right", style="red", width=6)
+
+    total_add = 0
+    total_del = 0
+    rows = 0
+    for line in numstat_output.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        added_raw, removed_raw, path = parts[0], parts[1], "\t".join(parts[2:])
+        # Binary files report '-' for both counts.
+        if added_raw == "-" and removed_raw == "-":
+            added = "-"
+            removed = "-"
+        else:
+            try:
+                added = int(added_raw)
+                removed = int(removed_raw)
+                total_add += added
+                total_del += removed
+            except ValueError:
+                added = added_raw
+                removed = removed_raw
+        rows += 1
+        table.add_row(path, str(added), str(removed))
+
+    console.print(table)
+    if rows:
+        console.print(
+            f"[dim]{rows} archivo(s) entre [bold cyan]{ref}[/] y HEAD · "
+            f"+{total_add} -{total_del} líneas[/]"
+        )

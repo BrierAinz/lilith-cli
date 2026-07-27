@@ -49,6 +49,7 @@ from .extra_commands import (
     run_recent_command,
     run_learn_command,
     run_deps_command,
+    run_diff_branch_command,
     run_diff_staged_command,
     run_diff_unstaged_command,
     run_doctor_command,
@@ -768,6 +769,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name in ("diff-unstaged", "diffunstaged"):
                     await run_diff_unstaged_command(session, cmd_args)
+                    continue
+                if cmd_name in ("diff-branch", "diffbranch"):
+                    await run_diff_branch_command(session, cmd_args)
                     continue
                 if cmd_name == "todos":
                     await run_todos_command(session, cmd_args)

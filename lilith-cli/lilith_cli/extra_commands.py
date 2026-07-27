@@ -3739,15 +3739,69 @@ _TOUR_STEPS: list[tuple[str, str]] = [
 async def run_tour_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
     """Ejecuta /tour para iniciar un recorrido interactivo por Lilith.
 
+    Subcomandos disponibles:
+
+    - (sin args)              → muestra todos los pasos seguidos
+    - ``list``                → lista los títulos numerados (sin contenido)
+    - ``step N``              → salta al paso N
+    - ``next`` / ``prev`` / ``n`` / ``p``  → navega un paso (estado en sesión)
+    - ``skip``                → cancela el recorrido activo
+    - ``reset``               → reinicia el cursor del recorrido al paso 1
+
+    El estado ``next``/``prev`` se guarda en ``session._tour_cursor`` para
+    que la navegación sea persistente mientras el REPL siga vivo.
+
     Examples:
         /tour
+        /tour list
         /tour step 2
+        /tour next
+        /tour prev
         /tour skip
     """
     text = args.strip().lower()
 
-    if text == "skip":
+    if text in ("skip", "cancel", "quit", "exit"):
         console.print("\n[dim]Recorrido cancelado.[/]\n")
+        _reset_tour_cursor(session)
+        return
+
+    if text in ("list", "ls", "index", "titles"):
+        _render_tour_index()
+        return
+
+    if text in ("reset", "rewind", "restart"):
+        _reset_tour_cursor(session)
+        console.print(
+            f"[dim]Cursor del recorrido reiniciado al paso 1 de {len(_TOUR_STEPS)}.[/dim]"
+        )
+        return
+
+    if text in ("next", "n", "forward", ">>"):
+        cursor = _get_tour_cursor(session)
+        if cursor is None:
+            cursor = 0
+        next_step = cursor + 1
+        if next_step > len(_TOUR_STEPS):
+            render_error(
+                f"Ya estás en el último paso ({len(_TOUR_STEPS)}). "
+                "Usá /tour reset para volver al inicio."
+            )
+            return
+        _render_tour_step(next_step)
+        _set_tour_cursor(session, next_step)
+        return
+
+    if text in ("prev", "previous", "p", "back", "<<"):
+        cursor = _get_tour_cursor(session)
+        if cursor is None or cursor <= 1:
+            render_error(
+                "Estás en el primer paso. Usá /tour step 1 para repetirlo."
+            )
+            return
+        prev_step = cursor - 1
+        _render_tour_step(prev_step)
+        _set_tour_cursor(session, prev_step)
         return
 
     if text.startswith("step"):
@@ -3761,16 +3815,76 @@ async def run_tour_command(session: AgentSession, args: str) -> None:  # noqa: A
             render_error(f"Paso inválido: {step}. El recorrido tiene 1-{len(_TOUR_STEPS)}.")
             return
         _render_tour_step(step)
+        _set_tour_cursor(session, step)
+        return
+
+    if text == "help":
+        _render_tour_help()
         return
 
     if text:
-        render_error("Uso: /tour [step N|skip]")
+        render_error(
+            "Uso: /tour [list|step N|next|prev|reset|skip|help]"
+        )
         return
 
     console.print("\n[bold realm]᛭ Recorrido interactivo de Lilith[/]")
     for i in range(1, len(_TOUR_STEPS) + 1):
         _render_tour_step(i)
-    console.print("[dim]Recorrido completado. Escribí /tour skip para salir o /tour step N para repetir un paso.[/]\n")
+    _set_tour_cursor(session, len(_TOUR_STEPS))
+    console.print(
+        "[dim]Recorrido completado. Usá /tour step N para repetir un paso o "
+        "/tour reset para volver al inicio.[/]\n"
+    )
+
+
+def _get_tour_cursor(session: AgentSession) -> int | None:
+    """Devuelve el cursor actual del recorrido (1-based) o ``None``."""
+    return getattr(session, "_tour_cursor", None)
+
+
+def _set_tour_cursor(session: AgentSession, step: int) -> None:
+    """Persiste el cursor del recorrido en la sesión."""
+    try:
+        session._tour_cursor = step  # type: ignore[attr-defined]
+    except Exception:
+        # En sesiones mock sin __dict__ escribible, ignorar silenciosamente.
+        pass
+
+
+def _reset_tour_cursor(session: AgentSession) -> None:
+    """Limpia el cursor del recorrido en la sesión."""
+    try:
+        if hasattr(session, "_tour_cursor"):
+            del session._tour_cursor  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+
+def _render_tour_index() -> None:
+    """Lista los títulos numerados del recorrido sin volcar el contenido."""
+    console.print(
+        f"\n[bold realm]᛭ Recorrido de Lilith[/] [dim]({len(_TOUR_STEPS)} pasos)[/]\n"
+    )
+    for i, (title, _body) in enumerate(_TOUR_STEPS, start=1):
+        console.print(f"  [bold cyan]{i}.[/] {title}")
+    console.print(
+        "\n[dim]Usá /tour step N para ver un paso, o /tour next/prev para navegar.[/]\n"
+    )
+
+
+def _render_tour_help() -> None:
+    """Imprime la ayuda del comando /tour."""
+    console.print("\n[bold realm]᛭ /tour[/bold realm] [dim]— recorrido interactivo[/dim]\n")
+    console.print("[bold]Subcomandos:[/bold]")
+    console.print("  [cyan]/tour[/]             [dim]# muestra los 5 pasos seguidos[/dim]")
+    console.print("  [cyan]/tour list[/]         [dim]# lista los títulos numerados[/dim]")
+    console.print("  [cyan]/tour step <n>[/]     [dim]# salta al paso n (1-{})[/dim]".format(len(_TOUR_STEPS)))
+    console.print("  [cyan]/tour next[/]         [dim]# avanza un paso[/dim]")
+    console.print("  [cyan]/tour prev[/]         [dim]# retrocede un paso[/dim]")
+    console.print("  [cyan]/tour reset[/]        [dim]# vuelve al paso 1[/dim]")
+    console.print("  [cyan]/tour skip[/]         [dim]# cancela el recorrido[/dim]")
+    console.print("  [cyan]/tour help[/]         [dim]# esta ayuda[/dim]\n")
 
 
 def _render_tour_step(step: int) -> None:

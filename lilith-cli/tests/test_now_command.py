@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 
 
@@ -107,3 +108,46 @@ def test_now_explicit_local_with_iso(fake_session, capsys):
     # Unix y RFC no se pidieron.
     assert "Unix:" not in out
     assert "RFC:" not in out
+
+
+def test_now_json_emits_machine_readable(fake_session, capsys):
+    """/now --json emite un único objeto JSON con las 5 formas de timestamp."""
+    from lilith_cli.extra_commands import run_now_command
+
+    _run(run_now_command(fake_session, "--json"))
+
+    out = capsys.readouterr().out.strip()
+    # Sin prefijos Rich como "Local:" ni "[info]" — solo JSON limpio.
+    assert "Local:" not in out
+    assert "UTC:" not in out
+    assert "[" not in out  # Rich markup ausente
+    payload = json.loads(out)
+    assert set(payload.keys()) == {"unix", "utc", "iso", "rfc", "local"}
+    # unix debe ser un entero positivo en el rango esperado (>= 2025).
+    assert isinstance(payload["unix"], int)
+    assert payload["unix"] > 1_700_000_000
+    # iso termina en Z porque construimos desde un datetime aware en UTC.
+    assert payload["iso"].endswith("Z")
+    # utc e iso deben coincidir en su parte de fecha/hora (mod segundos).
+    assert payload["utc"][:10] == payload["iso"][:10]
+    # rfc respeta el patrón RFC 2822 canónico.
+    assert re.search(
+        r"[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} [+-]\d{4}",
+        payload["rfc"],
+    )
+
+
+def test_now_json_with_extra_flags(fake_session, capsys):
+    """/now --json --utc --unix sigue emitiendo JSON completo (no mezcla Rich)."""
+    from lilith_cli.extra_commands import run_now_command
+
+    _run(run_now_command(fake_session, "--json --utc --unix"))
+
+    out = capsys.readouterr().out.strip()
+    payload = json.loads(out)
+    # Cuando --json esta activo, ninguna etiqueta Rich debe contaminar la salida.
+    assert "Local:" not in out
+    assert "UTC:" not in out
+    assert "Unix:" not in out
+    # Pero el payload completo sigue presente.
+    assert "unix" in payload and "local" in payload and "utc" in payload

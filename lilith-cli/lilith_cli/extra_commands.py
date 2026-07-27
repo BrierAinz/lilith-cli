@@ -6740,13 +6740,15 @@ def _run_deep_checks(session: AgentSession) -> list[dict]:
 
 
 async def run_now_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
-    """Show current timestamps (/now [--utc|--local|--unix|--iso|--rfc]).
+    """Show current timestamps (/now [--utc|--local|--unix|--iso|--rfc|--json]).
 
     Examples:
         /now
         /now --utc
         /now --unix --iso
         /now --rfc
+        /now --json
+        /now --unix --iso --json
     """
     from datetime import datetime, timezone
 
@@ -6755,32 +6757,60 @@ async def run_now_command(session: AgentSession, args: str) -> None:  # noqa: AR
     show_utc = "--utc" in tokens
     show_iso = "--iso" in tokens
     show_rfc = "--rfc" in tokens
+    as_json = "--json" in tokens
     explicit_local = "--local" in tokens
     # Si ningún flag específico se pasa, mostramos local como antes.
-    any_specific = show_unix or show_utc or show_iso or show_rfc
+    any_specific = show_unix or show_utc or show_iso or show_rfc or as_json
     show_local = explicit_local or not any_specific
 
     now_utc = datetime.now(timezone.utc)
     now_local = datetime.now()
 
+    # Construimos el payload (siempre las 4 formas en UTC + local), y solo
+    # emitimos Rich si no se pidio --json. Esto mantiene el modo
+    # machine-readable estable para scripts y pipelines.
+    payload: dict[str, object] = {
+        "unix": int(now_utc.timestamp()),
+        "utc": now_utc.strftime("%Y-%m-%d %H:%M:%S"),
+        "iso": now_utc.isoformat().replace("+00:00", "Z"),
+        "rfc": _now_rfc_value(now_utc),
+        "local": now_local.strftime("%Y-%m-%d %H:%M:%S %Z (%z)"),
+    }
+
+    if as_json:
+        import json as _json
+        # ``--json`` reemplaza la salida Rich: una sola linea, parseable.
+        console.print(_json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        console.print()
+        return
+
     if show_local:
-        console.print(f"[info]Local:[/info]  [bold cyan]{now_local.strftime('%Y-%m-%d %H:%M:%S %Z (%z)')}[/bold cyan]")
+        console.print(f"[info]Local:[/info]  [bold cyan]{payload['local']}[/bold cyan]")
     if show_utc:
-        console.print(f"[info]UTC:[/info]    [bold cyan]{now_utc.strftime('%Y-%m-%d %H:%M:%S')}[/bold cyan]")
+        console.print(f"[info]UTC:[/info]    [bold cyan]{payload['utc']}[/bold cyan]")
     if show_unix:
-        console.print(f"[info]Unix:[/info]   [bold cyan]{int(now_utc.timestamp())}[/bold cyan]")
+        console.print(f"[info]Unix:[/info]   [bold cyan]{payload['unix']}[/bold cyan]")
     if show_iso:
         # ISO 8601 — el formato universal para logs, APIs y versionado.
-        console.print(f"[info]ISO:[/info]    [bold cyan]{now_utc.isoformat().replace('+00:00', 'Z')}[/bold cyan]")
+        console.print(f"[info]ISO:[/info]    [bold cyan]{payload['iso']}[/bold cyan]")
     if show_rfc:
         # RFC 2822 — formato de email / HTTP, útil para tickets y logs de correo.
-        try:
-            from email.utils import format_datetime as _fmt_rfc
-            rfc_value = _fmt_rfc(now_utc)
-        except ImportError:  # pragma: no cover — email.utils es stdlib siempre disponible.
-            rfc_value = now_utc.strftime("%a, %d %b %Y %H:%M:%S +0000")
-        console.print(f"[info]RFC:[/info]    [bold cyan]{rfc_value}[/bold cyan]")
+        console.print(f"[info]RFC:[/info]    [bold cyan]{payload['rfc']}[/bold cyan]")
     console.print()
+
+
+def _now_rfc_value(now_utc) -> str:
+    """Format an aware UTC datetime as RFC 2822, falling back gracefully.
+
+    ``email.utils.format_datetime`` es la implementacion canonica; si por
+    algun motivo no estuviera disponible (ejecutable reducido de Python)
+    caemos a ``strftime`` con el formato RFC 2822 manual.
+    """
+    try:
+        from email.utils import format_datetime as _fmt_rfc
+        return _fmt_rfc(now_utc)
+    except ImportError:  # pragma: no cover — email.utils es stdlib siempre disponible.
+        return now_utc.strftime("%a, %d %b %Y %H:%M:%S +0000")
 
 # ── /hash command ───────────────────────────────────────────────
 

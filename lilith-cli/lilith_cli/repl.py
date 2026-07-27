@@ -134,6 +134,7 @@ from .batch_command import run_batch_command
 from .completion_command import run_completion_command
 from .how_command import run_how_command
 from .pipeline_command import run_pipeline_command
+from .undo_command import run_undo_peek_command
 from .tool_progress import DelegationLive, DelegationStreamBuffer, ToolProgressTracker, render_tool_progress
 from .trace import AgentTrace
 from .workflow_command import run_workflow_command
@@ -165,6 +166,9 @@ _SLASH_COMMANDS = [
     "/workflow",
     "/pipeline",
     "/batch",
+    "/undo-peek",
+    "/undo-diff",
+    "/peeks",
     "/bench",
     "/diff-config",
     "/diffconfig",
@@ -806,6 +810,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "batch":
                     await run_batch_command(session, cmd_args)
+                    continue
+                if cmd_name in ("undo-peek", "undo-diff", "peeks"):
+                    await run_undo_peek_command(session, cmd_args)
                     continue
                 if cmd_name == "lint":
                     await run_lint_command(session, cmd_args)

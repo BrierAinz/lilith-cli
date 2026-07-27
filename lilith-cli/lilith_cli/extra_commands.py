@@ -6740,13 +6740,25 @@ def _run_deep_checks(session: AgentSession) -> list[dict]:
 
 
 async def run_now_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
-    """Show current timestamps (/now [--utc|--local|--unix])."""
+    """Show current timestamps (/now [--utc|--local|--unix|--iso|--rfc]).
+
+    Examples:
+        /now
+        /now --utc
+        /now --unix --iso
+        /now --rfc
+    """
     from datetime import datetime, timezone
 
     tokens = args.split()
     show_unix = "--unix" in tokens
     show_utc = "--utc" in tokens
-    show_local = "--local" in tokens or not (show_unix or show_utc)
+    show_iso = "--iso" in tokens
+    show_rfc = "--rfc" in tokens
+    explicit_local = "--local" in tokens
+    # Si ningún flag específico se pasa, mostramos local como antes.
+    any_specific = show_unix or show_utc or show_iso or show_rfc
+    show_local = explicit_local or not any_specific
 
     now_utc = datetime.now(timezone.utc)
     now_local = datetime.now()
@@ -6757,6 +6769,17 @@ async def run_now_command(session: AgentSession, args: str) -> None:  # noqa: AR
         console.print(f"[info]UTC:[/info]    [bold cyan]{now_utc.strftime('%Y-%m-%d %H:%M:%S')}[/bold cyan]")
     if show_unix:
         console.print(f"[info]Unix:[/info]   [bold cyan]{int(now_utc.timestamp())}[/bold cyan]")
+    if show_iso:
+        # ISO 8601 — el formato universal para logs, APIs y versionado.
+        console.print(f"[info]ISO:[/info]    [bold cyan]{now_utc.isoformat().replace('+00:00', 'Z')}[/bold cyan]")
+    if show_rfc:
+        # RFC 2822 — formato de email / HTTP, útil para tickets y logs de correo.
+        try:
+            from email.utils import format_datetime as _fmt_rfc
+            rfc_value = _fmt_rfc(now_utc)
+        except ImportError:  # pragma: no cover — email.utils es stdlib siempre disponible.
+            rfc_value = now_utc.strftime("%a, %d %b %Y %H:%M:%S +0000")
+        console.print(f"[info]RFC:[/info]    [bold cyan]{rfc_value}[/bold cyan]")
     console.print()
 
 # ── /hash command ───────────────────────────────────────────────

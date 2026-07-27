@@ -130,6 +130,7 @@ from .render import (
     render_welcome,
     set_theme,
 )
+from .batch_command import run_batch_command
 from .completion_command import run_completion_command
 from .how_command import run_how_command
 from .pipeline_command import run_pipeline_command
@@ -163,6 +164,7 @@ _SLASH_COMMANDS = [
     "/s",
     "/workflow",
     "/pipeline",
+    "/batch",
     "/bench",
     "/diff-config",
     "/diffconfig",
@@ -801,6 +803,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "pipeline":
                     await run_pipeline_command(session, cmd_args)
+                    continue
+                if cmd_name == "batch":
+                    await run_batch_command(session, cmd_args)
                     continue
                 if cmd_name == "lint":
                     await run_lint_command(session, cmd_args)

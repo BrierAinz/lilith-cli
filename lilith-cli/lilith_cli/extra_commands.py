@@ -1163,21 +1163,87 @@ async def run_review_command(session: AgentSession, args: str) -> None:  # noqa:
         await _run_review_agent_command(session, tokens)
         return
 
-    try:
-        from lilith_tools.git_tools import ReviewPullRequestTool as _ReviewPT
-        result = _ReviewPT().execute(args=args)
-    except ImportError:
-        from lilith_tools.git_tools import GitOperationTool
-
-        # Map the documented /review flags onto allowed git operations.
-        sub = args.strip().lstrip("-") or "diff"
-        op, op_args = {
-            "diff": ("diff", ""),
-            "staged": ("diff", "--cached"),
-            "files": ("diff", "--name-only"),
-        }.get(sub, (sub, ""))
-        result = GitOperationTool().execute(op=op, args=op_args)
+    # Map the documented /review flags onto allowed git operations. Keep the
+    # context collection here so every review uses the hardened git runner
+    # below instead of an optional implementation with different safeguards.
+    sub = args.strip().lstrip("-") or "diff"
+    op, op_args = {
+        "diff": ("diff", ""),
+        "staged": ("diff", "--cached"),
+        "files": ("diff", "--name-only"),
+    }.get(sub, (sub, ""))
+    result = _run_review_git(op=op, args=op_args)
     _print_tool_result(result)
+
+
+def _run_review_git(*, op: str, args: str = "") -> ToolResult:
+    """Recopila contexto Git sin ejecutar configuración activa del repo.
+
+    ``git diff`` puede ejecutar comandos definidos por un repositorio no
+    confiable mediante ``core.fsmonitor`` o ``diff.external``. La revisión
+    ocurre antes de cualquier aprobación de herramientas, así que anulamos
+    esas extensiones y también los drivers ``textconv`` para que obtener el
+    diff sea una operación puramente de lectura.
+    """
+    op = op.strip().lower()
+    allowed = {"status", "diff"}
+    if op not in allowed:
+        return ToolResult(
+            success=False,
+            data=None,
+            error=f"Operación de revisión no permitida: '{op}'. Permitidas: diff, status",
+        )
+
+    try:
+        extra = shlex.split(args, posix=False) if args else []
+    except ValueError as exc:
+        return ToolResult(success=False, data=None, error=f"Argumentos Git inválidos: {exc}")
+    extra = [
+        token[1:-1]
+        if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'"
+        else token
+        for token in extra
+    ]
+    command = [
+        "git",
+        "--no-pager",
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "diff.external=",
+        op,
+    ]
+    if op == "diff":
+        command.extend(["--no-ext-diff", "--no-textconv"])
+    command.extend(extra)
+
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=str(Path.cwd()),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return ToolResult(success=False, data=None, error=f"No se pudo ejecutar git: {exc}")
+
+    data = {
+        "output": completed.stdout,
+        "stderr": completed.stderr,
+        "returncode": completed.returncode,
+        "command": command,
+    }
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip() or "error desconocido"
+        return ToolResult(
+            success=False,
+            data=data,
+            error=f"git {op} falló (código {completed.returncode}): {detail}",
+        )
+    return ToolResult(success=True, data=data)
 
 
 async def _run_review_agent_task(
@@ -1290,16 +1356,15 @@ async def _run_review_agent_command(session: AgentSession, tokens: list[str]) ->
         return
     note = " ".join(tokens).strip()
 
-    diff_result = GitOperationTool().execute(
+    diff_result = _run_review_git(
         op="diff",
         args="--cached" if staged else "",
-        workdir=str(Path.cwd()),
     )
     if not diff_result.success:
         render_error(diff_result.error or "No se pudo obtener el diff para revisar")
         return
     data = diff_result.data if isinstance(diff_result.data, dict) else {}
-    diff_text = str(data.get("stdout") or "")
+    diff_text = str(data.get("output") or data.get("stdout") or "")
     if not diff_text.strip():
         scope = "staged" if staged else "sin commit"
         console.print(f"[dim]No hay cambios {scope} para revisar.[/dim]")

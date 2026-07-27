@@ -17,14 +17,13 @@ async def test_review_agent_delega_diff_staged_sin_tocar_historial(
 
     calls: dict[str, object] = {}
 
-    class FakeGit:
-        def execute(self, **kwargs):
-            calls["git"] = kwargs
-            return SimpleNamespace(
-                success=True,
-                data={"stdout": "diff --git a/app.py b/app.py\n+eval(user_input)\n"},
-                error=None,
-            )
+    def fake_review_git(**kwargs):
+        calls["git"] = kwargs
+        return SimpleNamespace(
+            success=True,
+            data={"output": "diff --git a/app.py b/app.py\n+eval(user_input)\n"},
+            error=None,
+        )
 
     class FakeDelegate:
         def execute(self, **kwargs):
@@ -35,7 +34,7 @@ async def test_review_agent_delega_diff_staged_sin_tocar_historial(
                 error=None,
             )
 
-    monkeypatch.setattr(ec, "GitOperationTool", FakeGit)
+    monkeypatch.setattr(ec, "_run_review_git", fake_review_git)
     monkeypatch.setattr(delegate_mod, "DelegateSubagentTool", FakeDelegate)
     original_history = list(fake_session.history)
 

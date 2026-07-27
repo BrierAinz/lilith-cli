@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -15,25 +16,19 @@ def _tool_result(success: bool = True, data=None, error: str | None = None):
 
 @pytest.fixture
 def patched_review_tool(monkeypatch):
-    """Patch GitOperationTool at its source module so /review never spawns git.
-
-    /review does ``from lilith_tools.git_tools import GitOperationTool`` inside
-    the ImportError fallback, so we must patch the symbol where it lives, not
-    on ``lilith_cli.extra_commands``.
-    """
-    import lilith_tools.git_tools as gt
+    """Patch the hardened review runner so tests never spawn git."""
+    from lilith_cli import extra_commands as ec
 
     captured: list[dict[str, object]] = []
     pending_result: list = []
 
-    class FakeGit:
-        def execute(self, **kw):
-            captured.append(kw)
-            if pending_result:
-                return pending_result.pop(0)
-            return _tool_result(success=True, data={"output": "diff --git a/x b/x"})
+    def fake_run_review_git(**kw):
+        captured.append(kw)
+        if pending_result:
+            return pending_result.pop(0)
+        return _tool_result(success=True, data={"output": "diff --git a/x b/x"})
 
-    monkeypatch.setattr(gt, "GitOperationTool", FakeGit)
+    monkeypatch.setattr(ec, "_run_review_git", fake_run_review_git)
     return {"captured": captured, "pending_result": pending_result}
 
 
@@ -92,3 +87,28 @@ async def test_review_tool_output_is_printed(fake_session, patched_review_tool, 
 
     captured = capsys.readouterr()
     assert "fake diff content" in captured.out
+
+
+def test_review_git_disables_repo_controlled_execution(monkeypatch):
+    """La captura del diff neutraliza fsmonitor, diff externo y textconv."""
+    from lilith_cli import extra_commands as ec
+
+    observed = {}
+
+    def fake_run(command, **kwargs):
+        observed["command"] = command
+        observed["kwargs"] = kwargs
+        return SimpleNamespace(returncode=0, stdout="safe diff", stderr="")
+
+    monkeypatch.setattr(ec.subprocess, "run", fake_run)
+
+    result = ec._run_review_git(op="diff", args="--cached --name-only")
+
+    command = observed["command"]
+    assert result.success is True
+    assert command[:7] == [
+        "git", "--no-pager", "-c", "core.fsmonitor=false", "-c", "diff.external=", "diff"
+    ]
+    assert "--no-ext-diff" in command
+    assert "--no-textconv" in command
+    assert observed["kwargs"]["check"] is False

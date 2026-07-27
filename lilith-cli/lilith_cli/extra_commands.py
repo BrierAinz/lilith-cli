@@ -7754,6 +7754,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("save", "Guardar conversación"),
             ("export", "Exportar [--format json|md --output path]"),
             ("bookmark", "Marcadores de conversación [list|go|delete|rename|search]"),
+            ("note", "Bloc persistente de notas entre sesiones [list|show|edit|rm|clear]"),
             ("quote", "Citar mensaje del historial como texto plano [N|last|user]"),
             ("copy", "Copiar al portapapeles"),
             ("quit", "Salir"),

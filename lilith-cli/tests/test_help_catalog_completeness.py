@@ -104,7 +104,7 @@ def test_known_present_commands_still_listed() -> None:
 
 @pytest.mark.parametrize(
     "cmd",
-    ["batch", "completion", "context", "how", "map", "pipeline",
+    ["batch", "completion", "context", "how", "map", "note", "pipeline",
      "quote", "random", "workflow"],
 )
 def test_recently_dispatched_command_in_catalog(cmd: str) -> None:

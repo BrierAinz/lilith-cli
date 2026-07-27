@@ -134,6 +134,7 @@ from .render import (
 from .batch_command import run_batch_command
 from .completion_command import run_completion_command
 from .how_command import run_how_command
+from .notes_command import run_note_command
 from .pipeline_command import run_pipeline_command
 from .undo_command import run_undo_peek_command
 from .tool_progress import DelegationLive, DelegationStreamBuffer, ToolProgressTracker, render_tool_progress

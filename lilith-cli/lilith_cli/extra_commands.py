@@ -10602,12 +10602,73 @@ def _pr_compare_url(remote_url: str, base: str, head: str) -> str | None:
 
 def _pr_render_usage() -> None:
     console.print(
-        "[info]Uso:[/info] [bold cyan]/pr [base] [--no-push] [--dry-run] [--draft]\n"
-        "    [dim]base[/dim]   Rama destino (default: [cyan]main[/cyan]).\n"
-        "    [dim]--no-push[/dim]  No subir al remoto.\n"
-        "    [dim]--dry-run[/dim]  Mostrar plan sin ejecutar nada.\n"
-        "    [dim]--draft[/dim]    Abrir el PR como borrador (requiere [cyan]gh[/cyan])."
+        "[info]Uso:[/info] [bold cyan]/pr [base] [--no-push] [--dry-run] [--draft] "
+        "[--title \"...\"] [--body \"...\"]\n"
+        "    [dim]base[/dim]          Rama destino (default: [cyan]main[/cyan]).\n"
+        "    [dim]--no-push[/dim]     No subir al remoto.\n"
+        "    [dim]--dry-run[/dim]     Mostrar plan sin ejecutar nada.\n"
+        "    [dim]--draft[/dim]       Abrir el PR como borrador (requiere [cyan]gh[/cyan]).\n"
+        "    [dim]--title \"…\"[/dim]   Título del PR (por defecto: --fill usa el branch).\n"
+        "    [dim]--body \"…\"[/dim]    Descripción del PR (por defecto: --fill usa commits)."
     )
+
+
+def _pr_parse_option_value(args: str, flag: str) -> str | None:
+    """Extrae el valor de un flag ``--flag valor`` (con comillas opcionales).
+
+    Devuelve ``None`` si el flag no está presente o si el valor siguiente es
+    otro flag (``--algo``). Soporta las formas ``--flag=valor`` y
+    ``--flag=valor con espacios`` (re-uniendo los tokens que ``shlex``
+    haya partido por el espacio). Solo se respeta el primero de los
+    flags repetidos.
+    """
+    try:
+        tokens = shlex.split(args)
+    except ValueError:
+        tokens = args.split()
+    for index, token in enumerate(tokens):
+        if token == flag and index + 1 < len(tokens):
+            next_token = tokens[index + 1]
+            if next_token.startswith("--"):
+                return None
+            return next_token
+        if token.startswith(f"{flag}="):
+            # ``shlex.split`` conserva ``--title=Hola`` como un único token,
+            # pero parte ``--body=una desc`` en ``["--body=una", "desc"]``.
+            # Devolvemos la parte tras el ``=`` y, si quedaron tokens
+            # sueltos no-flag a continuación, los re-unimos con espacios.
+            value = token.split("=", 1)[1]
+            rest: list[str] = []
+            for following in tokens[index + 1 :]:
+                if following.startswith("--"):
+                    break
+                rest.append(following)
+            if rest:
+                value = f"{value} {' '.join(rest)}" if value else " ".join(rest)
+            return value or None
+    return None
+
+
+def _pr_extract_base(args: str, all_tokens: list[str], flags_with_value: tuple[str, ...]) -> str:
+    """Devuelve el primer token que no es flag ni valor de flag con argumento.
+
+    Si no hay ninguno, devuelve ``"main"`` por defecto.
+    """
+    skip_next = False
+    for token in all_tokens:
+        if skip_next:
+            skip_next = False
+            continue
+        if token in flags_with_value:
+            skip_next = True
+            continue
+        if token.startswith("--"):
+            continue
+        # También saltamos tokens de la forma ``--flag=value``.
+        if any(token.startswith(f"{f}=") for f in flags_with_value):
+            continue
+        return token
+    return "main"
 
 
 async def run_pr_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
@@ -10619,17 +10680,19 @@ async def run_pr_command(session: AgentSession, args: str) -> None:  # noqa: ARG
         /pr develop --draft
         /pr --dry-run
         /pr main --no-push
+        /pr --title "Fix login bug" --body "Closes #42"
     """
-    tokens = args.split()
-    if not tokens:
-        tokens = ["main"]
-    base = tokens[0]
-    no_push = "--no-push" in tokens
-    dry_run = "--dry-run" in tokens
-    draft = "--draft" in tokens
-    # Si el primer token es un flag (ej: /pr --no-push), usamos main como base.
-    if base.startswith("--"):
-        base = "main"
+    # Parseamos flags primero (pueden estar en cualquier posición).
+    try:
+        all_tokens = shlex.split(args)
+    except ValueError:
+        all_tokens = args.split()
+    no_push = "--no-push" in all_tokens
+    dry_run = "--dry-run" in all_tokens
+    draft = "--draft" in all_tokens
+    pr_title = _pr_parse_option_value(args, "--title")
+    pr_body = _pr_parse_option_value(args, "--body")
+    base = _pr_extract_base(args, all_tokens, ("--title", "--body"))
 
     branch = _pr_detect_branch()
     if not branch:
@@ -10702,8 +10765,13 @@ async def run_pr_command(session: AgentSession, args: str) -> None:  # noqa: ARG
     ]
     if draft:
         gh_cmd.append("--draft")
-    # Sin título/cuerpo, --fill usa el commit/branch como base.
-    gh_cmd.append("--fill")
+    if pr_title is not None:
+        gh_cmd.extend(["--title", pr_title])
+    if pr_body is not None:
+        gh_cmd.extend(["--body", pr_body])
+    # Si no se pasaron title/body, --fill usa el commit/branch como base.
+    if pr_title is None and pr_body is None:
+        gh_cmd.append("--fill")
 
     gh = subprocess.run(gh_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
     if gh.returncode != 0:

@@ -1235,6 +1235,150 @@ async def run_lint_command(session: AgentSession, args: str) -> None:  # noqa: A
         _print_tool_result(result)
 
 
+# Risk-tag heuristics used by ``/review --summary``. Lowercase.
+_REVIEW_PATH_RISK_KEYWORDS: dict[str, str] = {
+    "auth": "auth",
+    "password": "auth",
+    "secret": "secret",
+    "token": "secret",
+    "db": "db",
+    "sql": "db",
+    "migration": "db",
+    "subprocess": "subprocess",
+    "shell": "shell",
+}
+_REVIEW_CONTENT_RISK_MARKERS: dict[str, str] = {
+    "todo": "todo",
+    "fixme": "fixme",
+    "xxx": "fixme",
+    "secret": "secret",
+    "password": "auth",
+    "subprocess": "subprocess",
+    "shell=true": "shell",
+    "os.system": "shell",
+    "eval(": "eval",
+    "exec(": "eval",
+}
+
+
+def _review_summary(diff_text: str) -> dict[str, object]:
+    """Resume un diff unificado en una vista apta para triage.
+
+    Devuelve un diccionario con:
+      * ``files`` — lista ordenada de rutas tocadas.
+      * ``total_added`` / ``total_removed`` — líneas añadidas/eliminadas.
+      * ``total_hunks`` — número total de hunks ``@@``.
+      * ``per_file`` — lista con un dict por archivo (path, added,
+        removed, hunks).
+      * ``risk_tags`` — lista ordenada y sin duplicados de etiquetas de
+        riesgo heurísticas (auth, db, secret, subprocess, shell, eval,
+        todo, fixme).
+
+    La función no llama a subprocess ni al LLM; opera sobre el texto
+    crudo del diff y tolera entradas vacías o sin marcadores.
+    """
+    files: dict[str, dict[str, int]] = {}
+    current_path: str | None = None
+    total_added = 0
+    total_removed = 0
+    total_hunks = 0
+    risk: set[str] = set()
+
+    for raw_line in diff_text.splitlines():
+        line = raw_line
+        if line.startswith("diff --git "):
+            # Format: ``diff --git a/<path> b/<path>`` (or ``a/<p>/b`` in
+            # rename-with-copy cases). Use the b/ side when available.
+            parts = line.split()
+            if len(parts) >= 4:
+                b_part = parts[-1]
+                if b_part.startswith("b/"):
+                    current_path = b_part[2:]
+                else:
+                    current_path = parts[2].lstrip("a/")
+            if current_path is not None:
+                files.setdefault(current_path, {"added": 0, "removed": 0, "hunks": 0})
+            continue
+        if line.startswith("@@"):
+            total_hunks += 1
+            if current_path is not None:
+                files[current_path]["hunks"] += 1
+            continue
+        # Skip header / metadata noise.
+        if line.startswith("--- ") or line.startswith("+++ "):
+            continue
+        if line.startswith("index ") or line.startswith("new file") or line.startswith("deleted file"):
+            continue
+        if line.startswith("Only in ") or line.startswith("Binary files"):
+            continue
+        if line.startswith("+") and not line.startswith("+++"):
+            total_added += 1
+            if current_path is not None:
+                files[current_path]["added"] += 1
+            lower = line.lower()
+            for needle, tag in _REVIEW_CONTENT_RISK_MARKERS.items():
+                if needle in lower:
+                    risk.add(tag)
+            continue
+        if line.startswith("-") and not line.startswith("---"):
+            total_removed += 1
+            if current_path is not None:
+                files[current_path]["removed"] += 1
+            continue
+
+    # Path-keyword risk scan (case-insensitive, on the path itself).
+    for path in list(files.keys()):
+        lower = path.lower()
+        for needle, tag in _REVIEW_PATH_RISK_KEYWORDS.items():
+            if needle in lower:
+                risk.add(tag)
+
+    per_file = [
+        {
+            "path": p,
+            "added": data["added"],
+            "removed": data["removed"],
+            "hunks": data["hunks"],
+        }
+        for p, data in (files.items())
+    ]
+
+    return {
+        "files": sorted(files.keys()),
+        "total_added": total_added,
+        "total_removed": total_removed,
+        "total_hunks": total_hunks,
+        "per_file": per_file,
+        "risk_tags": sorted(risk),
+    }
+
+
+def _print_review_summary(summary: dict[str, Any]) -> None:
+    """Imprime el resumen de ``/review --summary`` en formato legible."""
+    files_list: list[Any] = list(summary.get("files") or [])
+    files: list[str] = [str(x) for x in files_list]
+    added: int = int(summary.get("total_added") or 0)
+    removed: int = int(summary.get("total_removed") or 0)
+    hunks: int = int(summary.get("total_hunks") or 0)
+    tags_list: list[Any] = list(summary.get("risk_tags") or [])
+    tags: list[str] = [str(x) for x in tags_list]
+    per_file_raw: list[Any] = list(summary.get("per_file") or [])
+    print(f"Archivos modificados: {len(files)}")
+    print(f"Hunks: {hunks}  |  +{added} líneas  /  -{removed} líneas")
+    if tags:
+        print(f"Riesgos detectados: {', '.join(tags)}")
+    else:
+        print("Riesgos detectados: (ninguno)")
+    for entry in per_file_raw:
+        if not isinstance(entry, dict):
+            continue
+        path = entry.get("path", "?")
+        a = entry.get("added", 0) or 0
+        r = entry.get("removed", 0) or 0
+        h = entry.get("hunks", 0) or 0
+        print(f"  · {path}  +{a}/-{r}  hunks={h}")
+
+
 async def run_review_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
     """Ejecuta /review para revisar el diff de un PR o rama.
 
@@ -1242,6 +1386,7 @@ async def run_review_command(session: AgentSession, args: str) -> None:  # noqa:
         /review
         /review --files
         /review --staged
+        /review --summary [--staged]
         /review --agent [--staged] [nota]
         /review --agent [status|result|cancel]
     """
@@ -1253,6 +1398,23 @@ async def run_review_command(session: AgentSession, args: str) -> None:  # noqa:
     if "--agent" in tokens:
         tokens.remove("--agent")
         await _run_review_agent_command(session, tokens)
+        return
+    summary_mode = False
+    if "--summary" in tokens:
+        tokens.remove("--summary")
+        summary_mode = True
+    if summary_mode:
+        sub = " ".join(tokens).strip() or "diff"
+        op, op_args = {
+            "diff": ("diff", ""),
+            "staged": ("diff", "--cached"),
+        }.get(sub, ("diff", ""))
+        result = _run_review_git(op=op, args=op_args)
+        if not result.success:
+            _print_tool_result(result)
+            return
+        raw = (result.data or {}).get("output", "") if isinstance(result.data, dict) else ""
+        _print_review_summary(_review_summary(raw))
         return
 
     # Map the documented /review flags onto allowed git operations. Keep the

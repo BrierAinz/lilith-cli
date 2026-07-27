@@ -4901,8 +4901,12 @@ async def run_map_command(session: AgentSession, args: str) -> None:  # noqa: AR
     Uso: /map [directorio] [--json]
     """
     text = args.strip()
-    json_output = "--json" in text.split()
-    tokens = [token for token in text.split() if token != "--json"]
+    tokens = text.split()
+    json_output = "--json" in tokens
+    tokens = [token for token in tokens if token != "--json"]
+    if len(tokens) > 1:
+        render_error("Uso: /map [directorio] [--json]")
+        return
     root = Path(tokens[0]).expanduser() if tokens else Path.cwd()
 
     if not root.exists():

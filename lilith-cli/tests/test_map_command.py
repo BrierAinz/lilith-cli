@@ -44,3 +44,12 @@ async def test_tree_symbols_json_es_machinereadable(tmp_path):
     assert payload[0]["archivo"] == "modulo.py"
     assert payload[0]["símbolos"] == "ejecuta"
     assert payload[0]["cantidad"] == 1
+
+
+@pytest.mark.asyncio
+async def test_tree_symbols_rejects_ambiguous_extra_arguments(tmp_path, capsys):
+    """El mapa no debe ignorar argumentos posicionales adicionales."""
+    await run_tree_command(DummySession(), f"symbols {tmp_path} inesperado")
+
+    output = capsys.readouterr().out
+    assert "Uso: /map" in output

@@ -132,6 +132,7 @@ from .render import (
     set_theme,
 )
 from .batch_command import run_batch_command
+from .bg_command import run_bg_command
 from .completion_command import run_completion_command
 from .how_command import run_how_command
 from .notes_command import run_note_command
@@ -168,6 +169,7 @@ _SLASH_COMMANDS = [
     "/workflow",
     "/pipeline",
     "/batch",
+    "/bg",
     "/undo-peek",
     "/undo-diff",
     "/peeks",
@@ -813,6 +815,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "batch":
                     await run_batch_command(session, cmd_args)
+                    continue
+                if cmd_name == "bg":
+                    await run_bg_command(session, cmd_args)
                     continue
                 if cmd_name in ("undo-peek", "undo-diff", "peeks"):
                     await run_undo_peek_command(session, cmd_args)

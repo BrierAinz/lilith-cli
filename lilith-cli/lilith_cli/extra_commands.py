@@ -7797,6 +7797,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("stream", "Estado del streaming de tokens"),
             ("json-mode", "Toggle modo JSON forzado"),
             ("watch", "Re-run de un comando al cambiar archivos"),
+            ("bg", "Procesos en background [list|start|status|stop|log|cleanup]"),
             ("editor", "Abrir editor externo para el último patch"),
             ("explain", "Explicar el último comando o tool call"),
         ],

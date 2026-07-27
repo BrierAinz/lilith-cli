@@ -129,6 +129,7 @@ from .render import (
     render_welcome,
     set_theme,
 )
+from .completion_command import run_completion_command
 from .pipeline_command import run_pipeline_command
 from .tool_progress import DelegationLive, DelegationStreamBuffer, ToolProgressTracker, render_tool_progress
 from .trace import AgentTrace
@@ -166,6 +167,7 @@ _SLASH_COMMANDS = [
     "/dcfg",
     "/deps",
     "/compare",
+    "/completion",
     "/conclave",
     "/learn",
     "/editor",
@@ -914,6 +916,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "compare":
                     await run_compare_command(session, cmd_args)
+                    continue
+                if cmd_name == "completion":
+                    await run_completion_command(session, cmd_args)
                     continue
                 if cmd_name == "conclave":
                     await run_conclave_command(session, cmd_args)

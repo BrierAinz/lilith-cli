@@ -73,6 +73,7 @@ from .extra_commands import (
     run_lint_fix_command,
     run_lines_command,
     run_log_command,
+    run_map_command,
     run_macro_command,
     run_metrics_command,
     run_model_info_command,
@@ -240,6 +241,7 @@ _SLASH_COMMANDS = [
     "/test",
     "/tour",
     "/tree",
+    "/map",
     "/recent",
     "/log",
     "/security-review",
@@ -891,6 +893,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "tree":
                     await run_tree_command(session, cmd_args)
+                    continue
+                if cmd_name == "map":
+                    await run_map_command(session, cmd_args)
                     continue
                 if cmd_name == "recent":
                     await run_recent_command(session, cmd_args)

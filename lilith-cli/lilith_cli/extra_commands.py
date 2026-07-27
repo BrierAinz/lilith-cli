@@ -1094,25 +1094,114 @@ async def run_bench_command(session: AgentSession, args: str) -> None:  # noqa: 
     console.print()
 
 
+def _lint_usage() -> str:
+    """Devuelve la ayuda de /lint sin ofrecer un destino implícito peligroso."""
+    return (
+        "Uso: /lint <ruta-relativa> [--tool <linter>]\n"
+        "  /lint lilith_cli/extra_commands.py\n"
+        "  /lint lilith_cli/ --tool ruff check\n"
+        "  /lint staged [--tool <linter>]"
+    )
+
+
+def _validate_lint_target(target: str) -> str | None:
+    """Valida que *target* sea explícito, relativo y esté dentro del cwd."""
+    candidate = Path(target).expanduser()
+    if candidate.is_absolute() or target in (".", "./"):
+        return "La ruta debe ser explícita y relativa; no se acepta '.' ni una ruta absoluta"
+
+    try:
+        cwd = Path.cwd().resolve()
+        resolved = candidate.resolve()
+        resolved.relative_to(cwd)
+    except (OSError, RuntimeError, ValueError):
+        return "La ruta debe permanecer dentro del repositorio de trabajo"
+
+    if not resolved.exists():
+        return f"Ruta no encontrada: {target}"
+    return None
+
+
+def _validate_lint_tool(linter: str | None) -> str | None:
+    """Rechaza modos de linter que puedan modificar archivos."""
+    if not linter:
+        return None
+    try:
+        tool_tokens = [token.lower() for token in shlex.split(linter, posix=False)]
+    except ValueError as exc:
+        return f"Linter inválido: {exc}"
+
+    unsafe_flags = {"--fix", "--unsafe-fixes", "--write", "--in-place", "-w"}
+    if unsafe_flags.intersection(tool_tokens):
+        return "/lint sólo permite modo reporte; quitá --fix/--unsafe-fixes/--write"
+
+    formatter_names = {"black", "isort", "autoflake", "yapf", "prettier", "rustfmt", "gofmt"}
+    if tool_tokens and tool_tokens[0] in formatter_names and not {"--check", "--diff"}.intersection(tool_tokens):
+        return "Ese formatter requiere --check o --diff para ejecutarse sin modificar archivos"
+    if "format" in tool_tokens and not {"--check", "--diff"}.intersection(tool_tokens):
+        return "/lint sólo permite reportes; un modo format debe incluir --check o --diff"
+    return None
+
+
 async def run_lint_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
-    """Ejecuta /lint [path] para analizar el código con el linter integrado.
+    """Ejecuta /lint sobre una ruta explícita, siempre en modo reporte.
+
+    No acepta una ruta vacía ni ``.``: el destino debe ser relativo y quedar
+    dentro del directorio de trabajo. ``staged`` es la única forma abreviada y
+    usa exclusivamente los archivos que Git devuelve como preparados.
 
     Examples:
-        /lint
-        /lint src/foo.py
-        /lint --tool <tool>
+        /lint lilith_cli/extra_commands.py
+        /lint lilith_cli/ --tool ruff check
         /lint staged
     """
-    import subprocess
+    text = (args or "").strip()
+    if not text:
+        render_error(_lint_usage())
+        return
 
-    text = args.strip()
-    parts = text.split(maxsplit=1)
+    try:
+        tokens = shlex.split(text, posix=False)
+    except ValueError as exc:
+        render_error(f"Argumentos inválidos: {exc}")
+        return
 
-    if parts and parts[0].lower() == "staged":
+    # posix=False preserves Windows backslashes; remove only syntax quotes.
+    tokens = [
+        token[1:-1]
+        if len(token) >= 2 and token[0] == token[-1] and token[0] in "\\\"'"
+        else token
+        for token in tokens
+    ]
+    if not tokens:
+        render_error(_lint_usage())
+        return
+
+    target = tokens.pop(0)
+    linter: str | None = None
+    if tokens:
+        if len(tokens) >= 2 and tokens[0] == "--tool":
+            linter = " ".join(tokens[1:]).strip()
+        elif len(tokens) == 1 and tokens[0].startswith("--tool="):
+            linter = tokens[0].split("=", 1)[1]
+        else:
+            render_error(_lint_usage())
+            return
+
+    tool_error = _validate_lint_tool(linter)
+    if tool_error:
+        render_error(tool_error)
+        return
+
+    if target.lower() == "staged":
         try:
             staged_proc = subprocess.run(
                 ["git", "diff", "--cached", "--name-only"],
-                capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
             )
         except FileNotFoundError:
             render_error("git no está disponible en PATH")
@@ -1120,27 +1209,30 @@ async def run_lint_command(session: AgentSession, args: str) -> None:  # noqa: A
         if staged_proc.returncode != 0:
             render_error(f"No se pudo leer archivos staged: {staged_proc.stderr.strip()}")
             return
-        staged_files = [f for f in staged_proc.stdout.splitlines() if f.strip()]
+        staged_files = [path for path in staged_proc.stdout.splitlines() if path.strip()]
         if not staged_files:
             console.print("[dim]No hay archivos staged para lintar.[/dim]")
             return
-        target = " ".join(staged_files)
-    elif parts and parts[0] == "--tool":
-        tool_name = parts[1] if len(parts) > 1 else "ruff"
-        target = "."
-        linter = tool_name
-        result = RunLinterTool().execute(path=target, linter=linter)
-        console.print("[bold realm]\u16ed Lint:[/] [dim]" + str(result.data.get("command", linter) if result.success else linter) + "[/dim]")
-        _print_tool_result(result)
-        return
+        targets = staged_files
     else:
-        target = text or "."
+        target_error = _validate_lint_target(target)
+        if target_error:
+            render_error(target_error)
+            return
+        targets = [target]
 
-    result = RunLinterTool().execute(path=target)
-    command_str = (result.data or {}).get("command", "") if result.success else ""
-    header = "[bold realm]\u16ed Lint:[/] [dim]" + command_str + "[/dim]"
-    console.print(header)
-    _print_tool_result(result)
+    for lint_target in targets:
+        target_error = _validate_lint_target(lint_target)
+        if target_error:
+            render_error(target_error)
+            return
+        kwargs = {"path": lint_target}
+        if linter:
+            kwargs["linter"] = linter
+        result = RunLinterTool().execute(**kwargs)
+        command_str = (result.data or {}).get("command", "") if result.success else (linter or "auto")
+        console.print("[bold realm]\\u16ed Lint:[/] [dim]" + str(command_str) + "[/dim]")
+        _print_tool_result(result)
 
 
 async def run_review_command(session: AgentSession, args: str) -> None:  # noqa: ARG001

@@ -212,3 +212,62 @@ async def test_release_command_rejects_invalid_no_level_defaults_to_patch(monkey
     major, minor, patch = (int(p) for p in __version__.split("."))
     assert f"{major}.{minor}.{patch + 1}" in output
     assert "(patch)" in output
+
+
+# ── /release must never use `git add -A` (rule #7) ────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_release_command_does_not_use_git_add_dot_a(monkeypatch, tmp_path):
+    """The /release flow stages only the files it actually touched.
+
+    Rule #7 forbids `git add -A` / `git add .` — they would scoop up
+    unrelated dirty worktree state into the release commit.
+    """
+    from pathlib import Path
+
+    # Force _prepend_changelog to return True so the changelog path is staged.
+    monkeypatch.setattr(
+        "lilith_cli.extra_commands._prepend_changelog", lambda *a, **kw: True
+    )
+
+    # Capture every subprocess.run invocation.
+    captured: list[list[str]] = []
+
+    def fake_run(cmd, *args, **kwargs):
+        captured.append(list(cmd))
+        # Pretend git returned a successful commit so the function proceeds.
+        class _Result:
+            returncode = 0
+            stderr = ""
+            stdout = ""
+
+        return _Result()
+
+    monkeypatch.setattr("lilith_cli.extra_commands.subprocess.run", fake_run)
+
+    # Skip the actual file mutation; _write_package_version is a thin wrapper.
+    monkeypatch.setattr(
+        "lilith_cli.extra_commands._write_package_version", lambda *a, **kw: None
+    )
+
+    # Silence the print output for the test run.
+    monkeypatch.setattr(
+        "lilith_cli.extra_commands.console.print", lambda *a, **kw: None
+    )
+
+    await run_release_command(DummySession(), "patch")
+
+    assert captured, "subprocess.run should have been invoked"
+    add_calls = [c for c in captured if c[:2] == ["git", "add"]]
+    assert add_calls, "expected at least one `git add` invocation"
+    for call in add_calls:
+        # Forbid the dangerous flags / patterns.
+        assert "-A" not in call, f"forbidden flag -A in: {call}"
+        assert "--all" not in call, f"forbidden flag --all in: {call}"
+        assert "." not in call, f"forbidden path '.' in: {call}"
+        # Must use `--` to separate flags from paths (defensive).
+        assert "--" in call, f"missing `--` separator in: {call}"
+        # Must reference exactly the two known paths.
+        assert "lilith_cli/__init__.py" in call
+        assert "CHANGELOG.md" in call

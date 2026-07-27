@@ -5952,9 +5952,14 @@ async def run_release_command(session, args):  # noqa: ARG001
         console.print("[warning]⚠ CHANGELOG.md no existe; sólo se actualizó __init__.py[/warning]")
 
     repo_root = Path(__file__).resolve().parent.parent.parent
+    # Only stage the files we just touched — never git add -A (rule #7).
+    staged_paths: list[str] = []
+    if changelog_written:
+        staged_paths.append("CHANGELOG.md")
+    staged_paths.append("lilith_cli/__init__.py")
     try:
         subprocess.run(
-            ["git", "add", "-A"],
+            ["git", "add", "--", *staged_paths],
             cwd=str(repo_root),
             check=True,
             capture_output=True,

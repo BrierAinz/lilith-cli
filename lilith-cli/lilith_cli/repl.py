@@ -130,6 +130,7 @@ from .render import (
     set_theme,
 )
 from .completion_command import run_completion_command
+from .how_command import run_how_command
 from .pipeline_command import run_pipeline_command
 from .tool_progress import DelegationLive, DelegationStreamBuffer, ToolProgressTracker, render_tool_progress
 from .trace import AgentTrace
@@ -262,6 +263,7 @@ _SLASH_COMMANDS = [
     "/hash",
     "/help",
     "/hooks",
+    "/how",
     "/json",
     "/lines",
     "/lint-fix",
@@ -919,6 +921,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "completion":
                     await run_completion_command(session, cmd_args)
+                    continue
+                if cmd_name == "how":
+                    await run_how_command(session, cmd_args)
                     continue
                 if cmd_name == "conclave":
                     await run_conclave_command(session, cmd_args)

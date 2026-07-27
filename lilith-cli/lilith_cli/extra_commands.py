@@ -8060,7 +8060,12 @@ def _deps_read_uv_lock(path: Path) -> dict[str, str]:
     except OSError:
         return {}
     pkgs: dict[str, str] = {}
-    for m in re.finditer(r"\[\[package\]\][\s\S]*?(?=\[\[package\]\]|\[\[|$)", text, re.MULTILINE):
+    # Sin ``re.MULTILINE``, y cortando con ``\Z`` en vez de ``$``: con
+    # MULTILINE el ``$`` del lookahead coincide con el fin de la PRIMERA
+    # línea, y como ``[\s\S]*?`` es lazy cada bloque se cerraba en
+    # ``[[package]]`` a secas. El cuerpo nunca se leía, así que esta
+    # función devolvía siempre un dict vacío.
+    for m in re.finditer(r"\[\[package\]\][\s\S]*?(?=\[\[|\Z)", text):
         block = m.group(0)
         nm = re.search(r'^name\s*=\s*"([^"]+)"', block, re.MULTILINE)
         if not nm:
@@ -8184,12 +8189,26 @@ async def run_deps_command(session: AgentSession, args: str) -> None:
         /deps outdated [path]   -> Best-effort newer version check (Python pkgs)
         /deps licenses [path]   -> List licenses from uv.lock when present
         /deps help              -> Show usage
+
+    Flags:
+        --json                  -> Emit machine-readable JSON instead of the
+                                  Rich table (works with all subcommands and
+                                  with the default listing).
     """
     args_clean = (args or "").strip()
     tokens = args_clean.split()
+    as_json = "--json" in tokens
+    # ``--json`` no es un subcomando ni un path — lo descartamos para no
+    # contaminar el resto del parseo (especialmente cuando aparece después
+    # del subcomando, p.ej. ``/deps outdated --json``).
+    tokens = [t for t in tokens if t != "--json"]
+
     if not tokens:
         target = Path.cwd()
         deps, licenses = _deps_collect(target)
+        if as_json:
+            _deps_emit_json(target, deps, licenses, mode="list")
+            return
         console.print(f"[info]\u16ed Dependencias en:[/info] [bold cyan]{target}[/bold cyan]")
         _deps_render_table(deps, licenses)
         return
@@ -8201,7 +8220,7 @@ async def run_deps_command(session: AgentSession, args: str) -> None:
         console.print("[bold realm]\u16ed /deps — Gestión de dependencias[/]")
         console.print()
         console.print("  [bold cyan]/deps [path][/bold cyan]            → Lista dependencias detectadas")
-        console.print("  [bold cyan]/deps outdated [path][/bold cyan]   → Chequeo de versiones más recientes")
+        console.print("  [bold cyan]/deps outdated [path][/bold cyan]   → Chequeo de versiones más nuevas")
         console.print("  [bold cyan]/deps licenses [path][/bold cyan]   → Licencias desde uv.lock")
         console.print("  [bold cyan]/deps help[/bold cyan]              → Esta ayuda")
         console.print()
@@ -8209,6 +8228,10 @@ async def run_deps_command(session: AgentSession, args: str) -> None:
             "  [dim]Manifiestos soportados:[/dim] [green]pyproject.toml[/], [green]requirements.txt[/], [green]package.json[/]"
         )
         console.print("  [dim]Bloqueo de licencias:[/dim] [green]uv.lock[/]")
+        console.print()
+        console.print(
+            "  [dim]Flag:[/dim] [bold cyan]--json[/bold cyan]              → salida machine-readable (todos los subcomandos)"
+        )
         console.print()
         return
 
@@ -8218,6 +8241,12 @@ async def run_deps_command(session: AgentSession, args: str) -> None:
             render_error(f"Ruta no encontrada o no es directorio: {target}")
             return
         deps, _ = _deps_collect(target)
+        if as_json:
+            # La verificación de versiones es online y lenta; en modo JSON
+            # emitimos el snapshot declarado (sin red) para que pipelines y
+            # tests no queden esperando al subprocess de ``pip index``.
+            _deps_emit_json(target, deps, {}, mode="outdated")
+            return
         console.print(f"[info]\u16ed Versiones en:[/info] [bold cyan]{target}[/bold cyan]")
         _deps_render_outdated(deps)
         return
@@ -8229,7 +8258,16 @@ async def run_deps_command(session: AgentSession, args: str) -> None:
             return
         deps, licenses = _deps_collect(target)
         if not licenses:
+            if as_json:
+                # En modo JSON emitimos un payload vacío en vez de error,
+                # para que los pipelines downstream puedan parsear sin
+                # branching especial por el caso ``sin uv.lock``.
+                _deps_emit_json(target, deps, {}, mode="licenses")
+                return
             render_error("No se encontró uv.lock para licencias")
+            return
+        if as_json:
+            _deps_emit_json(target, deps, licenses, mode="licenses")
             return
         console.print(f"[info]\u16ed Licencias en:[/info] [bold cyan]{target}[/bold cyan]")
         _deps_render_licenses(licenses)
@@ -8240,8 +8278,49 @@ async def run_deps_command(session: AgentSession, args: str) -> None:
         render_error(f"Ruta no encontrada o no es directorio: {sub}")
         return
     deps, licenses = _deps_collect(target)
+    if as_json:
+        _deps_emit_json(target, deps, licenses, mode="list")
+        return
     console.print(f"[info]\u16ed Dependencias en:[/info] [bold cyan]{target}[/bold cyan]")
     _deps_render_table(deps, licenses)
+
+
+def _deps_emit_json(
+    target: Path,
+    deps: list[tuple[str, str, str]],
+    licenses: dict[str, str],
+    *,
+    mode: str,
+) -> None:
+    """Emit a stable, machine-readable snapshot of the /deps payload.
+
+    ``mode`` is one of ``"list"``, ``"outdated"`` or ``"licenses"`` so
+    pipelines downstream can distinguish which subcommand produced the
+    payload without having to re-parse Rich output. The output is one
+    JSON object per ``/deps`` invocation; ``--json`` is intended to be
+    pipe-friendly (``jq``, redirección a archivo, etc.).
+    """
+    payload: dict[str, object] = {
+        "target": str(target),
+        "mode": mode,
+        "deps": [
+            {
+                "name": name,
+                "version": version,
+                "source": source,
+                "license": licenses.get(name, ""),
+            }
+            for name, version, source in deps
+        ],
+        "licenses": dict(licenses),
+        "count": len(deps),
+    }
+    # IMPORTANT: emit via ``sys.stdout`` (not Rich ``console.print``) so
+    # the JSON stays on a single, unwrapped line and pipelines can
+    # ``jq`` it directly. Rich would otherwise word-wrap long lines,
+    # injecting newlines into the middle of values like the target path.
+    sys.stdout.write(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    sys.stdout.write("\n")
 
 
 # ── /compare command ───────────────────────────────────────────────────

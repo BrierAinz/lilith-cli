@@ -943,6 +943,9 @@ async def run_repl(session: AgentSession) -> None:
                 if cmd_name == "how":
                     await run_how_command(session, cmd_args)
                     continue
+                if cmd_name in ("note", "notes", "note-add"):
+                    await run_note_command(session, cmd_args)
+                    continue
                 if cmd_name == "conclave":
                     await run_conclave_command(session, cmd_args)
                     continue

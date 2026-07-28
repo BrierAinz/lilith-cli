@@ -4,11 +4,32 @@ Adds the package directory to sys.path so that
 `from lilith_cli.main import ...` works without pip install.
 """
 
+import os
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+
+# ── Salida determinista ─────────────────────────────────────────────
+#
+# Decenas de tests comparan la salida de Rich contra texto plano
+# ("Tiempo total: 00:00.016"). Rich decide si emitir secuencias ANSI al
+# construir el ``Console`` de ``render.py``, que se crea al importar el
+# módulo — antes de que corra cualquier fixture.
+#
+# ``FORCE_COLOR`` fuerza ``is_terminal=True`` aunque pytest tenga la salida
+# capturada, y entonces Rich emite estilos igual. ``NO_COLOR`` no alcanza
+# para taparlo: suprime los colores pero no el ``bold``, así que el texto
+# llega como "\x1b[1m00:00\x1b[0m" y las aserciones fallan. Muchos runners
+# de agentes y CI exportan FORCE_COLOR, y ahí la suite se cae entera por el
+# entorno y no por el código (se vieron 88 fallos así).
+#
+# Se limpia a nivel de módulo, no en un fixture, porque para cuando el
+# primer fixture corre el ``Console`` ya está construido.
+for _var in ("FORCE_COLOR", "CLICOLOR_FORCE"):
+    os.environ.pop(_var, None)
 
 
 # Ensure lilith_cli is importable when running tests directly

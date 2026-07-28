@@ -7828,6 +7828,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
                     ("skills", "Catálogo de skills de delegación [show|save|delete <name>]"),
                     ("learn", "Minar post-mortems de delegación y sugerir skills [save N]"),
                     ("context", "Presupuesto de contexto con barra y umbral [--json]"),
+            ("temperature", "Ver o ajustar la temperatura de sampling [valor|reset] [--save]"),
                 ],
         "Files & Git": [
             ("cd", "Mostrar/cambiar directorio de trabajo [ruta]"),

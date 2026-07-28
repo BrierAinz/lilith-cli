@@ -138,6 +138,7 @@ from .completion_command import run_completion_command
 from .how_command import run_how_command
 from .notes_command import run_note_command
 from .pipeline_command import run_pipeline_command
+from .temperature_command import run_temperature_command
 from .undo_command import run_undo_peek_command
 from .tool_progress import DelegationLive, DelegationStreamBuffer, ToolProgressTracker, render_tool_progress
 from .trace import AgentTrace
@@ -262,6 +263,8 @@ _SLASH_COMMANDS = [
     "/template",
     "/templates",
     "/tpl",
+    "/temperature",
+    "/temp",
     "/timer",
     "/auto",
     "/json-mode",
@@ -923,6 +926,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "random":
                     await run_random_command(session, cmd_args)
+                    continue
+                if cmd_name in ("temperature", "temp"):
+                    await run_temperature_command(session, cmd_args)
                     continue
                 if cmd_name == "apply":
                     await run_apply_command(session, cmd_args)

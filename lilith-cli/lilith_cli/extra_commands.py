@@ -88,52 +88,6 @@ def _print_error(context, err):
                 console.print("[dim]tip: " + tip + "[/dim]")
                 break
 
-EDITOR_CONFIG_FILE = CONFIG_DIR / "editor.json"
-_FROZEN_EDITOR: str | None = None
-
-
-def _get_editor() -> str | None:
-    """Return the preferred editor command.
-
-    Order of precedence:
-    1. Runtime override set via /editor set.
-    2. EDITOR environment variable.
-    3. Fallback editors (vim, vi, nano, notepad).
-    """
-    if _FROZEN_EDITOR is not None:
-        return _FROZEN_EDITOR
-    if os.environ.get("EDITOR"):
-        return os.environ.get("EDITOR")
-    for candidate in ("vim", "vi", "nano", "notepad"):
-        if shutil.which(candidate):
-            return candidate
-    return None
-
-
-def _set_editor(command: str) -> None:
-    """Persist the preferred editor to disk and update the in-memory value."""
-    global _FROZEN_EDITOR
-    _FROZEN_EDITOR = command
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    EDITOR_CONFIG_FILE.write_text(json.dumps({"command": command}, ensure_ascii=False), encoding="utf-8")
-
-
-def _load_editor() -> None:
-    """Load a previously persisted editor override from disk."""
-    global _FROZEN_EDITOR
-    if EDITOR_CONFIG_FILE.exists():
-        try:
-            data = json.loads(EDITOR_CONFIG_FILE.read_text(encoding="utf-8"))
-            command = data.get("command", "")
-            if command:
-                _FROZEN_EDITOR = command
-        except (json.JSONDecodeError, OSError):
-            pass
-
-
-# Load persisted editor override on module import.
-_load_editor()
-
 
 # ---------------------------------------------------------------------------
 # Redaction helper for /redact: replace sensitive substrings with [REDACTED].

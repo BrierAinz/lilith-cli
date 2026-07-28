@@ -191,7 +191,6 @@ _SLASH_COMMANDS = [
     "/diffunstaged",
     "/diff-branch",
     "/diffbranch",
-    "/diff-config",
     "/quit",
     "/exit",
     "/q",
@@ -302,6 +301,26 @@ _SLASH_COMMANDS = [
     "/uuid",
     "/voice",
     "/whereami",
+    # Comandos que ya existían y estaban documentados en /help, pero nunca
+    # se listaron acá: el usuario los leía en la ayuda y el Tab no se los
+    # completaba. Ver test_autocomplete_covers_help_catalog.
+    "/base64",
+    "/bifrost",
+    "/calc",
+    "/commands",
+    "/config",
+    "/confirm",
+    "/diff",
+    "/init",
+    "/preview",
+    "/quickstart",
+    "/save",
+    "/start",
+    "/system",
+    "/tool",
+    "/undo",
+    "/where",
+    "/ygg",
 ]
 
 

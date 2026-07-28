@@ -7785,6 +7785,8 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("theme", "Cambiar tema visual [name | current | preview <name> | list]"),
             ("tools", "Habilitar/deshabilitar herramientas"),
             ("profile", "Perfiles de configuración [list|save|show|load|delete]"),
+            ("where", "Mostrar qué archivos de configuración se cargaron"),
+            ("confirm", "Activar/desactivar confirmación para escrituras destructivas"),
         ],
         "Development": [
             ("plan", "Plan numerado de tareas"),

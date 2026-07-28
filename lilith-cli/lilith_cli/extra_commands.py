@@ -56,7 +56,6 @@ if TYPE_CHECKING:
     from .agent import AgentSession
 
 
-
 # -- Error UX helper ----------------------------------------------------
 
 
@@ -122,7 +121,6 @@ def _redact_text(text: str, patterns: list[str] | None = None) -> str:
         for pattern in pattern_tuple:
             redacted = re.sub(pattern, "[REDACTED]", redacted)
     return redacted
-
 
 
 async def run_redact_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
@@ -962,7 +960,6 @@ async def run_search_command(session: AgentSession, args: str) -> None:
     _render_search_panel(result, kind="history", query=text)
 
 
-
 def _render_search_usage() -> None:
     """Muestra la ayuda de /search."""
     console.print("\n[bold realm]᛭ Uso de /search[/]")
@@ -1665,7 +1662,6 @@ def _compact_messages(messages: list) -> str:
     if len(summary) > 500:
         summary = summary[:500] + "..."
     return summary or "(empty)"
-
 
 
 # ── Template storage helpers ──────────────────────────────────────────
@@ -3825,9 +3821,6 @@ async def run_profile_command(session: AgentSession, args: str) -> None:
     )
 
 
-
-
-
 # ── /tour command ───────────────────────────────────────────────────────
 
 # Tour steps. Names + bodies reference real slash commands so the tour
@@ -4120,7 +4113,6 @@ def _print_pinned_messages(pinned: list[dict[str, Any]]) -> None:
     console.print()
 
 
-
 # ---------------------------------------------------------------------------
 # /pin storage + helpers + tool (pin_message)
 # ---------------------------------------------------------------------------
@@ -4204,10 +4196,6 @@ def _make_pin_entry(message: dict[str, Any], index: int) -> dict[str, Any]:
         "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "role": role,
     }
-
-
-
-
 
 
 def _pin_message_at_index(
@@ -4398,7 +4386,6 @@ def _register_pin_tool() -> None:
 
 # Ensure the tool is registered when this module is imported.
 _register_pin_tool()
-
 
 
 # ── /model-info command ──────────────────────────────────────────────────
@@ -4597,8 +4584,6 @@ def _print_tool_result(result) -> None:
             return
 
     console.print(str(data) if data is not None else "[success]✓ Hecho[/]")
-
-
 
 
 def _render_todos_table(todos: list) -> None:
@@ -5908,9 +5893,6 @@ async def run_test_command(session: AgentSession, args: str) -> None:  # noqa: A
     console.print()
 
 
-
-
-
 # ── /voice (TTS via PowerShell System.Speech on Windows) ───────────────────
 
 
@@ -6008,7 +5990,6 @@ async def run_voice_command(session: AgentSession, args: str) -> None:
         console.print("[success]✓ Audio reproducido[/success]")
     else:
         console.print("[error]No hay motor TTS disponible[/error]")
-
 
 
 # ── /multi-file (atomic multi-file edit transaction) ────────────────────────
@@ -6494,7 +6475,6 @@ from .doctor import apply_fixes, run_diagnostics
 from lilith_tools.env import EnvGetTool, EnvListTool, SysInfoTool
 
 
-
 # ── /doctor command ───────────────────────────────────────
 
 
@@ -6699,92 +6679,17 @@ def _run_deep_checks(session: AgentSession) -> list[dict]:
 
     return results
 
-# ── /now command ───────────────────────────────────────────
-
-
-<<<<<<< HEAD
-=======
-async def run_now_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
-    """Show current timestamps (/now [--utc|--local|--unix|--iso|--rfc|--json]).
-
-    Examples:
-        /now
-        /now --utc
-        /now --unix --iso
-        /now --rfc
-        /now --json
-        /now --unix --iso --json
-    """
-    from datetime import datetime, timezone
-
-    tokens = args.split()
-    show_unix = "--unix" in tokens
-    show_utc = "--utc" in tokens
-    show_iso = "--iso" in tokens
-    show_rfc = "--rfc" in tokens
-    as_json = "--json" in tokens
-    explicit_local = "--local" in tokens
-    # Si ningún flag específico se pasa, mostramos local como antes.
-    any_specific = show_unix or show_utc or show_iso or show_rfc or as_json
-    show_local = explicit_local or not any_specific
-
-    now_utc = datetime.now(timezone.utc)
-    now_local = datetime.now()
-
-    # Construimos el payload (siempre las 4 formas en UTC + local), y solo
-    # emitimos Rich si no se pidio --json. Esto mantiene el modo
-    # machine-readable estable para scripts y pipelines.
-    payload: dict[str, object] = {
-        "unix": int(now_utc.timestamp()),
-        "utc": now_utc.strftime("%Y-%m-%d %H:%M:%S"),
-        "iso": now_utc.isoformat().replace("+00:00", "Z"),
-        "rfc": _now_rfc_value(now_utc),
-        "local": now_local.strftime("%Y-%m-%d %H:%M:%S %Z (%z)"),
-    }
-
-    if as_json:
-        from .render import print_json
-
-        # ``--json`` reemplaza la salida Rich: una sola linea, parseable.
-        # print_json desactiva wrapping/markup/highlight, sin lo cual Rich
-        # parte el JSON en varias lineas y deja de parsear.
-        print_json(payload, sort_keys=True)
-        console.print()
-        return
-
-    if show_local:
-        console.print(f"[info]Local:[/info]  [bold cyan]{payload['local']}[/bold cyan]")
-    if show_utc:
-        console.print(f"[info]UTC:[/info]    [bold cyan]{payload['utc']}[/bold cyan]")
-    if show_unix:
-        console.print(f"[info]Unix:[/info]   [bold cyan]{payload['unix']}[/bold cyan]")
-    if show_iso:
-        # ISO 8601 — el formato universal para logs, APIs y versionado.
-        console.print(f"[info]ISO:[/info]    [bold cyan]{payload['iso']}[/bold cyan]")
-    if show_rfc:
-        # RFC 2822 — formato de email / HTTP, útil para tickets y logs de correo.
-        console.print(f"[info]RFC:[/info]    [bold cyan]{payload['rfc']}[/bold cyan]")
-    console.print()
->>>>>>> 68ca80752cda69c94956352d04fea3d72d64a633
-
-
 
 # ── /hash command ───────────────────────────────────────────────
-
 
 
 # ── /lines command ───────────────────────────────────────────────────
 
 
-
 # ── /base64 command ────────────────────────────────────────────────────
 
 
-
 # ── /uuid command ───────────────────────────────────────────────────────────
-
-
-
 
 
 # ── /qr command ─────────────────────────────────────────────────────────────────
@@ -7146,8 +7051,6 @@ async def run_json_command(session: AgentSession, args: str) -> None:  # noqa: A
     console.print()
 
 # ── /reverse command ───────────────────────────────────────────────────────────────
-
-
 
 
 # ── /conclave command ─────────────────────────────────────────────────────
@@ -9933,16 +9836,6 @@ def _render_learn_table() -> None:
 # ── /calc command ───────────────────────────────────────────
 
 
-
-
-
-
-
-
-
-
-
-
 # ── /cd command ───────────────────────────────────────────────────────────────
 
 
@@ -10000,8 +9893,6 @@ async def run_cd_command(session: AgentSession, args: str) -> None:  # noqa: ARG
 
 
 # ── /epoch command ────────────────────────────────────────────────────────────
-
-
 
 
 # ── /timer command ──────────────────────────────────────────────────────────
@@ -10135,10 +10026,6 @@ async def run_timer_command(session: AgentSession, args: str) -> None:  # noqa: 
 
 
 # ── /random command ─────────────────────────────────────────────────────────
-
-
-
-
 
 
 # ── /pr — Push branch & open GitHub PR ─────────────────────────────
@@ -10385,14 +10272,6 @@ async def run_pr_command(session: AgentSession, args: str) -> None:  # noqa: ARG
         return
     pr_url = gh.stdout.strip().splitlines()[-1] if gh.stdout.strip() else compare
     console.print(f"[success]✓ PR abierto:[/success] [link={pr_url}]{pr_url}[/link]")
-
-
-
-
-
-
-
-
 
 
 # ── /format command ────────────────────────────────────────────────────

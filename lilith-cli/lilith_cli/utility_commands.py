@@ -93,9 +93,12 @@ async def run_now_command(session: AgentSession, args: str) -> None:  # noqa: AR
     }
 
     if as_json:
-        import json as _json
+        from .render import print_json
+
         # ``--json`` reemplaza la salida Rich: una sola linea, parseable.
-        console.print(_json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        # print_json desactiva wrapping/markup/highlight, sin lo cual Rich
+        # parte el JSON en varias lineas y deja de parsear.
+        print_json(payload, sort_keys=True)
         console.print()
         return
 

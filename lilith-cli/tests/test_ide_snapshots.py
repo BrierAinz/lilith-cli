@@ -7,6 +7,10 @@ stored under ``tests/__snapshots__/``. Regenerate with::
 
 Determinism notes (why each knob exists):
 
+* ``NO_COLOR``/``ANSI_COLORS_DISABLED`` are cleared, because the snapshots
+  were recorded in colour: with colour off Textual adds the ``nocolor``
+  pseudo-class and every SVG mismatches, which looks like five broken tests
+  but is only the caller's environment leaking in.
 * The Header clock renders wall-clock time, so it is hidden in ``run_before``.
 * ``IDEConfig.load``/``save`` are patched so the user's real
   ``~/.yggdrasil/ide.yaml`` (theme, reopened files) never leaks into the
@@ -84,7 +88,14 @@ def project_root(tmp_path: Path) -> Path:
 
 @pytest.fixture(autouse=True)
 def deterministic_ide(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Isolate the app from the user's machine (config file, LSP servers)."""
+    """Isolate the app from the user's machine (colour env, config, LSP)."""
+    # The snapshots were recorded in colour. If the caller's environment
+    # disables colour, Textual adds the ``nocolor`` pseudo-class and every
+    # SVG differs, so all five tests fail for a reason that has nothing to
+    # do with the IDE. Agent runners and CI commonly export NO_COLOR.
+    for var in ("NO_COLOR", "ANSI_COLORS_DISABLED"):
+        monkeypatch.delenv(var, raising=False)
+
     monkeypatch.setattr(IDEConfig, "load", classmethod(lambda cls, path=None: cls()))
     monkeypatch.setattr(IDEConfig, "save", lambda self, path=None: None)
 

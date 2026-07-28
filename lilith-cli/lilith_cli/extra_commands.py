@@ -3637,9 +3637,19 @@ async def run_recap_command(session: AgentSession, args: str) -> None:  # noqa: 
         try:
             n = int(text)
         except ValueError:
-            render_error("Uso: /recap [número]")
+            render_error("Uso: /recap [número]  (entero entre 1 y 50)")
             return
 
+    if n < 1 or n > 50:
+        render_error(f"Uso: /recap [número]  (entero entre 1 y 50; recibí {n})")
+        return
+
+    history_len = len(session.history or [])
+    if history_len == 0:
+        console.print("[warning]La conversación está vacía; no hay nada que resumir.[/]")
+        return
+
+    n = min(n, history_len)
 
     prompt = f"Resumí las últimas {n} rondas de la conversación de forma concisa."
     await _stream_agent_reply(session, prompt)

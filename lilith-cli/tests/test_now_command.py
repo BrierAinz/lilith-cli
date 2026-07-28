@@ -110,6 +110,32 @@ def test_now_explicit_local_with_iso(fake_session, capsys):
     assert "RFC:" not in out
 
 
+def test_now_json_survives_a_narrow_console(fake_session, capsys, monkeypatch):
+    """El JSON sigue parseando aunque la consola sea mas angosta que la salida.
+
+    Rich envuelve al ancho de la consola, y al hacerlo mete un ``\\n``
+    DENTRO del JSON: la salida deja de parsear con "Invalid control
+    character". Los otros tests de --json no lo detectaban porque la
+    consola del modulo se construye al importar y en la maquina de
+    desarrollo suele quedar mas ancha que el payload; en CI, con 80
+    columnas, los dos reventaron.
+
+    Fijar un ancho chico hace la regresion determinista en cualquier
+    maquina, sin depender del tamano de terminal del runner.
+    """
+    from lilith_cli.extra_commands import run_now_command
+    from lilith_cli.render import console
+
+    monkeypatch.setattr(console, "width", 40)
+
+    _run(run_now_command(fake_session, "--json"))
+
+    out = capsys.readouterr().out.strip()
+    assert "\n" not in out, "Rich envolvio el JSON en varias lineas"
+    payload = json.loads(out)
+    assert set(payload.keys()) == {"unix", "utc", "iso", "rfc", "local"}
+
+
 def test_now_json_emits_machine_readable(fake_session, capsys):
     """/now --json emite un único objeto JSON con las 5 formas de timestamp."""
     from lilith_cli.extra_commands import run_now_command

@@ -164,6 +164,35 @@ def _stop_workers(app) -> None:
     app.workers.cancel_all()
 
 
+async def _wait_status_cursor(pilot, timeout: float = 5.0) -> None:
+    """Espera a que la barra de estado muestre la posicion del cursor.
+
+    ``_status_right()`` solo agrega "Ln N, Col N" cuando ya hay un editor
+    activo, y la barra se repinta en el siguiente refresco de estado, no
+    al instante en que se abre el archivo. Capturar antes de eso da una
+    barra sin la posicion: el snapshot esperado la tiene y el real no, y
+    el test falla con un escueto `assert False`. Es una carrera pura, asi
+    que salia rojo en 3.12 y verde en 3.11 con el mismo commit.
+
+    Esperar el texto observable en vez de una cantidad de pausas fijas lo
+    vuelve determinista. El timeout es una red: si nunca aparece, el test
+    falla por el snapshot (que es informacion util) en vez de colgarse.
+    """
+    from textual.widgets import Static
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        try:
+            text = str(pilot.app.query_one("#status-right", Static).renderable)
+        except Exception:
+            text = ""
+        if "Ln " in text:
+            return
+        await pilot.pause()
+        await asyncio.sleep(0.02)
+
+
 async def _wait_workers_idle(pilot, timeout: float = 5.0) -> None:
     """Espera a que los workers one-shot terminen, sin dormir a ciegas.
 
@@ -283,6 +312,9 @@ def test_ide_goto_line_modal(snap_compare, fake_session, project_root):
         # Let the one-shot git-info worker finish updating the info bar
         # (git fails fast outside a repo, leaving just the relative path).
         await _wait_workers_idle(pilot)
+        # Y que la barra de estado ya refleje la posicion del cursor del
+        # editor recien abierto, que es lo que capturo el snapshot.
+        await _wait_status_cursor(pilot)
         await pilot.pause()
         await pilot.press("ctrl+g")
         await pilot.pause()

@@ -39,6 +39,32 @@ from lilith_cli.providers import LLMProviderWrapper  # noqa: E402
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
+def _sleep_recorder():
+    """Devuelve ``(calls, fake_sleep)`` contando solo la tarea actual.
+
+    ``patch("lilith_cli.providers.asyncio.sleep", ...)`` parchea el modulo
+    ``asyncio`` global, no una copia del provider, asi que el recolector
+    tambien registraba los sleeps de tareas ajenas que otros tests dejaron
+    vivas en el event loop (por ejemplo una app de Textual todavia
+    corriendo). Con ``pytest-randomly`` el orden de los tests cambia entre
+    corridas, asi que el conteo dependia de que se hubiera ejecutado
+    antes: en CI aparecio ``len(sleep_calls) == 2`` fallando con **752**.
+
+    El provider hace ``await asyncio.sleep(...)`` dentro de la misma tarea
+    que consume ``stream()``/``complete()``, o sea la del test. Comparar
+    contra ``current_task()`` deja pasar solo esos backoffs y descarta el
+    ruido de fondo, sin debilitar ninguna asercion.
+    """
+    task = asyncio.current_task()
+    calls: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        if asyncio.current_task() is task:
+            calls.append(delay)
+
+    return calls, fake_sleep
+
+
 def _config(**overrides):
     """Build a SimpleNamespace that looks like YggdrasilConfig to the wrapper.
 
@@ -157,10 +183,7 @@ async def test_429_then_429_then_200_is_retried_and_succeeds():
     provider = LLMProviderWrapper(_config())
     provider._client = client
 
-    sleep_calls: list[float] = []
-
-    async def fake_sleep(delay: float) -> None:
-        sleep_calls.append(delay)
+    sleep_calls, fake_sleep = _sleep_recorder()
 
     with patch("lilith_cli.providers.asyncio.sleep", side_effect=fake_sleep):
         result = await provider.complete([{"role": "user", "content": "hi"}])
@@ -267,10 +290,7 @@ async def test_retry_after_header_is_honoured():
     provider = LLMProviderWrapper(_config(retry_backoff_max=2.0))
     provider._client = client
 
-    sleep_calls: list[float] = []
-
-    async def fake_sleep(delay: float) -> None:
-        sleep_calls.append(delay)
+    sleep_calls, fake_sleep = _sleep_recorder()
 
     with patch("lilith_cli.providers.asyncio.sleep", side_effect=fake_sleep):
         await provider.complete([{"role": "user", "content": "hi"}])
@@ -298,10 +318,7 @@ async def test_retry_after_http_date_is_ignored():
     )
     provider._client = client
 
-    sleep_calls: list[float] = []
-
-    async def fake_sleep(delay: float) -> None:
-        sleep_calls.append(delay)
+    sleep_calls, fake_sleep = _sleep_recorder()
 
     with patch("lilith_cli.providers.asyncio.sleep", side_effect=fake_sleep):
         await provider.complete([{"role": "user", "content": "hi"}])
@@ -327,10 +344,7 @@ async def test_backoff_grows_exponentially_and_caps_at_max():
     )
     provider._client = client
 
-    sleep_calls: list[float] = []
-
-    async def fake_sleep(delay: float) -> None:
-        sleep_calls.append(delay)
+    sleep_calls, fake_sleep = _sleep_recorder()
 
     with patch("lilith_cli.providers.asyncio.sleep", side_effect=fake_sleep):
         with pytest.raises(RuntimeError):
@@ -360,10 +374,7 @@ async def test_jitter_stays_within_fraction_band():
     )
     provider._client = client
 
-    sleep_calls: list[float] = []
-
-    async def fake_sleep(delay: float) -> None:
-        sleep_calls.append(delay)
+    sleep_calls, fake_sleep = _sleep_recorder()
 
     with patch("lilith_cli.providers.asyncio.sleep", side_effect=fake_sleep):
         with pytest.raises(RuntimeError):
@@ -623,10 +634,7 @@ async def test_stream_500_then_500_then_200_is_retried_and_succeeds():
     provider = LLMProviderWrapper(_config())
     provider._client = client
 
-    sleep_calls: list = []
-
-    async def fake_sleep(delay: float) -> None:
-        sleep_calls.append(delay)
+    sleep_calls, fake_sleep = _sleep_recorder()
 
     with patch("lilith_cli.providers.asyncio.sleep", side_effect=fake_sleep):
         chunks = []

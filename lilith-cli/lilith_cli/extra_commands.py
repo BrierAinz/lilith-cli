@@ -88,52 +88,6 @@ def _print_error(context, err):
                 console.print("[dim]tip: " + tip + "[/dim]")
                 break
 
-EDITOR_CONFIG_FILE = CONFIG_DIR / "editor.json"
-_FROZEN_EDITOR: str | None = None
-
-
-def _get_editor() -> str | None:
-    """Return the preferred editor command.
-
-    Order of precedence:
-    1. Runtime override set via /editor set.
-    2. EDITOR environment variable.
-    3. Fallback editors (vim, vi, nano, notepad).
-    """
-    if _FROZEN_EDITOR is not None:
-        return _FROZEN_EDITOR
-    if os.environ.get("EDITOR"):
-        return os.environ.get("EDITOR")
-    for candidate in ("vim", "vi", "nano", "notepad"):
-        if shutil.which(candidate):
-            return candidate
-    return None
-
-
-def _set_editor(command: str) -> None:
-    """Persist the preferred editor to disk and update the in-memory value."""
-    global _FROZEN_EDITOR
-    _FROZEN_EDITOR = command
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    EDITOR_CONFIG_FILE.write_text(json.dumps({"command": command}, ensure_ascii=False), encoding="utf-8")
-
-
-def _load_editor() -> None:
-    """Load a previously persisted editor override from disk."""
-    global _FROZEN_EDITOR
-    if EDITOR_CONFIG_FILE.exists():
-        try:
-            data = json.loads(EDITOR_CONFIG_FILE.read_text(encoding="utf-8"))
-            command = data.get("command", "")
-            if command:
-                _FROZEN_EDITOR = command
-        except (json.JSONDecodeError, OSError):
-            pass
-
-
-# Load persisted editor override on module import.
-_load_editor()
-
 
 # ---------------------------------------------------------------------------
 # Redaction helper for /redact: replace sensitive substrings with [REDACTED].
@@ -5189,10 +5143,15 @@ async def run_map_command(session: AgentSession, args: str) -> None:  # noqa: AR
 
     entries = _repo_map_entries(root)
     if json_output:
-        console.print(json.dumps([
-            {"archivo": path, "símbolos": symbols, "cantidad": count}
-            for path, symbols, count in entries
-        ], ensure_ascii=False, indent=2))
+        from .render import print_json
+
+        print_json(
+            [
+                {"archivo": path, "símbolos": symbols, "cantidad": count}
+                for path, symbols, count in entries
+            ],
+            indent=2,
+        )
         return
 
     if not entries:
@@ -5483,8 +5442,17 @@ async def run_editor_command(session: AgentSession, args: str) -> None:  # noqa:
     # /editor <archivo>[:línea]
     line: int | None = None
     target = text
-    if ":" in text and not target.startswith("/"):
+    if ":" in text:
         # Split from the last colon to handle Windows paths with drive letters.
+        #
+        # Antes esto exigia ademas `not target.startswith("/")`, lo que
+        # desactivaba el parseo de linea para CUALQUIER ruta absoluta de
+        # Unix: `/editor /ruta/archivo.txt:42` intentaba abrir un archivo
+        # llamado "archivo.txt:42" y cortaba con "Archivo no encontrado".
+        # El guard sobraba: rpartition ya parte por el ULTIMO ":", asi que
+        # "C:/x/f.txt" da line_part="/x/f.txt" (no es digito, no se toca) y
+        # "C:/x/f.txt:42" da line_part="42". Las unidades de Windows quedan
+        # cubiertas sin romper Unix.
         path_part, _, line_part = text.rpartition(":")
         if path_part and line_part.isdigit():
             target = path_part
@@ -6734,6 +6702,70 @@ def _run_deep_checks(session: AgentSession) -> list[dict]:
 # ── /now command ───────────────────────────────────────────
 
 
+<<<<<<< HEAD
+=======
+async def run_now_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+    """Show current timestamps (/now [--utc|--local|--unix|--iso|--rfc|--json]).
+
+    Examples:
+        /now
+        /now --utc
+        /now --unix --iso
+        /now --rfc
+        /now --json
+        /now --unix --iso --json
+    """
+    from datetime import datetime, timezone
+
+    tokens = args.split()
+    show_unix = "--unix" in tokens
+    show_utc = "--utc" in tokens
+    show_iso = "--iso" in tokens
+    show_rfc = "--rfc" in tokens
+    as_json = "--json" in tokens
+    explicit_local = "--local" in tokens
+    # Si ningún flag específico se pasa, mostramos local como antes.
+    any_specific = show_unix or show_utc or show_iso or show_rfc or as_json
+    show_local = explicit_local or not any_specific
+
+    now_utc = datetime.now(timezone.utc)
+    now_local = datetime.now()
+
+    # Construimos el payload (siempre las 4 formas en UTC + local), y solo
+    # emitimos Rich si no se pidio --json. Esto mantiene el modo
+    # machine-readable estable para scripts y pipelines.
+    payload: dict[str, object] = {
+        "unix": int(now_utc.timestamp()),
+        "utc": now_utc.strftime("%Y-%m-%d %H:%M:%S"),
+        "iso": now_utc.isoformat().replace("+00:00", "Z"),
+        "rfc": _now_rfc_value(now_utc),
+        "local": now_local.strftime("%Y-%m-%d %H:%M:%S %Z (%z)"),
+    }
+
+    if as_json:
+        from .render import print_json
+
+        # ``--json`` reemplaza la salida Rich: una sola linea, parseable.
+        # print_json desactiva wrapping/markup/highlight, sin lo cual Rich
+        # parte el JSON en varias lineas y deja de parsear.
+        print_json(payload, sort_keys=True)
+        console.print()
+        return
+
+    if show_local:
+        console.print(f"[info]Local:[/info]  [bold cyan]{payload['local']}[/bold cyan]")
+    if show_utc:
+        console.print(f"[info]UTC:[/info]    [bold cyan]{payload['utc']}[/bold cyan]")
+    if show_unix:
+        console.print(f"[info]Unix:[/info]   [bold cyan]{payload['unix']}[/bold cyan]")
+    if show_iso:
+        # ISO 8601 — el formato universal para logs, APIs y versionado.
+        console.print(f"[info]ISO:[/info]    [bold cyan]{payload['iso']}[/bold cyan]")
+    if show_rfc:
+        # RFC 2822 — formato de email / HTTP, útil para tickets y logs de correo.
+        console.print(f"[info]RFC:[/info]    [bold cyan]{payload['rfc']}[/bold cyan]")
+    console.print()
+>>>>>>> 68ca80752cda69c94956352d04fea3d72d64a633
 
 
 

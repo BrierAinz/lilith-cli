@@ -58,7 +58,10 @@ def test_how_resolves_orphaned_timer_command(fake_session, capsys):
     assert "/timer" in out
     # Docstring mention of stopwatch / cronómetro is unique enough to assert on.
     assert "cronómetro" in out.lower() or "timer" in out.lower()
-    assert "lilith_cli/extra_commands.py" in out
+    # Se afirma que muestra un origen dentro del paquete, no un archivo
+    # concreto: partir el monolito mueve estos comandos de modulo (p. ej. a
+    # utility_commands.py) y el test no deberia romperse por eso.
+    assert "lilith_cli/" in out
 
 
 def test_how_resolves_orphaned_quote_command(fake_session, capsys):
@@ -66,7 +69,10 @@ def test_how_resolves_orphaned_quote_command(fake_session, capsys):
     out = capsys.readouterr().out
     assert "Comando desconocido" not in out
     assert "/quote" in out
-    assert "lilith_cli/extra_commands.py" in out
+    # Se afirma que muestra un origen dentro del paquete, no un archivo
+    # concreto: partir el monolito mueve estos comandos de modulo (p. ej. a
+    # utility_commands.py) y el test no deberia romperse por eso.
+    assert "lilith_cli/" in out
 
 
 def test_how_resolves_orphaned_epoch_command(fake_session, capsys):
@@ -74,7 +80,10 @@ def test_how_resolves_orphaned_epoch_command(fake_session, capsys):
     out = capsys.readouterr().out
     assert "Comando desconocido" not in out
     assert "/epoch" in out
-    assert "lilith_cli/extra_commands.py" in out
+    # Se afirma que muestra un origen dentro del paquete, no un archivo
+    # concreto: partir el monolito mueve estos comandos de modulo (p. ej. a
+    # utility_commands.py) y el test no deberia romperse por eso.
+    assert "lilith_cli/" in out
 
 
 def test_how_resolves_orphaned_random_command(fake_session, capsys):
@@ -82,7 +91,10 @@ def test_how_resolves_orphaned_random_command(fake_session, capsys):
     out = capsys.readouterr().out
     assert "Comando desconocido" not in out
     assert "/random" in out
-    assert "lilith_cli/extra_commands.py" in out
+    # Se afirma que muestra un origen dentro del paquete, no un archivo
+    # concreto: partir el monolito mueve estos comandos de modulo (p. ej. a
+    # utility_commands.py) y el test no deberia romperse por eso.
+    assert "lilith_cli/" in out
 
 
 def test_how_fallback_picks_up_repl_alias(fake_session, capsys):

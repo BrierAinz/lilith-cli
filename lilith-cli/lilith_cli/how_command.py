@@ -106,17 +106,23 @@ def _build_extra_index() -> dict[str, dict[str, Any]]:
     extra_path = _LILITH_CLI_DIR / "extra_commands.py"
     _harvest_module(extra_path, index, aliases_by_name, module_name="extra_commands")
 
-    # 2) Standalone <name>_command.py files (batch, notes, pipeline,
-    # workflow, completion). Each carries its own run_X_command.
-    for module_path in sorted(_LILITH_CLI_DIR.glob("*_command.py")):
-        if module_path.name == "extra_commands.py":
-            continue
-        _harvest_module(
-            module_path,
-            index,
-            aliases_by_name,
-            module_name=module_path.stem,
-        )
+    # 2) Módulos propios: tanto `<name>_command.py` (batch, notes, pipeline,
+    # workflow, completion, temperature) como los `<dominio>_commands.py` que
+    # salieron de partir el monolito (utility_commands, ...). Si esto sólo
+    # mirara el singular, los comandos extraídos del monolito desaparecerían
+    # de /how sin que ningún otro test lo notara.
+    seen: set[Path] = set()
+    for pattern in ("*_command.py", "*_commands.py"):
+        for module_path in sorted(_LILITH_CLI_DIR.glob(pattern)):
+            if module_path.name == "extra_commands.py" or module_path in seen:
+                continue
+            seen.add(module_path)
+            _harvest_module(
+                module_path,
+                index,
+                aliases_by_name,
+                module_name=module_path.stem,
+            )
 
     return index
 

@@ -35,6 +35,7 @@ from .config import CONFIG_DIR
 from .extra_commands import (
     _load_aliases,
     run_alias_command,
+    run_apply_command,
     run_base64_command,
     run_bench_command,
     run_calc_command,

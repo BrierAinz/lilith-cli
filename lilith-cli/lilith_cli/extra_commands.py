@@ -7837,6 +7837,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("diff-config", "Diff de configuración"),
             ("diff-staged", "Cambios preparadas en git [stats | <archivo>]"),
             ("diff-unstaged", "Cambios sin preparar en git [stats | <archivo>]"),
+            ("apply", "Aplicar un parche unified-diff [--check|--reverse|--3way]"),
             ("tree", "Árbol de archivos"),
             ("map", "Mapa de símbolos (funciones/clases) de un archivo [--depth N]"),
             ("multi-file", "Edit multi-archivo atómico"),
@@ -12003,6 +12004,8 @@ def _resolve_repo_root(start: Path | None = None) -> Path | None:
             cwd=cwd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
     except FileNotFoundError:
@@ -12150,6 +12153,8 @@ async def run_apply_command(session: AgentSession, args: str) -> None:  # noqa: 
             input=patch_text,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             cwd=repo_root,
             check=False,
         )
@@ -12169,6 +12174,8 @@ async def run_apply_command(session: AgentSession, args: str) -> None:  # noqa: 
                 cwd=repo_root,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 check=False,
             )
             affected = [

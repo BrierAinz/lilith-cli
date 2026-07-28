@@ -38,6 +38,28 @@ if _pkg_dir not in sys.path:
     sys.path.insert(0, _pkg_dir)
 
 
+# ── Estado de orquestación aislado ──────────────────────────────────
+#
+# ``DelegateSubagentTool`` persiste cada delegación llamando a
+# ``OrchestrationStateStore()`` sin argumentos, que resuelve a
+# ``~/.yggdrasil/orchestration_state.json``: el MISMO archivo que /state
+# y /costs le muestran al operador. Los tests que ejercitan la
+# delegación con presets falsos le metían tareas y costos inventados al
+# estado real (se acumularon ~184 tareas "fake-preset").
+#
+# Apuntar el override documentado ``YGGDRASIL_ORCHESTRATION_STATE`` a un
+# archivo temporal por test mantiene esa persistencia bajo cobertura
+# pero la manda a un destino descartable. Los tests que definen la
+# variable o pasan ``state_path`` explícito siguen mandando: esto solo
+# fija el valor por defecto.
+
+@pytest.fixture(autouse=True)
+def _isolate_orchestration_state(tmp_path, monkeypatch):
+    monkeypatch.setenv(
+        "YGGDRASIL_ORCHESTRATION_STATE", str(tmp_path / "orchestration_state.json")
+    )
+
+
 @pytest.fixture
 def fake_session():
     """Return a lightweight AgentSession with a mocked provider."""

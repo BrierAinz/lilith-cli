@@ -351,6 +351,36 @@ def list_themes() -> list[CLITheme]:
 YGGDRASIL_THEME = Theme(THEMES["norse"].theme)
 console = Console(theme=YGGDRASIL_THEME)
 
+
+def print_json(payload: Any, **dumps_kwargs: Any) -> None:
+    """Emitir *payload* como JSON que se pueda parsear del otro lado.
+
+    Los tres flags no son cosmeticos, son obligatorios:
+
+    * ``soft_wrap`` — por defecto Rich envuelve al ancho de la consola, y al
+      hacerlo mete un ``\\n`` DENTRO del JSON. En una terminal de 80 columnas
+      la salida deja de parsear con "Invalid control character", que es justo
+      lo contrario de lo que promete un flag ``--json``. Se detecto en CI,
+      donde el runner tiene 80 columnas y dos tests de ``/now --json``
+      reventaron; en la maquina de desarrollo no se veia porque la consola
+      queda mas ancha que el payload.
+    * ``markup`` — Rich interpreta los corchetes como etiquetas de estilo, y
+      el JSON esta lleno de ``[`` y ``]``.
+    * ``highlight`` — colorea numeros y strings, metiendo secuencias ANSI en
+      lo que tiene que ser texto plano.
+
+    Usar SIEMPRE esta funcion para salida legible por maquina, en vez de
+    ``console.print(json.dumps(...))``; hay un test que lo verifica sobre el
+    AST de todo el paquete.
+    """
+    dumps_kwargs.setdefault("ensure_ascii", False)
+    console.print(
+        json.dumps(payload, **dumps_kwargs),
+        soft_wrap=True,
+        markup=False,
+        highlight=False,
+    )
+
 # ── Timer ───────────────────────────────────────────────────────────
 
 

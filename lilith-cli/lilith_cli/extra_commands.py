@@ -5158,10 +5158,15 @@ async def run_map_command(session: AgentSession, args: str) -> None:  # noqa: AR
 
     entries = _repo_map_entries(root)
     if json_output:
-        console.print(json.dumps([
-            {"archivo": path, "símbolos": symbols, "cantidad": count}
-            for path, symbols, count in entries
-        ], ensure_ascii=False, indent=2))
+        from .render import print_json
+
+        print_json(
+            [
+                {"archivo": path, "símbolos": symbols, "cantidad": count}
+                for path, symbols, count in entries
+            ],
+            indent=2,
+        )
         return
 
     if not entries:
@@ -6751,21 +6756,12 @@ async def run_now_command(session: AgentSession, args: str) -> None:  # noqa: AR
     }
 
     if as_json:
-        import json as _json
+        from .render import print_json
+
         # ``--json`` reemplaza la salida Rich: una sola linea, parseable.
-        #
-        # soft_wrap/markup/highlight son obligatorios, no cosmeticos: por
-        # defecto Rich envuelve al ancho de la consola, y ahi mete un \n
-        # DENTRO del JSON. En una terminal de 80 columnas la salida deja de
-        # parsear ("Invalid control character"), que es justo lo contrario
-        # de lo que promete --json. Ademas Rich interpretaria los corchetes
-        # del JSON como markup y coloraria los numeros.
-        console.print(
-            _json.dumps(payload, ensure_ascii=False, sort_keys=True),
-            soft_wrap=True,
-            markup=False,
-            highlight=False,
-        )
+        # print_json desactiva wrapping/markup/highlight, sin lo cual Rich
+        # parte el JSON en varias lineas y deja de parsear.
+        print_json(payload, sort_keys=True)
         console.print()
         return
 

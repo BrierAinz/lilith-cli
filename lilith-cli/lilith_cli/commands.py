@@ -748,7 +748,9 @@ class UsageCommand(BaseCommand):
                     "duration_human": duration_str,
                 },
             }
-            console.print(json.dumps(data, indent=2, ensure_ascii=False, default=str))
+            from .render import print_json
+
+            print_json(data, indent=2, default=str)
             return
 
         console.print("\n[bold realm]᛭ Estadísticas de la sesión[/]\n")

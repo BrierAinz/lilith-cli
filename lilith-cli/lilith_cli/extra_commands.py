@@ -5498,8 +5498,17 @@ async def run_editor_command(session: AgentSession, args: str) -> None:  # noqa:
     # /editor <archivo>[:línea]
     line: int | None = None
     target = text
-    if ":" in text and not target.startswith("/"):
+    if ":" in text:
         # Split from the last colon to handle Windows paths with drive letters.
+        #
+        # Antes esto exigia ademas `not target.startswith("/")`, lo que
+        # desactivaba el parseo de linea para CUALQUIER ruta absoluta de
+        # Unix: `/editor /ruta/archivo.txt:42` intentaba abrir un archivo
+        # llamado "archivo.txt:42" y cortaba con "Archivo no encontrado".
+        # El guard sobraba: rpartition ya parte por el ULTIMO ":", asi que
+        # "C:/x/f.txt" da line_part="/x/f.txt" (no es digito, no se toca) y
+        # "C:/x/f.txt:42" da line_part="42". Las unidades de Windows quedan
+        # cubiertas sin romper Unix.
         path_part, _, line_part = text.rpartition(":")
         if path_part and line_part.isdigit():
             target = path_part

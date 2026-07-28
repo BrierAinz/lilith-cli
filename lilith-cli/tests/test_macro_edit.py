@@ -59,7 +59,17 @@ async def test_macro_edit_defaults_to_notepad_on_windows(
 
     monkeypatch.delenv("VISUAL", raising=False)
     monkeypatch.delenv("EDITOR", raising=False)
-    monkeypatch.setattr("lilith_cli.commands.sys.platform", "win32")
+    # El fallback se decide con `os.name == "nt"`, no con sys.platform:
+    # parchear sys.platform no hacia nada y el test solo pasaba en Windows
+    # por tautologia (alla os.name YA es "nt"). En Linux caia al "vi" del
+    # otro ramal. Parcheando lo que el codigo realmente lee, el test
+    # comprueba el fallback de verdad y es independiente del SO.
+    # Se parchea el modulo `os` real y no un atributo de
+    # lilith_cli.commands porque ahi `os` se importa dentro de la funcion,
+    # asi que el modulo no expone el nombre.
+    import os as _os
+
+    monkeypatch.setattr(_os, "name", "nt")
     monkeypatch.setattr("subprocess.run", fake_run)
 
     await MacroCommand(_Session()).execute("edit deploy")

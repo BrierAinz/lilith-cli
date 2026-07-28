@@ -164,6 +164,35 @@ def _stop_workers(app) -> None:
     app.workers.cancel_all()
 
 
+async def _wait_workers_idle(pilot, timeout: float = 5.0) -> None:
+    """Espera a que los workers one-shot terminen, sin dormir a ciegas.
+
+    Esperar un tiempo fijo a que un worker actualice la UI es una carrera:
+    si el runner esta cargado y no llega a tiempo, el snapshot captura la
+    pantalla a medio actualizar y el test falla de forma intermitente. Ya
+    paso en CI, donde el mismo commit fallo en 3.12 y paso en 3.11.
+
+    Consultar el estado real de los workers lo vuelve determinista. El
+    timeout es una red: si alguno no termina nunca, el test sigue (y
+    fallara por el snapshot, que es informacion util) en vez de colgar
+    la suite.
+    """
+    from textual.worker import WorkerState
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        busy = [
+            w
+            for w in pilot.app.workers
+            if w.state in (WorkerState.PENDING, WorkerState.RUNNING)
+        ]
+        if not busy:
+            return
+        await pilot.pause()
+        await asyncio.sleep(0.02)
+
+
 # ── Snapshot tests ──────────────────────────────────────────────────
 
 
@@ -253,7 +282,7 @@ def test_ide_goto_line_modal(snap_compare, fake_session, project_root):
         await pilot.pause()
         # Let the one-shot git-info worker finish updating the info bar
         # (git fails fast outside a repo, leaving just the relative path).
-        await asyncio.sleep(0.6)
+        await _wait_workers_idle(pilot)
         await pilot.pause()
         await pilot.press("ctrl+g")
         await pilot.pause()

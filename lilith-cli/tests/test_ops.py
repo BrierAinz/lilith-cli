@@ -123,10 +123,16 @@ def test_version_bumped_to_4_4_0():
 # ── agents ──────────────────────────────────────────────────────────
 
 
-def test_agents_table_against_fixture(fixture_repo_root: Path, capsys):
+def test_agents_table_against_fixture(fixture_repo_root: Path, capsys, monkeypatch):
     """agents (no --show) should print a table covering both fixture cards."""
     from lilith_cli.ops import agents
 
+    # Sin ancho explicito, Rich asume 80 columnas bajo captura de pytest y
+    # parte el path del footer a mitad del nombre ("...a\ngent_cards.yaml"),
+    # con lo que la asercion de substring falla segun cuan largo sea el
+    # tmp_path del runner. Fijar COLUMNS hace la salida determinista; la
+    # Console se construye dentro de agents(), asi que lee este valor.
+    monkeypatch.setenv("COLUMNS", "200")
     agents(show=None, repo_root=fixture_repo_root)
     out = capsys.readouterr().out
 

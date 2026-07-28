@@ -255,6 +255,7 @@ _SLASH_COMMANDS = [
     "/cls",
     "/clear-screen",
     "/agent",
+    "/apply",
     "/mode",
     "/modo",
     "/template",
@@ -921,6 +922,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "random":
                     await run_random_command(session, cmd_args)
+                    continue
+                if cmd_name == "apply":
+                    await run_apply_command(session, cmd_args)
                     continue
                 if cmd_name == "alias":
                     await run_alias_command(session, cmd_args)

@@ -11964,3 +11964,236 @@ def _render_diff_branch_stats(numstat_output: str, ref: str) -> None:
             f"[dim]{rows} archivo(s) entre [bold cyan]{ref}[/] y HEAD · "
             f"+{total_add} -{total_del} líneas[/]"
         )
+# ── /apply ────────────────────────────────────────────────────────────────────
+# Aplica un parche unified-diff (formato git) al árbol de trabajo.
+# Pensado para que un agente pegue un diff propuesto y el usuario lo apruebe
+# con un solo comando. Por seguridad: rechaza rutas fuera del repo y exige
+# confirmación cuando --check falla. Delega TODO el trabajo a `git apply`,
+# sin reinventar el parser de unified diff (riesgo de corrupcion).
+
+_APPLY_HELP_LINES = (
+    "  [cyan]/apply <archivo.diff>[/]            — aplicar parche desde archivo",
+    "  [cyan]/apply --stdin[/]                   — leer el parche de stdin (pegar)",
+    "  [cyan]/apply --check[/]                   — solo verificar, no escribe",
+    "  [cyan]/apply --dry-run[/]                 — alias de --check (verbose)",
+    "  [cyan]/apply --reverse[/]                 — revertir el parche (git apply -R)",
+    "  [cyan]/apply --3way[/]                    — fusión de 3 vías si falla",
+    "  [cyan]/apply --include <patrón>[/]        — limitar archivos tocados",
+)
+
+
+def _render_apply_usage() -> None:
+    """Muestra la ayuda de /apply."""
+    console.print("\n[bold realm]᛭ Uso de /apply[/]")
+    for line in _APPLY_HELP_LINES:
+        console.print(line)
+    console.print(
+        "\n[dim]El parche debe estar en formato unified diff (lo que produce "
+        "`git diff` o `git format-patch`). Por seguridad no se aplica a rutas "
+        "fuera del repositorio actual.[/]\n"
+    )
+
+
+def _resolve_repo_root(start: Path | None = None) -> Path | None:
+    """Devuelve la raíz del repo git que contiene ``start`` (o CWD)."""
+    cwd = (start or Path.cwd()).resolve()
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return None
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    try:
+        return Path(result.stdout.strip()).resolve()
+    except OSError:
+        return None
+
+
+def _check_patch_targets_in_repo(patch_text: str, repo_root: Path) -> list[str]:
+    """Inspecciona las cabeceras ``+++`` y devuelve las que salen del repo.
+
+    No rechaza ``/dev/null`` (creación/eliminación legítima). Devuelve lista
+    vacía si todos los targets están dentro del repo.
+    """
+    bad: list[str] = []
+    for line in patch_text.splitlines():
+        if not line.startswith("+++ "):
+            continue
+        parts = line[4:].split("\t", 1)[0].strip()
+        if parts == "/dev/null":
+            continue
+        if parts.startswith(("a/", "b/")):
+            parts = parts[2:]
+        if not parts:
+            continue
+        try:
+            target = (repo_root / parts).resolve()
+        except OSError:
+            bad.append(parts)
+            continue
+        try:
+            target.relative_to(repo_root)
+        except ValueError:
+            bad.append(parts)
+    return bad
+
+
+async def run_apply_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+    """Ejecuta /apply para aplicar un parche unified-diff al árbol de trabajo.
+
+    Examples:
+        /apply fix.patch
+        /apply --stdin
+        /apply fix.patch --check
+        /apply fix.patch --reverse
+        /apply fix.patch --include 'src/*.py'
+        /apply fix.patch --3way
+    """
+    text = args.strip()
+
+    if not text or text.lower() in ("help", "--help", "-h", "?"):
+        _render_apply_usage()
+        return
+
+    parser = argparse.ArgumentParser(prog="/apply", add_help=False)
+    parser.add_argument("file", nargs="?")
+    parser.add_argument("--stdin", action="store_true")
+    parser.add_argument("--check", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--reverse", "-R", action="store_true")
+    parser.add_argument("--3way", dest="threeway", action="store_true")
+    parser.add_argument("--include", dest="include", default=None)
+    parser.add_argument("--quiet", "-q", action="store_true")
+    # posix=False preserva las barras invertidas de rutas Windows; luego
+    # limpiamos comillas envolventes para que `/apply "ruta con espacios.patch"`
+    # siga funcionando.
+    raw_tokens = shlex.split(text, posix=False) if text else []
+    clean_tokens: list[str] = []
+    for tok in raw_tokens:
+        if len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in ('"', "'"):
+            tok = tok[1:-1]
+        clean_tokens.append(tok)
+    try:
+        parsed, unknown = parser.parse_known_args(clean_tokens)
+    except SystemExit:
+        return
+    if unknown:
+        render_error(f"Argumentos no reconocidos para /apply: {' '.join(unknown)}")
+        return
+
+    patch_text: str | None = None
+    source_desc = ""
+    try:
+        if parsed.stdin:
+            patch_text = sys.stdin.read()
+            source_desc = "<stdin>"
+        elif parsed.file:
+            patch_path = Path(parsed.file).expanduser()
+            if not patch_path.exists():
+                render_error(f"No existe el archivo de parche: {parsed.file}")
+                return
+            try:
+                patch_text = patch_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                patch_text = patch_path.read_text(encoding="latin-1")
+            source_desc = str(patch_path)
+        else:
+            render_error("Uso: /apply <archivo.diff> | /apply --stdin")
+            return
+    except KeyboardInterrupt:
+        render_error("Lectura de parche cancelada.")
+        return
+
+    if not patch_text or not patch_text.strip():
+        render_error("El parche está vacío.")
+        return
+
+    repo_root = _resolve_repo_root()
+    if repo_root is None:
+        render_error(
+            "No se encontró raíz de repositorio git. /apply requiere estar "
+            "dentro de un repo (o subdirectorio del mismo)."
+        )
+        return
+
+    bad_targets = _check_patch_targets_in_repo(patch_text, repo_root)
+    if bad_targets:
+        joined = ", ".join(bad_targets)
+        render_error(
+            f"El parche apunta a rutas fuera del repositorio [{repo_root}]: "
+            f"{joined}. Rechazado por seguridad."
+        )
+        return
+
+    git_args = ["git", "apply"]
+    if parsed.check or parsed.dry_run:
+        git_args.append("--check")
+    if parsed.reverse:
+        git_args.append("--reverse")
+    if parsed.threeway:
+        git_args.append("--3way")
+    if parsed.include:
+        git_args.extend(["--include", parsed.include])
+    if parsed.quiet:
+        git_args.append("--quiet")
+    git_args.append("-")  # leemos el parche de stdin para evitar quoting.
+
+    try:
+        result = subprocess.run(
+            git_args,
+            input=patch_text,
+            capture_output=True,
+            text=True,
+            cwd=repo_root,
+            check=False,
+        )
+    except FileNotFoundError:
+        render_error("git no está disponible en el PATH; no se puede aplicar.")
+        return
+
+    if result.returncode == 0:
+        if parsed.check or parsed.dry_run:
+            console.print(
+                f"[success]✓ Parche válido (no aplicado) · fuente: {source_desc}[/]"
+            )
+            return
+        try:
+            list_proc = subprocess.run(
+                ["git", "diff", "--name-only"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            affected = [
+                ln.strip() for ln in list_proc.stdout.splitlines() if ln.strip()
+            ]
+        except FileNotFoundError:
+            affected = []
+        if affected:
+            preview = affected[:8]
+            more = "" if len(affected) <= 8 else f" (+{len(affected) - 8} más)"
+            joined = ", ".join(preview)
+            console.print(
+                f"[success]✓ Parche aplicado ({len(affected)} archivo(s)): "
+                f"{joined}{more}[/]"
+            )
+            console.print(
+                "[dim]  Usa /diff-unstaged para revisar o /git para commitear.[/]"
+            )
+        else:
+            console.print(f"[success]✓ Parche aplicado · fuente: {source_desc}[/]")
+        return
+
+    err = (result.stderr or result.stdout or "git apply falló sin mensaje").strip()
+    render_error(f"No se pudo aplicar el parche: {err}")
+    console.print(
+        "[dim]Sugerencias: probá /apply --check para validar primero, --reverse "
+        "si lo aplicaste dos veces, o --3way si hay drift.[/]"
+    )

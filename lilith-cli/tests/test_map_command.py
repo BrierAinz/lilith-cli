@@ -37,7 +37,13 @@ async def test_tree_symbols_json_es_machinereadable(tmp_path):
     (tmp_path / "modulo.py").write_text("def ejecuta():\n    pass\n", encoding="utf-8")
     prints: list[str] = []
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=prints.append):
+    # `prints.append` pelado no acepta kwargs, y la salida JSON pasa
+    # soft_wrap/markup/highlight para que Rich no parta el JSON en varias
+    # lineas. Se ignoran los kwargs y se guarda solo el texto.
+    with patch(
+        "lilith_cli.extra_commands.console.print",
+        side_effect=lambda *a, **kw: prints.append(a[0] if a else ""),
+    ):
         await run_tree_command(DummySession(), f"symbols {tmp_path} --json")
 
     payload = json.loads(prints[0])

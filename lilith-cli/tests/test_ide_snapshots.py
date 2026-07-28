@@ -164,6 +164,62 @@ def _stop_workers(app) -> None:
     app.workers.cancel_all()
 
 
+def _hide_cursor_position(app) -> None:
+    """Oculta el lado derecho de la barra de estado antes de capturar.
+
+    Ese Static muestra "Ln N, Col N" cuando ``_current_editor()`` devuelve
+    algo, y eso solo pasa una vez que la pestana recien abierta quedo
+    activa. El detalle es que ese asentamiento ocurre DESPUES de que
+    ``run_before`` retorna, mientras Textual drena sus mensajes pendientes
+    y justo antes de exportar el SVG: o sea, entra en la captura por una
+    carrera que el test no controla. Con el mismo commit salia verde en
+    3.11 y rojo en 3.12, y el diff del reporte era exactamente esa linea:
+
+        esperado: 🌿 local / local-model  Ln 1, Col 1  Tokens ↑0 ↓0 Σ0
+        real:     🌿 local / local-model  Tokens ↑0 ↓0 Σ0
+
+    Esperar o forzar el repintado no alcanza, porque el valor depende de
+    ese asentamiento posterior. Se oculta el widget, que es el mismo
+    criterio que este archivo ya aplica al reloj del header: sacar de la
+    foto lo que varia con el tiempo en vez de intentar sincronizarlo. Lo
+    que el test verifica (el modal de ir-a-linea sobre un editor abierto)
+    queda intacto.
+    """
+    try:
+        app.query_one("#status-right").display = False
+    except Exception:
+        pass
+
+
+async def _wait_workers_idle(pilot, timeout: float = 5.0) -> None:
+    """Espera a que los workers one-shot terminen, sin dormir a ciegas.
+
+    Esperar un tiempo fijo a que un worker actualice la UI es una carrera:
+    si el runner esta cargado y no llega a tiempo, el snapshot captura la
+    pantalla a medio actualizar y el test falla de forma intermitente. Ya
+    paso en CI, donde el mismo commit fallo en 3.12 y paso en 3.11.
+
+    Consultar el estado real de los workers lo vuelve determinista. El
+    timeout es una red: si alguno no termina nunca, el test sigue (y
+    fallara por el snapshot, que es informacion util) en vez de colgar
+    la suite.
+    """
+    from textual.worker import WorkerState
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        busy = [
+            w
+            for w in pilot.app.workers
+            if w.state in (WorkerState.PENDING, WorkerState.RUNNING)
+        ]
+        if not busy:
+            return
+        await pilot.pause()
+        await asyncio.sleep(0.02)
+
+
 # ── Snapshot tests ──────────────────────────────────────────────────
 
 
@@ -253,8 +309,10 @@ def test_ide_goto_line_modal(snap_compare, fake_session, project_root):
         await pilot.pause()
         # Let the one-shot git-info worker finish updating the info bar
         # (git fails fast outside a repo, leaving just the relative path).
-        await asyncio.sleep(0.6)
-        await pilot.pause()
+        await _wait_workers_idle(pilot)
+        # La posicion del cursor entra en la barra despues de que run_before
+        # retorna, asi que es carrera pura: se saca de la foto.
+        _hide_cursor_position(pilot.app)
         await pilot.press("ctrl+g")
         await pilot.pause()
         _freeze_inputs(pilot.app)

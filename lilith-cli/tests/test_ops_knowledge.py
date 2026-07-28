@@ -34,6 +34,31 @@ if _PKG_DIR not in sys.path:
     sys.path.insert(0, _PKG_DIR)
 
 
+def _mimir_available() -> bool:
+    """True si Mimir esta presente en el workspace que envuelve al repo.
+
+    Los tests de ``ask`` marcados abajo son de INTEGRACION: cargan el
+    modulo real ``Vanaheim/Agents/Mimir/cli.py`` a proposito (ver la nota
+    en sus docstrings) en vez de simularlo. Vanaheim es un submodulo del
+    superrepo Yggdrasil, no de Asgard, asi que en un checkout de
+    reino-asgard suelto ese archivo no existe y los tests reventaban con
+    FileNotFoundError. Saltearlos cuando falta la dependencia los deja
+    correr en el workspace completo y no rompe CI donde no puede estar.
+    """
+    try:
+        from lilith_cli import ops_knowledge
+
+        return ops_knowledge._mimir_cli_path().is_file()
+    except Exception:
+        return False
+
+
+requires_mimir = pytest.mark.skipif(
+    not _mimir_available(),
+    reason="Mimir (Vanaheim/Agents/Mimir/cli.py) no esta en este checkout",
+)
+
+
 # ── Fixtures ────────────────────────────────────────────────────────
 
 
@@ -171,6 +196,7 @@ def test_load_mimir_cli_missing_file(monkeypatch, tmp_path: Path, capsys):
 # ── ask: missing-index branch ──────────────────────────────────────
 
 
+@requires_mimir
 def test_ask_missing_index_prints_hint_and_exits(mimir_tree: Path, capsys):
     """ask with no index on disk should exit 2 with a friendly hint.
 
@@ -202,6 +228,7 @@ def test_ask_missing_index_prints_hint_and_exits(mimir_tree: Path, capsys):
 # ── ask: real index end-to-end ──────────────────────────────────────
 
 
+@requires_mimir
 def test_ask_against_real_mimir_index(mimir_tree: Path, capsys):
     """ask should retrieve the photon chunk when the index is built."""
     from lilith_cli import ops_knowledge
@@ -227,6 +254,7 @@ def test_ask_against_real_mimir_index(mimir_tree: Path, capsys):
     assert "photon.md" in out or "Svartalfheim/plans/photon.md" in out
 
 
+@requires_mimir
 def test_ask_with_index_flag_rebuilds_then_queries(mimir_tree: Path, capsys):
     """ask --index should rebuild the index then query successfully."""
     from lilith_cli import ops_knowledge

@@ -461,7 +461,15 @@ class TestTerminalMixinDispatch:
             await pilot.pause()
             assert not log.lines
 
-    async def test_pty_command_written_to_backend(self, fake_session, tmp_path):
+    async def test_pty_command_written_to_backend(self, fake_session, tmp_path, monkeypatch):
+        # _use_pty() consulta winpty_available(), que fuera de Windows es
+        # False: sin simularla el comando se iba por el ramal subprocess y
+        # el backend nunca recibia nada. FakeBackend ya sustituye al PTY
+        # real, asi que fingir la disponibilidad ejercita el despacho a PTY
+        # en cualquier SO en vez de dejarlo sin cubrir en Linux.
+        monkeypatch.setattr(
+            "lilith_cli.ide.views.terminal.winpty_available", lambda: True
+        )
         app = _make_app(fake_session, tmp_path)
         async with app.run_test(size=(120, 40)) as pilot:
             session = app._term_manager().active

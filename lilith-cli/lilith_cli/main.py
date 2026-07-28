@@ -463,8 +463,9 @@ def _render_delegate_tool_result(preset_name: str, result: Any) -> None:
 
     structured_payload = data.get("structured")
     if structured_payload:
-        import json as _json
-        console.print(_json.dumps(structured_payload, ensure_ascii=False, indent=2))
+        from .render import print_json
+
+        print_json(structured_payload, indent=2)
     else:
         content = data.get("content") or data.get("raw_content") or ""
         if content:

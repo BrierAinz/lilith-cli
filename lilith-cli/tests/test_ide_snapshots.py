@@ -164,33 +164,31 @@ def _stop_workers(app) -> None:
     app.workers.cancel_all()
 
 
-async def _wait_status_cursor(pilot, timeout: float = 5.0) -> None:
-    """Espera a que la barra de estado muestre la posicion del cursor.
+def _hide_cursor_position(app) -> None:
+    """Oculta el lado derecho de la barra de estado antes de capturar.
 
-    ``_status_right()`` solo agrega "Ln N, Col N" cuando ya hay un editor
-    activo, y la barra se repinta en el siguiente refresco de estado, no
-    al instante en que se abre el archivo. Capturar antes de eso da una
-    barra sin la posicion: el snapshot esperado la tiene y el real no, y
-    el test falla con un escueto `assert False`. Es una carrera pura, asi
-    que salia rojo en 3.12 y verde en 3.11 con el mismo commit.
+    Ese Static muestra "Ln N, Col N" cuando ``_current_editor()`` devuelve
+    algo, y eso solo pasa una vez que la pestana recien abierta quedo
+    activa. El detalle es que ese asentamiento ocurre DESPUES de que
+    ``run_before`` retorna, mientras Textual drena sus mensajes pendientes
+    y justo antes de exportar el SVG: o sea, entra en la captura por una
+    carrera que el test no controla. Con el mismo commit salia verde en
+    3.11 y rojo en 3.12, y el diff del reporte era exactamente esa linea:
 
-    Esperar el texto observable en vez de una cantidad de pausas fijas lo
-    vuelve determinista. El timeout es una red: si nunca aparece, el test
-    falla por el snapshot (que es informacion util) en vez de colgarse.
+        esperado: 🌿 local / local-model  Ln 1, Col 1  Tokens ↑0 ↓0 Σ0
+        real:     🌿 local / local-model  Tokens ↑0 ↓0 Σ0
+
+    Esperar o forzar el repintado no alcanza, porque el valor depende de
+    ese asentamiento posterior. Se oculta el widget, que es el mismo
+    criterio que este archivo ya aplica al reloj del header: sacar de la
+    foto lo que varia con el tiempo en vez de intentar sincronizarlo. Lo
+    que el test verifica (el modal de ir-a-linea sobre un editor abierto)
+    queda intacto.
     """
-    from textual.widgets import Static
-
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    while loop.time() < deadline:
-        try:
-            text = str(pilot.app.query_one("#status-right", Static).renderable)
-        except Exception:
-            text = ""
-        if "Ln " in text:
-            return
-        await pilot.pause()
-        await asyncio.sleep(0.02)
+    try:
+        app.query_one("#status-right").display = False
+    except Exception:
+        pass
 
 
 async def _wait_workers_idle(pilot, timeout: float = 5.0) -> None:
@@ -312,10 +310,9 @@ def test_ide_goto_line_modal(snap_compare, fake_session, project_root):
         # Let the one-shot git-info worker finish updating the info bar
         # (git fails fast outside a repo, leaving just the relative path).
         await _wait_workers_idle(pilot)
-        # Y que la barra de estado ya refleje la posicion del cursor del
-        # editor recien abierto, que es lo que capturo el snapshot.
-        await _wait_status_cursor(pilot)
-        await pilot.pause()
+        # La posicion del cursor entra en la barra despues de que run_before
+        # retorna, asi que es carrera pura: se saca de la foto.
+        _hide_cursor_position(pilot.app)
         await pilot.press("ctrl+g")
         await pilot.pause()
         _freeze_inputs(pilot.app)

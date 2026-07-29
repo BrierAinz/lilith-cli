@@ -7475,6 +7475,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("alias", "Aliases [set|get|remove|list]"),
             ("tip", "Tips de Lilith [N|list|add|count]"),
             ("compare", "Comparar archivos [files|json|text] <a> <b> | recent <modo>"),
+            ("ingest", "Traer una página web al RAG de Mimir [<url> --nombre <slug> --sobrescribir --reindex]"),
             ("search", "Buscar en historial o archivos [history|files <patrón>]"),
             ("snippet", "Guardar/ejecutar snippets reutilizables"),
             ("model-info", "Detalles del modelo activo (precio, contexto, alias)"),

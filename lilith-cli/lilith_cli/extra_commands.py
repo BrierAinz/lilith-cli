@@ -7379,6 +7379,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("note", "Bloc persistente de notas entre sesiones [list|show|edit|rm|clear]"),
             ("quote", "Citar mensaje del historial como texto plano [N|last|user]"),
             ("copy", "Copiar al portapapeles"),
+            ("paste", "Pegar desde el portapapeles y enviar al agente [--prepend TEXTO]"),
             ("quit", "Salir"),
             ("log", "Resumen de sesión [stats|clear|path|N]"),
             ("capture", "Transcripción Markdown [--output <ruta> | --include-tools | --no-usage | --tags <tags> | --exclude-system | --first N | --last N]"),

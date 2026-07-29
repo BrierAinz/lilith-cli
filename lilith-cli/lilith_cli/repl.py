@@ -144,6 +144,7 @@ from .tool_progress import DelegationLive, DelegationStreamBuffer, ToolProgressT
 from .trace import AgentTrace
 from .workflow_command import run_workflow_command
 from .ingest_command import run_ingest_command
+from .paste_command import run_paste_command
 
 
 # ── Prompt constants ────────────────────────────────────────────────
@@ -214,6 +215,7 @@ _SLASH_COMMANDS = [
     "/goal",
     "/last-tool",
     "/quote",
+    "/paste",
     "/compact",
     "/summarize",
     "/resume",
@@ -995,6 +997,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "feedback":
                     await run_feedback_command(session, cmd_args)
+                    continue
+                if cmd_name == "paste":
+                    await run_paste_command(session, cmd_args)
                     continue
                 if cmd_name in ("note", "notes", "note-add"):
                     await run_note_command(session, cmd_args)

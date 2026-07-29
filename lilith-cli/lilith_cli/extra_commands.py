@@ -7373,6 +7373,7 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("undo", "Deshacer última operación"),
             ("undo-peek", "Listar/previsualizar backups pendientes [N | list | clear]"),
             ("redo", "Rehacer"),
+            ("retry", "Reenviar último mensaje o enviar uno nuevo [<texto>]"),
             ("save", "Guardar conversación"),
             ("export", "Exportar [--format json|md --output path]"),
             ("bookmark", "Marcadores de conversación [list|go|delete|rename|search]"),
@@ -7401,6 +7402,8 @@ async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: A
             ("profile", "Perfiles de configuración [list|save|show|load|delete]"),
             ("where", "Mostrar qué archivos de configuración se cargaron"),
             ("confirm", "Activar/desactivar confirmación para escrituras destructivas"),
+            ("memory", "Buscar o guardar en la memoria persistente [<query> | save <texto>]"),
+            ("system", "Mostrar o modificar el system prompt [<nuevo prompt>]"),
         ],
         "Development": [
             ("plan", "Plan numerado de tareas"),

@@ -10980,6 +10980,10 @@ async def run_apply_command(session: AgentSession, args: str) -> None:  # noqa: 
 # Se movieron a utility_commands.py (grupo autocontenido). Se reexportan
 # para no romper los imports existentes de repl.py y de los tests.
 from .utility_commands import (  # noqa: E402,F401
+    _CALC_BINOPS,
+    _CALC_CONSTANTS,
+    _CALC_FUNCTIONS,
+    _CALC_UNARYOPS,
     _calc_eval_node,
     _extract_text_from_message,
     _now_rfc_value,
@@ -11005,6 +11009,18 @@ from .utility_commands import (  # noqa: E402,F401
 # ── Movidos a metrics_commands.py ─────────────────────────────────
 # Se reexportan para no romper los imports existentes.
 from .metrics_commands import (  # noqa: E402,F401
+    _command_metrics,
+    _file_edit_metrics,
+    _fmt_secs,
+    _format_duration_short,
+    _metrics_emit_json,
+    _metrics_show_commands,
+    _metrics_show_files,
+    _metrics_show_summary,
+    _metrics_show_tools,
+    _telemetry_status,
+    _tool_metrics,
+    _usage_color,
     run_bench_command,
     run_metrics_command,
     run_tokens_command,

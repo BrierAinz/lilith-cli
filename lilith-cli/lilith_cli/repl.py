@@ -143,6 +143,7 @@ from .undo_command import run_undo_peek_command
 from .tool_progress import DelegationLive, DelegationStreamBuffer, ToolProgressTracker, render_tool_progress
 from .trace import AgentTrace
 from .workflow_command import run_workflow_command
+from .ingest_command import run_ingest_command
 
 
 # ── Prompt constants ────────────────────────────────────────────────
@@ -301,6 +302,7 @@ _SLASH_COMMANDS = [
     "/uuid",
     "/voice",
     "/whereami",
+    "/ingest",
     # Comandos que ya existían y estaban documentados en /help, pero nunca
     # se listaron acá: el usuario los leía en la ayuda y el Tab no se los
     # completaba. Ver test_autocomplete_covers_help_catalog.
@@ -987,6 +989,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name == "how":
                     await run_how_command(session, cmd_args)
+                    continue
+                if cmd_name == "ingest":
+                    await run_ingest_command(session, cmd_args)
                     continue
                 if cmd_name in ("note", "notes", "note-add"):
                     await run_note_command(session, cmd_args)

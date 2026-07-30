@@ -20,6 +20,8 @@ Subcommands:
 * ``/note <text>...``  — append a note (the canonical form)
 * ``/note list``       — show all notes (most recent last), one per line
 * ``/note list --ids`` — list with explicit IDs (useful for ``rm``)
+* ``/note search <q>`` — filter notes whose text contains ``q`` (case-insensitive)
+* ``/note search <q> --ids`` — same as above with explicit IDs
 * ``/note show <id>``  — print a single note in full
 * ``/note edit <id> <text>...`` — replace the text of a note (timestamp updated)
 * ``/note rm <id>``    — delete a single note
@@ -111,6 +113,8 @@ def _print_usage() -> None:
         "  [bold cyan]/note <texto>...[/]               — agrega una nota\n"
         "  [bold cyan]/note list[/]                    — lista todas las notas\n"
         "  [bold cyan]/note list --ids[/]              — lista con IDs al inicio\n"
+        "  [bold cyan]/note search <texto>[/]          — filtra notas por texto (case-insensitive)\n"
+        "  [bold cyan]/note search <texto> --ids[/]    — igual, con IDs\n"
         "  [bold cyan]/note show <id>[/]               — muestra una nota entera\n"
         "  [bold cyan]/note edit <id> <texto>...[/]    — reemplaza el texto\n"
         "  [bold cyan]/note rm <id>[/]                 — borra una nota\n"
@@ -261,6 +265,35 @@ def _show_note(note_id: int) -> None:
     _render_single_note(note)
 
 
+def _search_notes(query: str, with_ids: bool) -> None:
+    """Filter notes whose text contains ``query`` (case-insensitive) and render them.
+
+    The match is a plain substring search on the note body; the query is
+    stripped of the ``--ids`` / ``-i`` flag before matching.  When no notes
+    match, a short hint is printed instead of an empty body — distinguishes
+    "the store is empty" from "no match for that query" so the user knows
+    which knob to turn next.
+    """
+    notes = _load_notes()
+    if not notes:
+        console.print("[dim]No hay notas todavía. Probá /note tu primera idea.[/]")
+        return
+    needle = query.lower()
+    matches = [n for n in notes if needle in str(n.get("text", "")).lower()]
+    if not matches:
+        console.print(
+            f"[dim]Sin coincidencias para «{query}». "
+            f"Probá /note list para ver todas.[/dim]"
+        )
+        return
+    _render_notes_table(matches, with_ids=with_ids)
+    # Tiny footer so the user can tell search from list at a glance.
+    console.print(
+        f"[dim]Filtro aplicado: «{query}» — {len(matches)} de {len(notes)} "
+        f"nota(s).[/dim]"
+    )
+
+
 # ── Entry point ────────────────────────────────────────────────────
 
 
@@ -284,6 +317,26 @@ async def run_note_command(session: "AgentSession", args: str) -> None:  # noqa:
 
     if text.lower() == "clear":
         _clear_all()
+        return
+
+    # ``/note search <query> [--ids|-i]`` is the only subcommand that takes
+    # a free-form body, so it has to be matched BEFORE the generic split on
+    # ``parts[0]`` (otherwise "search alpha" would be splitted into head="search"
+    # and rest="alpha", but we want the rest to keep the trailing --ids flag).
+    # We test against `text[len("search"):]` (case-insensitive) rather than the
+    # whole text so that "search a b --ids" becomes query="a b", flag="--ids".
+    if text.lower().startswith("search"):
+        tail = text[len("search"):].strip()
+        if not tail:
+            render_error("Uso: /note search <texto> [--ids]")
+            return
+        lowered = tail.lower()
+        if lowered.endswith("--ids") or lowered.endswith("-i"):
+            flag = lowered[-len("--ids"):] if lowered.endswith("--ids") else "-i"
+            query = tail[: len(tail) - len(flag) - 1].strip()
+            _search_notes(query, with_ids=True)
+            return
+        _search_notes(tail, with_ids=False)
         return
 
     # ``/note show <id>``

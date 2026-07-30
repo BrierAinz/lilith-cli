@@ -1,9 +1,9 @@
 """Tests for the ``/note`` slash command.
 
 The command lives in ``lilith_cli.notes_command`` and persists free-form
-text notes to ``~/.yggdrasil/notes.json``. These tests cover the four
-subcommands (``add``, ``list``, ``show``, ``edit``, ``rm``, ``clear``),
-the length guard, and the alias surface.
+text notes to ``~/.yggdrasil/notes.json``. These tests cover the six
+subcommands (``add``, ``list``, ``show``, ``edit``, ``rm``, ``clear``,
+``search``), the length guard, and the alias surface.
 """
 
 from __future__ import annotations
@@ -362,3 +362,122 @@ async def test_run_note_uses_text_as_default(
     notes = _load_notes()
     assert len(notes) == 1
     assert "esto no es list" in notes[0]["text"]
+
+
+# ── /note search ─────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_run_note_search_filters_case_insensitive(
+    isolated_notes: Path, fake_console: _CapturingConsole
+) -> None:
+    """``/note search <q>`` shows only matching notes, case-insensitive."""
+    _save_notes(
+        [
+            {"id": 1, "text": "Debug the auth flow", "created": "2026-07-30T09:00:00"},
+            {"id": 2, "text": "ship deploy script", "created": "2026-07-30T10:00:00"},
+            {"id": 3, "text": "auth bug in oauth", "created": "2026-07-30T11:00:00"},
+        ]
+    )
+
+    await run_note_command(FakeSession(), "search auth")
+
+    out = "\n".join(fake_console.messages)
+    assert "Debug the auth flow" in out
+    assert "auth bug in oauth" in out
+    assert "ship deploy script" not in out
+    # The footer mentions the applied filter and a count.
+    assert "Filtro aplicado" in out
+    assert "2 de 3" in out
+
+
+@pytest.mark.asyncio
+async def test_run_note_search_no_matches_reports_hint(
+    isolated_notes: Path, fake_console: _CapturingConsole
+) -> None:
+    """No matches → short hint, not just silence."""
+    _save_notes(
+        [
+            {"id": 1, "text": "alpha", "created": "2026-07-30T09:00:00"},
+            {"id": 2, "text": "beta", "created": "2026-07-30T10:00:00"},
+        ]
+    )
+
+    await run_note_command(FakeSession(), "search nada-que-contenga-esto")
+
+    out = "\n".join(fake_console.messages)
+    assert "Sin coincidencias" in out
+    assert "nada-que-contenga-esto" in out
+    # Should NOT render the matching table on no-match.
+    assert "Filtro aplicado" not in out
+
+
+@pytest.mark.asyncio
+async def test_run_note_search_empty_store_reports_no_notes(
+    isolated_notes: Path, fake_console: _CapturingConsole
+) -> None:
+    """Empty store → 'no notes yet' message, not an empty filter line."""
+    await run_note_command(FakeSession(), "search algo")
+
+    out = "\n".join(fake_console.messages)
+    assert "No hay notas" in out
+    # No filter footer when the store is empty.
+    assert "Filtro aplicado" not in out
+
+
+@pytest.mark.asyncio
+async def test_run_note_search_with_ids_renders_id_column(
+    isolated_notes: Path, fake_console: _CapturingConsole
+) -> None:
+    """``search <q> --ids`` mirrors ``list --ids`` and prepends the IDs."""
+    _save_notes(
+        [
+            {"id": 1, "text": "alpha hit", "created": "2026-07-30T09:00:00"},
+            {"id": 2, "text": "no match", "created": "2026-07-30T10:00:00"},
+            {"id": 3, "text": "another hit", "created": "2026-07-30T11:00:00"},
+        ]
+    )
+
+    await run_note_command(FakeSession(), "search hit --ids")
+
+    out = "\n".join(fake_console.messages)
+    assert "alpha hit" in out
+    assert "another hit" in out
+    assert "no match" not in out
+    assert "Filtro aplicado" in out
+
+
+@pytest.mark.asyncio
+async def test_run_note_search_with_short_flag(
+    isolated_notes: Path, fake_console: _CapturingConsole
+) -> None:
+    """``-i`` is the short alias for ``--ids`` and works the same way."""
+    _save_notes(
+        [
+            {"id": 1, "text": "alpha hit", "created": "2026-07-30T09:00:00"},
+        ]
+    )
+
+    await run_note_command(FakeSession(), "search hit -i")
+
+    out = "\n".join(fake_console.messages)
+    assert "alpha hit" in out
+    assert "Filtro aplicado" in out
+
+
+@pytest.mark.asyncio
+async def test_run_note_search_without_args_errors(
+    isolated_notes: Path, fake_console: _CapturingConsole
+) -> None:
+    """`/note search` with no query is a usage error, not a free-text note."""
+    _save_notes(
+        [{"id": 1, "text": "kept", "created": "2026-07-30T09:00:00"}]
+    )
+    await run_note_command(FakeSession(), "search")
+
+    errs = [m for m in fake_console.messages if "Uso: /note search" in m]
+    assert len(errs) == 1
+    # And it must NOT have turned into a new note.
+    notes = _load_notes()
+    assert len(notes) == 1
+    assert notes[0]["text"] == "kept"

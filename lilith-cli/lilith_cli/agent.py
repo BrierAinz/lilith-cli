@@ -81,6 +81,64 @@ class Message(dict):
         return {"role": "system", "content": text}
 
 
+def _drop_orphan_tool_messages(
+    history: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Repara el pairing tool_call↔tool_result de un historial (posiblemente
+    truncado) para que sea válido ante la API de chat/completions.
+
+    Dos desajustes que el truncamiento por max_turns puede introducir y que el
+    proveedor (k3/OpenAI) rechaza con ``tool_call_id is not found`` (400):
+
+    1. Un mensaje ``role="tool"`` sin un ``assistant`` previo que declare su
+       ``tool_call_id`` (el corte dejó el result pero no su assistant). Se
+       descarta el result huérfano.
+    2. Un ``assistant`` con ``tool_calls`` al que le falta el ``tool`` result de
+       alguno de sus ids (grupo incompleto). Se degrada a un assistant sin
+       ``tool_calls`` conservando su ``content``; si no tiene content, se omite.
+
+    No muta el input; devuelve una lista nueva.
+    """
+    resulted: set[str] = {
+        m["tool_call_id"]
+        for m in history
+        if isinstance(m, dict) and m.get("role") == "tool" and "tool_call_id" in m
+    }
+    # ids de grupos COMPLETOS: un assistant cuyos tool_calls tienen TODOS su
+    # result. Solo esos assistant (con sus tool_calls) y esos results se
+    # conservan; si un grupo está incompleto, ni el assistant lleva tool_calls
+    # ni se conservan sus results parciales (quedarían huérfanos).
+    kept_ids: set[str] = set()
+    for m in history:
+        if isinstance(m, dict) and m.get("role") == "assistant" and m.get("tool_calls"):
+            ids = {tc["id"] for tc in m["tool_calls"] if "id" in tc}
+            if ids and ids <= resulted:
+                kept_ids.update(ids)
+
+    out: list[dict[str, Any]] = []
+    for m in history:
+        if not isinstance(m, dict):
+            out.append(m)
+            continue
+        role = m.get("role")
+        if role == "tool":
+            if m.get("tool_call_id") in kept_ids:
+                out.append(m)
+            # else: result de un grupo incompleto/huérfano → se descarta
+        elif role == "assistant" and m.get("tool_calls"):
+            ids = {tc["id"] for tc in m["tool_calls"] if "id" in tc}
+            if ids and ids <= resulted:
+                out.append(m)  # grupo completo: se mantiene con sus tool_calls
+            else:
+                content = m.get("content") or ""
+                if str(content).strip():
+                    out.append({"role": "assistant", "content": content})
+                # grupo incompleto sin content → se omite del todo
+        else:
+            out.append(m)
+    return out
+
+
 # ── AgentSession ────────────────────────────────────────────────────
 
 
@@ -1016,6 +1074,12 @@ class AgentSession:
             )
         ]
         history = visible_history[-max_turns * 2 :]  # user+assistant = 2 messages per turn
+        # El truncamiento por max_turns corta por cantidad de mensajes, sin
+        # respetar los grupos assistant(tool_calls)→tool_results: puede dejar un
+        # tool result sin su assistant (huérfano) o un assistant con un grupo de
+        # tools incompleto. El proveedor rechaza ambos con "tool_call_id is not
+        # found" (400) y la sesión interactiva crashea. Se reparan acá.
+        history = _drop_orphan_tool_messages(history)
 
         messages.extend(history)
         return messages

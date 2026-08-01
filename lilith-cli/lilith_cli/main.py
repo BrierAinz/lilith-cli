@@ -228,8 +228,38 @@ def prompt(
             help="Override the tool-calling loop cap for this run",
         ),
     ] = None,
+    quiet: Annotated[
+        bool,
+        Parameter(
+            name=["--quiet", "-q"],
+            help="Machine mode: stdout carries only the final response (no ANSI, banners or panels); diagnostics go to stderr",
+        ),
+    ] = False,
+    output_format: Annotated[
+        str,
+        Parameter(
+            name="--output-format",
+            help="Output format: 'text' (default) or 'json' (single stable JSON document; implies --quiet)",
+        ),
+    ] = "text",
 ) -> None:
-    """Modo one-shot: enviar un prompt y mostrar la respuesta."""
+    """Modo one-shot: enviar un prompt y mostrar la respuesta.
+
+    Sin flags, la salida es la experiencia Rich interactiva de siempre.
+    Con ``--quiet`` o ``--output-format json`` la salida es limpia y
+    apta para que otra IA la consuma como sub-agente: stdout lleva solo
+    la respuesta final (text) o un único documento JSON estable (json);
+    errores y diagnósticos van a stderr con código de salida no cero.
+    """
+    if output_format not in ("text", "json"):
+        # Plain-text error to stderr — never Rich, never stdout — so a
+        # machine consumer gets: empty stdout, parseable stderr, exit 2.
+        print(
+            f"error: --output-format inválido: {output_format!r}. Valores: text, json",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
     cfg = load_config(config_path)
     _apply_overrides(cfg, model=model, provider=provider, local=local, no_tools=no_tools)
     if yes:
@@ -242,9 +272,25 @@ def prompt(
         cfg.max_iterations = max_iterations
 
     from .agent import AgentSession
-    from .repl import run_oneshot
 
     session = AgentSession(cfg)
+
+    # ── Machine mode (quiet / json) ─────────────────────────────────
+    # Reuses the same AgentSession + process_message_stream loop as the
+    # Rich UI, but renders nothing: clean stdout for sub-agent consumers.
+    if quiet or output_format == "json":
+        from .machine_output import run_oneshot_machine
+
+        exit_code = asyncio.run(
+            run_oneshot_machine(session, text, output_format=output_format)
+        )
+        if exit_code:
+            raise SystemExit(exit_code)
+        return
+
+    # ── Default Rich path (unchanged) ───────────────────────────────
+    from .repl import run_oneshot
+
     asyncio.run(run_oneshot(session, text))
 
 

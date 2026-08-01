@@ -1,8 +1,8 @@
-"""Rich-based terminal renderer for Yggdrasil CLI v6.6.
+"""Rich-based terminal renderer for Yggdrasil CLI.
 
 Provides themed output helpers: markdown, streaming text, tool-call cards,
 thinking panels, turn separators, welcome banners, and a theme system
-with Norse / Cyberpunk / Minimal presets.
+with Norse / Cyberpunk / Minimal / Lilith presets.
 """
 
 from __future__ import annotations
@@ -26,6 +26,8 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
+
+from lilith_cli import __version__
 
 
 # ── Theme system ───────────────────────────────────────────────────
@@ -90,12 +92,11 @@ class CLITheme:
 
 
 # ── Banner art ────────────────────────────────────────────────────
-
-_NORSE_BANNER = r"""
+_NORSE_BANNER = f"""
         ᛭          ᛟ          ᛭
   ╔═════════════════════════════════╗
   ║        Y G G D R A S I L        ║
-  ║          C L I · v6.6           ║
+  ║{f'C L I · v{__version__}':^33}║
   ║   Where Ancient Meets Digital   ║
   ╚═════════════════════════════════╝
         ┃        ┃       ┃
@@ -103,10 +104,10 @@ _NORSE_BANNER = r"""
      Asgard  Midgard  Muspelheim
 """
 
-_CYBERPUNK_BANNER = r"""
+_CYBERPUNK_BANNER = f"""
   ╔═════════════════════════════════╗
   ║     ⟐  Y G G D R A S I L  ⟐     ║
-  ║          C L I · v6.6           ║
+  ║{f'C L I · v{__version__}':^33}║
   ║   Signals From The Edge Nodes   ║
   ╚═════════════════════════════════╝
           ╠══╦══╦══╦══╦══╣
@@ -114,15 +115,15 @@ _CYBERPUNK_BANNER = r"""
           ╚══╩══╩══╩══╩══╝
 """
 
-_MINIMAL_BANNER = r"""
-yggdrasil cli · v6.6
+_MINIMAL_BANNER = f"""
+yggdrasil cli · v{__version__}
 ────────────────────
 """
 
-_LILITH_BANNER = r"""
+_LILITH_BANNER = f"""
              ☾  ✦  ☽
      L I L I T H  ·  C L I
-             v6.6
+             v{__version__}
   Demon of Information terminal
 """
 

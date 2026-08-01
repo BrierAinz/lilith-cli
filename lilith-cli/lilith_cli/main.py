@@ -1,4 +1,4 @@
-"""Yggdrasil CLI v6.0 — Unified entry point.
+"""Yggdrasil CLI — Unified entry point.
 
 Usage:
   yggdrasil              # Launch interactive REPL
@@ -47,7 +47,7 @@ from . import __version__  # single-source-of-truth
 
 app = App(
     name="yggdrasil",
-    help="Yggdrasil CLI v6.0 — Where Ancient Meets Digital",
+    help=f"Yggdrasil CLI v{__version__} — Where Ancient Meets Digital",
     version=__version__,
 )
 
@@ -545,11 +545,8 @@ def _render_delegate_tool_result(preset_name: str, result: Any) -> None:
 # ── Doctor (healthcheck) ────────────────────────────────────────────
 
 
-# Default cost ceiling for the per-provider 1-token ping. Same rationale
-# as ``/subagents test``: small enough to be cheap on every provider,
-# large enough to leave room for reasoning_content on Kimi / DeepSeek /
-# GLM-5.1 (which burn the budget on chain-of-thought).
-_DOCTOR_PING_MAX_TOKENS = 64
+# Keep pings cheap while leaving room for reasoning-first models.
+_DOCTOR_PING_MAX_TOKENS = 256
 
 # Hard wall-clock cap on the whole ping. Even though the provider may
 # have its own per-call timeout, the doctor never blocks longer than
@@ -698,9 +695,46 @@ async def _ping_one_provider(
             f"({len(content)}c visibles, {len(reasoning)}c reasoning)"
         )
     else:
+        # Distinguish exhausted budgets from other empty responses.
         row["status"] = "warn"
-        row["message"] = f"respondio en {elapsed_ms}ms pero sin contenido"
+        finish_reason = response.get("finish_reason") or "?"
+        usage = response.get("usage") or {}
+        usage_bits: list[str] = []
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            if key in usage and usage[key] is not None:
+                usage_bits.append(f"{key}={usage[key]}")
+        usage_str = f" usage({', '.join(usage_bits)})" if usage_bits else ""
+        if finish_reason == "length":
+            row["message"] = (
+                f"respondio en {elapsed_ms}ms pero agoto el presupuesto "
+                f"(finish_reason=length, max_tokens={_DOCTOR_PING_MAX_TOKENS})"
+                f"{usage_str}"
+            )
+        else:
+            row["message"] = (
+                f"respondio en {elapsed_ms}ms pero sin contenido "
+                f"(finish_reason={finish_reason})"
+                f"{usage_str}"
+            )
     return row
+
+
+_LOOPBACK_HOSTNAMES = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _is_loopback_base_url(base_url: str | None) -> bool:
+    """Return whether ``base_url`` uses a supported loopback host."""
+    if not base_url:
+        return False
+    from urllib.parse import urlparse
+
+    try:
+        host = urlparse(str(base_url)).hostname
+    except (TypeError, ValueError):
+        return False
+    if host is None:
+        return False
+    return host.strip().lower() in _LOOPBACK_HOSTNAMES
 
 
 async def _run_provider_pings(cfg: Any) -> list[dict[str, str]]:
@@ -719,7 +753,21 @@ async def _run_provider_pings(cfg: Any) -> list[dict[str, str]]:
                 _ping_one_provider(name, providers[name], parent_cfg=cfg),
                 timeout=_DOCTOR_PING_TIMEOUT_SECONDS,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
+            # A stopped local model server is a warning; remote timeouts are errors.
+            profile = providers[name]
+            base_url = getattr(profile, "base_url", None)
+            if _is_loopback_base_url(base_url):
+                return {
+                    "check": f"ping:{name}",
+                    "status": "warn",
+                    "message": (
+                        f"servicio local no disponible "
+                        f"(timeout {_DOCTOR_PING_TIMEOUT_SECONDS:.0f}s "
+                        f"en {base_url})"
+                    ),
+                    "latency_ms": int(_DOCTOR_PING_TIMEOUT_SECONDS * 1000),
+                }
             return {
                 "check": f"ping:{name}",
                 "status": "error",

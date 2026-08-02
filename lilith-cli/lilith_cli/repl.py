@@ -137,6 +137,7 @@ from .bg_command import run_bg_command
 from .completion_command import run_completion_command
 from .how_command import run_how_command
 from .notes_command import run_note_command
+from .btw_command import run_btw_command
 from .pipeline_command import run_pipeline_command
 from .temperature_command import run_temperature_command
 from .undo_command import run_undo_peek_command
@@ -292,6 +293,9 @@ _SLASH_COMMANDS = [
     "/note",
     "/notes",
     "/note-add",
+    "/btw",
+    "/aside",
+    "/side",
     "/now",
     "/plan",
     "/pr",
@@ -1003,6 +1007,9 @@ async def run_repl(session: AgentSession) -> None:
                     continue
                 if cmd_name in ("note", "notes", "note-add"):
                     await run_note_command(session, cmd_args)
+                    continue
+                if cmd_name in ("btw", "aside", "side"):
+                    await run_btw_command(session, cmd_args)
                     continue
                 if cmd_name == "conclave":
                     await run_conclave_command(session, cmd_args)

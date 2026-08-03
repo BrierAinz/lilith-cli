@@ -32,6 +32,7 @@ Determinism notes (why each knob exists):
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 from pathlib import Path
 
@@ -103,6 +104,19 @@ def deterministic_ide(monkeypatch: pytest.MonkeyPatch) -> None:
         return None
 
     monkeypatch.setattr(LSPManager, "get_client", _no_client)
+
+    # Rich adds a random numeric namespace to every exported SVG. The
+    # released snapshot plugin does not normalize it yet, so strip it before
+    # comparison to keep the committed snapshots deterministic.
+    from textual import _doc
+
+    take_svg_screenshot = _doc.take_svg_screenshot
+
+    def _take_normalized_svg(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        svg = take_svg_screenshot(*args, **kwargs)
+        return re.sub(r"\bterminal-\d+-([\w-]+)", r"terminal-\1", svg)
+
+    monkeypatch.setattr(_doc, "take_svg_screenshot", _take_normalized_svg)
 
 
 # ── Helpers ─────────────────────────────────────────────────────────

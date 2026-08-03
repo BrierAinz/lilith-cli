@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Tests (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+        python-version:
+          - "3.11"
+          - "3.12"
+
+    env:
+      PYTHONUTF8: "1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.1"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install workspace
+        run: uv sync --all-packages --all-extras --locked
+
+      - name: Smoke test CLI
+        run: uv run lilith --help
+
+      - name: Test core
+        run: uv run pytest -q lilith-core/tests
+
+      - name: Test memory
+        run: uv run pytest -q lilith-memory/tests
+
+      # These suites include one integration file each that imports lilith-tools,
+      # which is not part of this public standalone repository.
+      - name: Test skills standalone surface
+        run: uv run pytest -q lilith-skills/tests --ignore=lilith-skills/tests/test_heimdall_cve.py
+
+      - name: Test orchestrator standalone surface
+        run: uv run pytest -q lilith-orchestrator/tests --ignore=lilith-orchestrator/tests/test_task_router.py

@@ -1,0 +1,60 @@
+name: Bug report
+description: Report reproducible behavior that is incorrect or unexpected.
+title: "[Bug]: "
+labels:
+  - bug
+  - "status: needs-triage"
+body:
+  - type: checkboxes
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and pull requests.
+          required: true
+        - label: I removed credentials, personal data, and private prompts from logs.
+          required: true
+  - type: dropdown
+    attributes:
+      label: Component
+      options:
+        - CLI or chat REPL
+        - TUI IDE
+        - Core
+        - Memory and RAG
+        - Skills
+        - Orchestrator
+        - Installation or packaging
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Current behavior
+      description: Describe what happened, including the exact error when available.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Run ...
+        2. Configure ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Environment
+      description: Lilith version or commit, Python version, operating system, and terminal.
+      placeholder: "Lilith 4.x, Python 3.11, Windows 11, PowerShell"
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Sanitized logs or context
+      render: text

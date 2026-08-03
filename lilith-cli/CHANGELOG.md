@@ -4,6 +4,17 @@ All notable changes to `lilith-cli` will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `lilith prompt` machine-readable modes for sub-agent consumption:
+  `--quiet` (stdout carries only the final response — no ANSI, banners,
+  separators, thinking panels, tool cards or timings) and
+  `--output-format text|json`. JSON mode emits a single stable document
+  with `schema_version`, `success`, `response`, `usage`, `duration_ms`
+  and `error`; internal reasoning is never included. Errors and
+  diagnostics go to stderr with a non-zero exit code. The default
+  invocation keeps the interactive Rich rendering unchanged, reusing
+  the same `AgentSession` event stream (no duplicated agent logic).
+
 ## [4.4.0] - 2026-07-12
 
 ### Added

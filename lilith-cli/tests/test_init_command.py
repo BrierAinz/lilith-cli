@@ -117,9 +117,15 @@ class TestInitCommand:
 class TestProjectInstructionsInjection:
     """Verify .lilith/CLAUDE.md content is injected into the system prompt."""
 
-    def _make_session(self, cwd: Path, instructions: str):
-        """Build a minimal AgentSession in a controlled directory."""
-        import os as _os
+    def _make_session(self):
+        """Build a minimal AgentSession whose instruction loader is stubbed.
+
+        The loader itself is covered by ``test_agents_md.py``; here we
+        only verify that the value returned by ``_load_project_instructions``
+        is appended to the system prompt under the ``PROJECT INSTRUCTIONS:``
+        marker. Stubbing the loader keeps the test hermetic (no real
+        filesystem reads, no leakage of a global ``~/AGENTS.md``).
+        """
         from lilith_cli.agent import AgentSession
         from lilith_cli.config import YggdrasilConfig
 
@@ -147,73 +153,37 @@ class TestProjectInstructionsInjection:
         session._project_instructions = None
         session.provider = MagicMock()
         session.provider.stream = AsyncMock(return_value=iter([]))
-
-        # Write project instructions and patch cwd.
-        instructions_path = cwd / ".lilith" / "CLAUDE.md"
-        instructions_path.parent.mkdir(parents=True, exist_ok=True)
-        instructions_path.write_text(instructions, encoding="utf-8")
-        self._saved_cwd = _os.getcwd()
-        _os.chdir(str(cwd))
         return session
 
-    def teardown_method(self):
-        import os as _os
-        if hasattr(self, "_saved_cwd"):
-            _os.chdir(self._saved_cwd)
-
-    def test_injects_local_instructions(self, tmp_path):
-        session = self._make_session(tmp_path, "Usá siempre async/await.")
-        messages = session._build_messages()
+    def test_injects_local_instructions(self):
+        session = self._make_session()
+        with patch.object(
+            session,
+            "_load_project_instructions",
+            return_value="Usá siempre async/await.",
+        ):
+            messages = session._build_messages()
         assert messages[0]["role"] == "system"
         assert "PROJECT INSTRUCTIONS:" in messages[0]["content"]
         assert "Usá siempre async/await." in messages[0]["content"]
 
-    def test_injects_global_instructions(self, tmp_path):
-        home = tmp_path / "home"
-        home.mkdir()
-        lilith_dir = home / ".lilith"
-        lilith_dir.mkdir()
-        (lilith_dir / "CLAUDE.md").write_text("Reglas globales.", encoding="utf-8")
+    def test_injects_global_instructions(self):
+        session = self._make_session()
+        with patch.object(
+            session,
+            "_load_project_instructions",
+            return_value="Reglas globales.",
+        ):
+            messages = session._build_messages()
+        assert "PROJECT INSTRUCTIONS:" in messages[0]["content"]
+        assert "Reglas globales." in messages[0]["content"]
 
-        with patch("pathlib.Path.home", return_value=home):
-            with patch("pathlib.Path.cwd", return_value=tmp_path / "nowhere"):
-                from lilith_cli.agent import AgentSession
-                from lilith_cli.config import YggdrasilConfig
-
-                cfg = YggdrasilConfig(provider="local", model="local-model")
-                session = AgentSession.__new__(AgentSession)
-                session.config = cfg
-                session.system_prompt = cfg.system_prompt
-                session.history = []
-                session._tools_enabled = False
-                session._total_usage = {
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "total_tokens": 0,
-                }
-                session._per_model_usage = {}
-                session._last_user_message = ""
-                session._cancel_event = None
-                session._memory = None
-                session._tool_registry = None
-                session._tools_cache = []
-                session._disabled_tools = set()
-                session._hook_registry = None
-                session._session_id = ""
-                session._hook_failures = 0
-                session._project_instructions = None
-                session.provider = MagicMock()
-                session.provider.stream = AsyncMock(return_value=iter([]))
-
-                messages = session._build_messages()
-                assert "PROJECT INSTRUCTIONS:" in messages[0]["content"]
-                assert "Reglas globales." in messages[0]["content"]
-
-    def test_no_instructions_when_file_missing(self, tmp_path):
-        session = self._make_session(tmp_path, "")
-        # Remove the file so the directory exists but the instructions don't.
-        (tmp_path / ".lilith" / "CLAUDE.md").unlink()
-        messages = session._build_messages()
+    def test_no_instructions_when_file_missing(self):
+        session = self._make_session()
+        with patch.object(
+            session, "_load_project_instructions", return_value=""
+        ):
+            messages = session._build_messages()
         assert "PROJECT INSTRUCTIONS:" not in messages[0]["content"]
 
     def test_registry_has_init_command(self):

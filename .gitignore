@@ -13,6 +13,7 @@ venv/
 .mypy_cache/
 .coverage
 htmlcov/
+snapshot_report.html
 
 # Editors / OS
 .vscode/

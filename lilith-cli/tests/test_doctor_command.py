@@ -559,3 +559,118 @@ class TestDoctorCommand:
         with pytest.raises(SystemExit) as excinfo:
             app(["doctor"], exit_on_error=False, console=None)
         assert excinfo.value.code == 1
+
+
+class TestDoctorPingEdgeCases:
+    """Regression tests for ping limits and timeout classification."""
+
+    def test_ping_max_tokens_is_256(self):
+        from lilith_cli import main as cli_main
+
+        assert cli_main._DOCTOR_PING_MAX_TOKENS == 256
+
+    def test_empty_content_with_finish_reason_length_is_warn_with_usage(
+        self, monkeypatch
+    ):
+        from lilith_cli import main as cli_main
+        from lilith_cli import providers as cli_providers
+
+        cfg = _make_cfg(providers={"fake": _make_provider_profile()})
+
+        class _EmptyLength:
+            def __init__(self, cfg):
+                self.cfg = cfg
+
+            async def complete(self, messages, *, tools=None, **kwargs):
+                return {
+                    "content": "",
+                    "tool_calls": [],
+                    "usage": {
+                        "prompt_tokens": 3,
+                        "completion_tokens": 256,
+                        "total_tokens": 259,
+                    },
+                    "finish_reason": "length",
+                    "reasoning_content": "",
+                }
+
+            async def close(self):
+                return None
+
+        monkeypatch.setattr(cli_providers, "LLMProviderWrapper", _EmptyLength)
+        rows = asyncio.run(cli_main._run_provider_pings(cfg))
+        assert rows[0]["status"] == "warn"
+        assert "finish_reason=length" in rows[0]["message"]
+        assert "max_tokens=256" in rows[0]["message"]
+        assert "completion_tokens=256" in rows[0]["message"]
+
+    def test_hard_timeout_on_loopback_is_warn_local_unavailable(
+        self, monkeypatch
+    ):
+        from lilith_cli import main as cli_main
+
+        profile = _make_provider_profile()
+        profile.base_url = "http://localhost:1234/v1"
+        cfg = _make_cfg(providers={"local": profile})
+
+        monkeypatch.setattr(cli_main, "_DOCTOR_PING_TIMEOUT_SECONDS", 0.05)
+
+        async def _never_answers(*a, **k):
+            await asyncio.sleep(5)
+
+        monkeypatch.setattr(cli_main, "_ping_one_provider", _never_answers)
+        rows = asyncio.run(cli_main._run_provider_pings(cfg))
+        assert rows[0]["check"] == "ping:local"
+        assert rows[0]["status"] == "warn"
+        assert "servicio local no disponible" in rows[0]["message"]
+
+    def test_hard_timeout_on_remote_is_error(self, monkeypatch):
+        from lilith_cli import main as cli_main
+
+        profile = _make_provider_profile()
+        profile.base_url = "https://api.remote.example/v1"
+        cfg = _make_cfg(providers={"remote": profile})
+
+        monkeypatch.setattr(cli_main, "_DOCTOR_PING_TIMEOUT_SECONDS", 0.1)
+
+        async def _never_answers(*a, **k):
+            await asyncio.sleep(5)
+
+        monkeypatch.setattr(cli_main, "_ping_one_provider", _never_answers)
+        rows = asyncio.run(cli_main._run_provider_pings(cfg))
+        assert rows[0]["check"] == "ping:remote"
+        assert rows[0]["status"] == "error"
+        assert "timeout" in rows[0]["message"]
+
+
+class TestLoopbackDetection:
+    """Recognize only canonical loopback hosts."""
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://localhost:1234/v1",
+            "http://127.0.0.1:8080",
+            "http://[::1]:5000/v1",
+            "https://localhost",
+        ],
+    )
+    def test_loopback_urls_detected(self, url):
+        from lilith_cli import main as cli_main
+
+        assert cli_main._is_loopback_base_url(url) is True
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://api.openai.com/v1",
+            "http://192.168.1.10:1234/v1",
+            "https://example.com",
+            None,
+            "",
+        ],
+    )
+    def test_non_loopback_urls_rejected(self, url):
+        from lilith_cli import main as cli_main
+
+        assert cli_main._is_loopback_base_url(url) is False

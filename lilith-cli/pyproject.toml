@@ -13,6 +13,7 @@ dependencies = [
     "lilith-skills",
     "lilith-orchestrator",
     "lilith-memory",
+    "lilith-tools",
     "pydantic>=2",
     "httpx",
     "rich",
@@ -29,6 +30,8 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "pytest-textual-snapshot",
+    # pytest-textual-snapshot 1.0 still relies on Syrupy's 4.x extension API.
+    "syrupy==4.8.0",
 ]
 
 [project.scripts]
@@ -45,3 +48,4 @@ lilith-core = { workspace = true }
 lilith-skills = { workspace = true }
 lilith-orchestrator = { workspace = true }
 lilith-memory = { workspace = true }
+lilith-tools = { workspace = true }

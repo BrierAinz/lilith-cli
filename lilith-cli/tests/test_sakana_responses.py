@@ -242,6 +242,23 @@ def test_outputs_alias_is_accepted():
 # ── End-to-end: payload assembly floor/cap for Sakana ────────────────
 
 
+def test_sakana_explicit_false_keeps_chat_completions():
+    """An existing profile can explicitly retain the Chat endpoint."""
+    profile = SimpleNamespace(
+        base_url="https://api.sakana.ai/v1",
+        use_responses=False,
+    )
+    config = SimpleNamespace(
+        provider="sakana",
+        providers={"sakana": profile},
+        base_url=profile.base_url,
+    )
+
+    provider = LLMProviderWrapper(config)
+
+    assert provider._is_sakana_responses() is False
+
+
 @pytest.mark.asyncio
 async def test_sakana_payload_uses_floor_256_and_cap_4096():
     """When the Sakana Responses path is taken, ``max_output_tokens``

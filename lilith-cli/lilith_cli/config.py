@@ -58,8 +58,8 @@ class ProviderProfile(BaseModel):
     temperature: float | None = None
     max_tokens: int | None = None
     # Provider-specific toggles. ``use_responses`` is honored by Sakana:
-    # when True, the wrapper POSTs to ``/v1/responses`` instead of the
-    # default OpenAI-compatible ``/v1/chat/completions`` endpoint.
+    # when True, the wrapper POSTs to ``/v1/responses``. New generated
+    # configs set it to True; an explicit False keeps Chat Completions.
     use_responses: bool | None = None
 
 
@@ -324,21 +324,20 @@ retry_jitter: 0.25
 # Lilith's main session uses the top-level ``provider`` above
 # (Sakana Fugu Ultra); sub-agents pick one of the profiles below.
 #
-# Sakana exposes BOTH an OpenAI-compatible Chat Completions API
-# (this default) and a Responses API at /v1/responses. Lilith uses
-# the OpenAI-compatible one for simplicity; switch ``sakana.use_responses: true``
-# to opt into the Responses API instead.
+# Sakana exposes BOTH an OpenAI-compatible Chat Completions API and a
+# Responses API at /v1/responses. New configs use Responses by default;
+# set ``sakana.use_responses: false`` explicitly to use Chat Completions.
 providers:
 
   # ── Sakana Fugu (the Lilith session) ──
-  # OpenAI-compatible Chat Completions endpoint. Verified models:
+  # Responses API endpoint by default. Verified models:
   # fugu, fugu-ultra, fugu-ultra-20260615.
   sakana:
     api_key: ${FUGU_API_KEY}
     base_url: https://api.sakana.ai/v1
     model: fugu-ultra
-    # Optional Responses-API opt-in (off by default; uncomment to enable)
-    # use_responses: false
+    # Set false explicitly to use OpenAI-compatible Chat Completions.
+    use_responses: true
 
   # ── Sub-agent profile: MiniMax (Anthropic-compatible) ──
   # Used by sub-agents that need a strong general model. Verified

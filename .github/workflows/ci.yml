@@ -57,16 +57,20 @@ jobs:
       - name: Smoke test CLI
         run: uv run lilith --help
 
+      - name: Test CLI
+        run: uv run pytest -q lilith-cli/tests
+
       - name: Test core
         run: uv run pytest -q lilith-core/tests
 
       - name: Test memory
         run: uv run pytest -q lilith-memory/tests
 
-      # These suites include one integration file each that imports lilith-tools,
-      # which is not part of this public standalone repository.
-      - name: Test skills standalone surface
-        run: uv run pytest -q lilith-skills/tests --ignore=lilith-skills/tests/test_heimdall_cve.py
+      - name: Test skills
+        run: uv run pytest -q lilith-skills/tests
 
-      - name: Test orchestrator standalone surface
-        run: uv run pytest -q lilith-orchestrator/tests --ignore=lilith-orchestrator/tests/test_task_router.py
+      - name: Test orchestrator
+        run: uv run pytest -q lilith-orchestrator/tests
+
+      - name: Test tools
+        run: uv run pytest -q lilith-tools/tests

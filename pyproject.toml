@@ -8,9 +8,10 @@ dependencies = ["lilith-cli"]
 
 [tool.uv.sources]
 lilith-cli = { workspace = true }
+lilith-tools = { workspace = true }
 
 [tool.uv.workspace]
-members = ["lilith-cli", "lilith-core", "lilith-skills", "lilith-orchestrator", "lilith-memory"]
+members = ["lilith-cli", "lilith-core", "lilith-skills", "lilith-orchestrator", "lilith-memory", "lilith-tools"]
 
 [build-system]
 requires = ["hatchling"]

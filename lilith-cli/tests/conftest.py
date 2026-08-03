@@ -12,6 +12,18 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 
+# pytest-textual-snapshot still names its single-file extension through the
+# old ``_file_extension`` attribute. Syrupy 5 renamed that hook to
+# ``file_extension``. Keep the committed SVG snapshots discoverable while the
+# upstream plugin catches up.
+try:
+    from pytest_textual_snapshot import SVGImageExtension
+except ImportError:  # pragma: no cover - the snapshot extra is optional
+    pass
+else:
+    SVGImageExtension.file_extension = "svg"
+
+
 # ── Salida determinista ─────────────────────────────────────────────
 #
 # Decenas de tests comparan la salida de Rich contra texto plano

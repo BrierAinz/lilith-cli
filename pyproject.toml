@@ -10,6 +10,12 @@ dependencies = ["lilith-cli"]
 lilith-cli = { workspace = true }
 lilith-tools = { workspace = true }
 
+[tool.uv]
+# pytest-textual-snapshot pins Syrupy 4.8.0 even though its public fixture
+# remains compatible with Syrupy 5. Override that stale transitive pin so
+# pytest can receive security fixes from the 9.x line.
+override-dependencies = ["syrupy>=5.5.3"]
+
 [tool.uv.workspace]
 members = ["lilith-cli", "lilith-core", "lilith-skills", "lilith-orchestrator", "lilith-memory", "lilith-tools"]
 

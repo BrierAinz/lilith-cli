@@ -19,6 +19,18 @@ from lilith_tools.local_context import (
 )
 
 
+def test_run_timeout_names_the_command(monkeypatch):
+    def _timeout(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired(cmd=["docker", "ps"], timeout=10.0)
+
+    monkeypatch.setattr(local_context.subprocess, "run", _timeout)
+
+    rc, stdout, stderr = local_context._run(["docker", "ps"], timeout=10.0)
+
+    assert (rc, stdout) == (-2, "")
+    assert stderr == "docker timed out after 10.0s"
+
+
 # ── LocalPythonInfoTool ────────────────────────────────────────────────────
 
 
@@ -209,10 +221,22 @@ LISTEN 0 4096 [::]:5432 [::]:*
 
 
 class TestLocalDockerPs:
-    def test_docker_ps_handles_missing_docker(self):
+    def test_docker_ps_handles_missing_docker(self, monkeypatch):
+        monkeypatch.setattr(local_context.shutil, "which", lambda _cmd: None)
         tool = LocalDockerPsTool()
-        # If docker is not installed, should return clean error, not crash
         result = tool.execute()
-        # Either succeeds (docker installed) or fails with "not installed"
-        if not result.success:
-            assert "not installed" in result.error or "docker" in result.error.lower()
+        assert not result.success
+        assert result.error == "docker not installed"
+
+    def test_docker_ps_reports_daemon_timeout(self, monkeypatch):
+        monkeypatch.setattr(local_context.shutil, "which", lambda _cmd: "docker")
+        monkeypatch.setattr(
+            local_context,
+            "_run",
+            lambda _cmd, timeout: (-2, "", f"docker timed out after {timeout}s"),
+        )
+
+        result = LocalDockerPsTool().execute()
+
+        assert not result.success
+        assert result.error == "docker timed out after 10.0s"

@@ -27,11 +27,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest",
+    "pytest>=9.0.3",
     "pytest-asyncio",
     "pytest-textual-snapshot",
-    # pytest-textual-snapshot 1.0 still relies on Syrupy's 4.x extension API.
-    "syrupy==4.8.0",
 ]
 
 [project.scripts]

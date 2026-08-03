@@ -50,7 +50,7 @@ def _run(cmd: list[str], timeout: float = 5.0, cwd: str | None = None) -> tuple[
     except FileNotFoundError:
         return -1, "", f"command not found: {cmd[0]}"
     except subprocess.TimeoutExpired:
-        return -2, "", f"timeout after {timeout}s"
+        return -2, "", f"{cmd[0]} timed out after {timeout}s"
     except Exception as e:
         return -3, "", str(e)
 

@@ -29,7 +29,7 @@ from rich.live import Live
 
 
 if TYPE_CHECKING:
-    from .agent import AgentSession
+    from .session_runtime import SessionRuntime
 from .commands import CommandRegistry
 from .config import CONFIG_DIR
 from .extra_commands import (
@@ -448,7 +448,7 @@ def _is_multi_line_start(text: str) -> bool:
 # ── Conversation persistence ────────────────────────────────────────
 
 
-def _auto_save_conversation(session: AgentSession) -> Path | None:
+def _auto_save_conversation(session: SessionRuntime) -> Path | None:
     """Save the conversation history as JSON. Returns the filepath or None."""
     if not session.history:
         return None
@@ -539,7 +539,7 @@ def _load_conversation(filepath: Path) -> dict[str, Any] | None:
 # ── Main REPL ───────────────────────────────────────────────────────
 
 
-async def run_repl(session: AgentSession) -> None:
+async def run_repl(session: SessionRuntime) -> None:
     """Launch the interactive REPL loop."""
     # Ensure directories exist.
     _HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -1120,7 +1120,7 @@ async def run_repl(session: AgentSession) -> None:
 
 
 async def _process_with_streaming(
-    session: AgentSession,
+    session: SessionRuntime,
     text: str,
     stats: dict | None = None,
     trace: AgentTrace | None = None,
@@ -1434,7 +1434,7 @@ async def _process_with_streaming(
     session._last_user_message = text
 
 
-async def run_oneshot(session: AgentSession, prompt: str, *, echo: bool = False) -> None:
+async def run_oneshot(session: SessionRuntime, prompt: str, *, echo: bool = False) -> None:
     """Run a single prompt and print the result.
 
     Used by the CLI's one-shot mode (e.g. ``lilith -p "hola"``).

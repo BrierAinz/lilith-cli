@@ -44,14 +44,14 @@ from .render import console, render_error
 if TYPE_CHECKING:
     from rich.panel import Panel
 
-    from .agent import AgentSession
+    from .session_runtime import SessionRuntime
 
 
 _LILITH_CLI_DIR = Path(__file__).resolve().parent
 _EXTRA_INDEX: dict[str, dict[str, Any]] | None = None
 
 
-def _resolve_command(session: "AgentSession", name: str):
+def _resolve_command(session: "SessionRuntime", name: str):
     """Look up a command (or alias) in the freshly-built registry.
 
     Returns the BaseCommand instance, or ``None`` if not found. A fresh
@@ -397,7 +397,7 @@ def _format_extra_block(entry: dict[str, Any]) -> "Panel":
     )
 
 
-async def run_how_command(session: "AgentSession", args: str) -> None:
+async def run_how_command(session: "SessionRuntime", args: str) -> None:
     """Show detailed help for a slash command (/how <nombre>)."""
     name = args.strip().lstrip("/")
     if not name:

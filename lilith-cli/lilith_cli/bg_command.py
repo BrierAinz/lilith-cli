@@ -20,7 +20,7 @@ from .render import console, render_error
 
 
 if TYPE_CHECKING:
-    from .agent import AgentSession
+    from .session_runtime import SessionRuntime
 
 
 _BG_USAGE = """Uso: /bg <subcomando> [args]
@@ -107,7 +107,7 @@ def _parse_log_lines(rest: str) -> int:
     return 50
 
 
-async def run_bg_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_bg_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Gestiona procesos en background (``/bg list|start|status|stop|log|cleanup``).
 
     Examples:

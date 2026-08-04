@@ -14,7 +14,12 @@ import json
 import shlex
 import sys
 import time
+from typing import TYPE_CHECKING
+
 from .render import console, get_theme, render_error, set_theme
+
+if TYPE_CHECKING:
+    from .session_runtime import SessionRuntime
 
 
 async def run_metrics_command(session, args: str) -> None:
@@ -219,7 +224,7 @@ async def run_usage_command(session, args: str) -> None:
         console.print()
 
 
-async def run_bench_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_bench_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /bench para medir latencias del proveedor actual.
 
     Examples:

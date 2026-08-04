@@ -19,10 +19,10 @@ from .render import console, render_error
 
 
 if TYPE_CHECKING:
-    from .agent import AgentSession
+    from .session_runtime import SessionRuntime
 
 
-async def run_json_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_json_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Validate and pretty-print JSON (/json <text|file>)."""
     text = args.strip()
     if not text:

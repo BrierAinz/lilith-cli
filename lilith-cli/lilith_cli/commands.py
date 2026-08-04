@@ -60,7 +60,7 @@ def _save_feedback(entries: list[dict[str, Any]]) -> None:
 
 
 if TYPE_CHECKING:
-    from .agent import AgentSession
+    from .session_runtime import SessionRuntime
 
 
 # ── Bookmark storage helper ─────────────────────────────────────────
@@ -101,7 +101,7 @@ class BaseCommand:
     description: str = ""
     aliases: list[str] = []
 
-    def __init__(self, session: AgentSession) -> None:
+    def __init__(self, session: SessionRuntime) -> None:
         self.session = session
 
     async def execute(self, args: str) -> None:
@@ -4357,7 +4357,7 @@ class SubagentsCommand(BaseCommand):
 class CommandRegistry:
     """Discovers, registers, and routes slash commands."""
 
-    def __init__(self, session: AgentSession) -> None:
+    def __init__(self, session: SessionRuntime) -> None:
         self.session = session
         self._commands: dict[str, BaseCommand] = {}
         self._aliases: dict[str, str] = {}

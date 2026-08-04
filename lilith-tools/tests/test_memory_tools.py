@@ -5,7 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from lilith_tools.memory import MemoryRecallTool, MemorySaveTool, _reset_cache
+from lilith_tools.memory import (
+    MemoryEvidenceTool,
+    MemoryRecallTool,
+    MemorySaveTool,
+    _reset_cache,
+)
 from lilith_tools.registry import ToolRegistry
 
 
@@ -60,3 +65,37 @@ def test_memory_tools_are_registered():
     ToolRegistry.register(MemoryRecallTool)
     assert ToolRegistry.get("memory_save") is MemorySaveTool
     assert ToolRegistry.get("memory_recall") is MemoryRecallTool
+
+
+def test_semantic_memory_roundtrip_has_provenance_and_evidence(tmp_path: Path):
+    db_path = tmp_path / "memory.db"
+    saved = MemorySaveTool().execute(
+        text="Ainz prefiere respuestas concisas.",
+        fact_type="preference",
+        namespace="ainz",
+        source="explicit_user_statement",
+        confidence=0.95,
+        provenance={"conversation": "test"},
+        db_path=str(db_path),
+    )
+
+    assert saved.success is True
+    assert saved.data["semantic_id"]
+    recalled = MemoryRecallTool().execute(
+        query="respuestas concisas", namespace="ainz", min_confidence=0.9,
+        db_path=str(db_path),
+    )
+    assert recalled.success is True
+    assert recalled.data["count"] == 1
+    passage = recalled.data["passages"][0]
+    assert passage["semantic_id"] == saved.data["semantic_id"]
+    assert passage["source"] == "explicit_user_statement"
+    assert passage["provenance"]
+
+    evidence = MemoryEvidenceTool().execute(
+        semantic_id=saved.data["semantic_id"], supports=False,
+        source="later_user_correction", note="preference changed", weight=0.2,
+        db_path=str(db_path),
+    )
+    assert evidence.success is True
+    assert evidence.data["evidence"][0]["relation"] == "contradicts"

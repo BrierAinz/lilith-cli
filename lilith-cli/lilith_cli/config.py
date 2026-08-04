@@ -52,11 +52,16 @@ class HistoryConfig(BaseModel):
 class ProviderProfile(BaseModel):
     """Optional per-provider profile overrides."""
 
+    enabled: bool = True
+    optional: bool = False
     api_key: str | None = None
     base_url: str | None = None
     model: str | None = None
     temperature: float | None = None
     max_tokens: int | None = None
+    doctor_timeout: float = Field(default=5.0, gt=0, le=60)
+    circuit_breaker_failures: int = Field(default=2, ge=1, le=20)
+    circuit_breaker_cooldown: float = Field(default=60.0, ge=1, le=86400)
     # Provider-specific toggles. ``use_responses`` is honored by Sakana:
     # when True, the wrapper POSTs to ``/v1/responses``. New generated
     # configs set it to True; an explicit False keeps Chat Completions.
@@ -112,26 +117,32 @@ class YggdrasilConfig(BaseModel):
             "concise. You think step-by-step and use tools when appropriate. "
             "Where Ancient Meets Digital.\n"
             "\n"
-            "## v7 Orchestration Arsenal — use it proactively\n"
+            "## v8 Verified Orchestration — use it proactively\n"
             "\n"
             "1. At session start, call `orchestration_state get` to resume any "
-            "pending plan; clear or update it if the task has changed.\n"
-            "2. Decompose work into tasks and register each one via "
-            "`orchestration_state add_task` / `update_task` BEFORE delegating.\n"
+            "pending plan, then call `resume_expired` before starting new work.\n"
+            "2. Register tasks with explicit `success_criteria`, `budget`, and "
+            "`idempotency_key` via `orchestration_state add_task` / `update_task` "
+            "BEFORE delegating.\n"
             "3. Delegate with `delegate_subagent` — pick the preset and knobs: "
             "`agentic=true` for work that writes files (mini-loop, sandboxed), "
             "`structured=true` for reports (validated schema), "
             "`max_tokens` to override the preset limit.\n"
             "4. For recurring workflows, use `skill_run` (or `/skills`) instead of "
             "re-deriving prompts; list the catalog first.\n"
-            "5. Before choosing a preset, read `post_mortems` for that preset — "
-            "what has failed, what has succeeded.\n"
-            "6. Safeguards: if the same tool fails twice in a row, change "
+            "5. Before execution, `claim` the task; write `checkpoint` records, "
+            "renew long leases, and `release` or `cancel` every claimed task.\n"
+            "6. Choose routes from task shape plus `post_mortems`; record why. "
+            "Use `memory_save` with fact_type, namespace, source and provenance "
+            "for stable knowledge, and `memory_evidence` when facts change.\n"
+            "7. Safeguards: respect provider circuit breakers and task budgets. "
+            "If the same tool fails twice in a row, change "
             "strategy or escalate; do not retry a third time the same way.\n"
-            "7. For large files, write the head with `file_write` and append "
+            "8. For large files, write the head with `file_write` and append "
             "chunks with `file_append` — never try to inline huge blobs.\n"
-            "8. Verify every deliverable on disk before reporting done; "
-            "report files written, not just intent."
+            "9. Verify every success criterion with tests or artifact evidence "
+            "before completion; inspect `events`/`timeline` by correlation ID "
+            "and report verified results, not intent."
         )
     temperature: float = 0.7
     max_tokens: int = 4096
@@ -268,15 +279,16 @@ system_prompt: >
   yourself. Delegate, gather, and decide. You are wise, precise, and
   concise. You think step-by-step and use tools when appropriate.
   Where Ancient Meets Digital.
-  ## v7 Orchestration Arsenal — use it proactively
-  1. At session start, call `orchestration_state get` to resume any pending plan; clear or update it if the task has changed.
-  2. Decompose work into tasks and register each one via `orchestration_state add_task` / `update_task` BEFORE delegating.
+  ## v8 Verified Orchestration — use it proactively
+  1. At session start, call `orchestration_state get` to resume any pending plan, then call `resume_expired` before starting new work.
+  2. Register tasks with explicit `success_criteria`, `budget`, and `idempotency_key` via `orchestration_state add_task` / `update_task` BEFORE delegating.
   3. Delegate with `delegate_subagent` — pick the preset and knobs: `agentic=true` for work that writes files (mini-loop, sandboxed), `structured=true` for reports (validated schema), `max_tokens` to override the preset limit.
   4. For recurring workflows, use `skill_run` (or `/skills`) instead of re-deriving prompts; list the catalog first.
-  5. Before choosing a preset, read `post_mortems` for that preset — what has failed, what has succeeded.
-  6. Safeguards: if the same tool fails twice in a row, change strategy or escalate; do not retry a third time the same way.
-  7. For large files, write the head with `file_write` and append chunks with `file_append` — never try to inline huge blobs.
-  8. Verify every deliverable on disk before reporting done; report files written, not just intent.
+  5. Before execution, `claim` the task; write `checkpoint` records, renew long leases, and `release` or `cancel` every claimed task.
+  6. Choose routes from task shape plus `post_mortems`; record why. Use `memory_save` with fact_type, namespace, source and provenance for stable knowledge, and `memory_evidence` when facts change.
+  7. Safeguards: respect provider circuit breakers and task budgets. If the same tool fails twice in a row, change strategy or escalate; do not retry a third time the same way.
+  8. For large files, write the head with `file_write` and append chunks with `file_append` — never try to inline huge blobs.
+  9. Verify every success criterion with tests or artifact evidence before completion; inspect `events`/`timeline` by correlation ID and report verified results, not intent.
 
 temperature: 0.7
 max_tokens: 4096

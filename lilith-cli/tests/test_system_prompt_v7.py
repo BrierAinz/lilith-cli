@@ -19,8 +19,8 @@ from lilith_cli.config import YggdrasilConfig, _DEFAULT_CONFIG_YAML
 
 
 # Tools / commands whose presence in the default prompt is required.
-# Keep this list aligned with the v7 arsenal list in
-# ``Docs/LILITH_V7_ROADMAP.md`` (tandas 1-6).
+# The filename stays for compatibility, but these assertions include the
+# additive v8 verified-orchestration contract.
 _REQUIRED_KEYWORDS: tuple[str, ...] = (
     "orchestration_state",
     "add_task",
@@ -32,6 +32,14 @@ _REQUIRED_KEYWORDS: tuple[str, ...] = (
     "skill_run",
     "/skills",
     "post_mortems",
+    "success_criteria",
+    "idempotency_key",
+    "resume_expired",
+    "checkpoint",
+    "memory_evidence",
+    "circuit breakers",
+    "timeline",
+    "correlation id",
     "file_write",
     "file_append",
     "verify",  # "Verify every deliverable on disk"
@@ -58,12 +66,12 @@ class TestYggdrasilConfigDefaultSystemPrompt:
             f"knows the arsenal exists. Got prompt:\n{prompt}"
         )
 
-    def test_default_prompt_mentions_eight_clauses(self) -> None:
-        """The arsenal is a numbered list 1..8 — pin the count."""
+    def test_default_prompt_mentions_nine_clauses(self) -> None:
+        """The verified arsenal is a numbered list 1..9 — pin the count."""
         prompt = YggdrasilConfig().system_prompt
         clause_markers = re.findall(r"(?:^|\n)\s*\d+\.\s", prompt)
-        assert len(clause_markers) >= 8, (
-            f"v7 arsenal list should have at least 8 numbered clauses, "
+        assert len(clause_markers) >= 9, (
+            f"v8 arsenal list should have at least 9 numbered clauses, "
             f"found {len(clause_markers)} in:\n{prompt}"
         )
 

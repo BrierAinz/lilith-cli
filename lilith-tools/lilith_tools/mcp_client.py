@@ -63,6 +63,9 @@ DEFAULT_TIMEOUT_SECONDS = 30.0
 """Per-call timeout for ``tools/call`` (also exposed as the synthetic
 tool's ``timeout_seconds`` so the agent honours it as a floor)."""
 
+_STARTUP_TIMEOUT_SECONDS = 30.0
+"""Maximum time for subprocess startup, MCP initialize, and tools/list."""
+
 
 # ── Schema helpers ───────────────────────────────────────────────────
 
@@ -175,7 +178,12 @@ class MCPClient:
         # Wait for initialize/list_tools to settle so the caller knows
         # what to register. ``start`` is meant to be quick (subprocess
         # spawn + handshake); the per-call timeout is separate.
-        self._ready.wait(timeout=15.0)
+        if not self._ready.wait(timeout=_STARTUP_TIMEOUT_SECONDS):
+            self._ready_error = TimeoutError(
+                "MCP initialize/tools-list timed out after "
+                f"{_STARTUP_TIMEOUT_SECONDS:.0f}s"
+            )
+            return False
         if self._ready_error is not None:
             return False
         return bool(self._remote_tools)
@@ -223,6 +231,15 @@ class MCPClient:
 
     def close(self) -> None:
         """Tear down the subprocess and the thread."""
+        self.force_close()
+
+    def force_close(self) -> None:
+        """Best-effort teardown used when a caller-facing ``close`` fails.
+
+        Keeping this fallback separate is intentional: embedders and tests may
+        wrap or replace :meth:`close`, but the manager must still release the
+        stdio subprocess and its event-loop thread during shutdown.
+        """
         self._closed = True
         if self._loop is None or not self._loop.is_running():
             return
@@ -457,6 +474,7 @@ class MCPClientManager:
         )
         if not client.start():
             err = client.last_error or "no tools advertised"
+            client.force_close()
             return f"error: {err}"
 
         mounted: list[str] = []
@@ -485,8 +503,18 @@ class MCPClientManager:
         if client is not None:
             try:
                 client.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "MCP server %s: close() failed; forcing teardown (%s)",
+                    name,
+                    exc,
+                )
+                try:
+                    client.force_close()
+                except Exception:
+                    logger.exception(
+                        "MCP server %s: forced teardown also failed", name
+                    )
         for tool_name in self._mounted.pop(name, []):
             try:
                 ToolRegistry.unload(tool_name)

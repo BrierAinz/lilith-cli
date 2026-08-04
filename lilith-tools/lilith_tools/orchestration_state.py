@@ -1,11 +1,8 @@
-"""Persistent, process-safe orchestration plan state.
+"""Persistent orchestration plan state.
 
-Decision: this is a dedicated JSON document under ``~/.yggdrasil`` rather
-than a row in ``lilith-memory``. The recon found no canonical shared memory.db:
-MemoryStore is an append-only conversation table with free-form metadata and
-cannot atomically replace a typed plan/task state. A compact atomically-replaced
-JSON document provides the required cross-session semantics without mixing
-orchestration records into chat history.
+Production uses a transactional SQLite backend.  Explicit ``*.json`` paths are
+kept as a compatibility backend for old integrations and fixtures; the first
+production SQLite open imports the former JSON snapshot without deleting it.
 """
 
 from __future__ import annotations
@@ -28,15 +25,17 @@ VALID_STATUSES = {
     "en_revision",
     "completada",
     "fallida",
+    "cancelada",
 }
-TERMINAL_STATUSES = {"completada", "fallida"}
+TERMINAL_STATUSES = {"completada", "fallida", "cancelada"}
 VALID_TRANSITIONS = {
-    "pendiente": {"delegada", "bloqueada", "en_revision", "completada", "fallida"},
-    "delegada": {"bloqueada", "en_revision", "completada", "fallida"},
-    "bloqueada": {"pendiente", "delegada", "completada", "fallida"},
-    "en_revision": {"delegada", "bloqueada", "completada", "fallida"},
+    "pendiente": {"delegada", "bloqueada", "en_revision", "completada", "fallida", "cancelada"},
+    "delegada": {"pendiente", "bloqueada", "en_revision", "completada", "fallida", "cancelada"},
+    "bloqueada": {"pendiente", "delegada", "completada", "fallida", "cancelada"},
+    "en_revision": {"pendiente", "delegada", "bloqueada", "completada", "fallida", "cancelada"},
     "completada": set(),
     "fallida": {"pendiente", "delegada"},
+    "cancelada": {"pendiente"},
 }
 _LOCK = threading.RLock()
 
@@ -47,7 +46,11 @@ def now_iso() -> str:
 
 def default_state_path() -> Path:
     override = os.environ.get("YGGDRASIL_ORCHESTRATION_STATE")
-    return Path(override).expanduser() if override else Path.home() / ".yggdrasil" / "orchestration_state.json"
+    return Path(override).expanduser() if override else Path.home() / ".yggdrasil" / "orchestration_state.sqlite3"
+
+
+def legacy_state_path() -> Path:
+    return Path.home() / ".yggdrasil" / "orchestration_state.json"
 
 
 def _empty_state() -> dict[str, Any]:
@@ -63,6 +66,14 @@ def _empty_state() -> dict[str, Any]:
 class OrchestrationStateStore:
     def __init__(self, path: str | Path | None = None) -> None:
         self.path = Path(path).expanduser() if path else default_state_path()
+        self._sqlite = None
+        if self.path.suffix.lower() != ".json":
+            from .orchestration_sqlite import SQLiteOrchestrationBackend
+
+            self._sqlite = SQLiteOrchestrationBackend(
+                self.path,
+                legacy_json=legacy_state_path() if path is None else None,
+            )
 
     def _read(self) -> dict[str, Any]:
         if not self.path.exists():
@@ -87,10 +98,14 @@ class OrchestrationStateStore:
         os.replace(temp, self.path)
 
     def get(self) -> dict[str, Any]:
+        if self._sqlite is not None:
+            return self._sqlite.get()
         with _LOCK:
             return self._read()
 
     def set_plan(self, name: str, description: str = "") -> dict[str, Any]:
+        if self._sqlite is not None:
+            return self._sqlite.set_plan(name, description)
         name = str(name).strip()
         if not name:
             raise ValueError("name es requerido")
@@ -116,6 +131,15 @@ class OrchestrationStateStore:
         preset: str | None = None,
         **metadata: Any,
     ) -> dict[str, Any]:
+        if self._sqlite is not None:
+            return self._sqlite.add_task(
+                title,
+                description,
+                task_id=task_id,
+                status=status,
+                preset=preset,
+                **metadata,
+            )
         title = str(title).strip()
         if not title:
             raise ValueError("title es requerido")
@@ -124,6 +148,17 @@ class OrchestrationStateStore:
         with _LOCK:
             state = self._read()
             ident = str(task_id or uuid.uuid4().hex[:12]).strip()
+            idempotency_key = str(metadata.get("idempotency_key") or "").strip() or None
+            if idempotency_key:
+                existing = next(
+                    (
+                        item for item in state["tasks"]
+                        if item.get("idempotency_key") == idempotency_key
+                    ),
+                    None,
+                )
+                if existing is not None:
+                    return existing
             if any(task.get("id") == ident for task in state["tasks"]):
                 raise ValueError(f"task id duplicado: {ident}")
             stamp = now_iso()
@@ -145,6 +180,13 @@ class OrchestrationStateStore:
                 "routing": dict(metadata.get("routing") or {}),
                 "escalation": metadata.get("escalation"),
                 "turns": int(metadata.get("turns", 0)),
+                "success_criteria": list(metadata.get("success_criteria") or []),
+                "budget": dict(metadata.get("budget") or {}),
+                "verification": dict(metadata.get("verification") or {}),
+                "correlation_id": str(metadata.get("correlation_id") or uuid.uuid4().hex),
+                "trace_id": metadata.get("trace_id"),
+                "idempotency_key": idempotency_key,
+                "checkpoints": [],
             }
             state["tasks"].append(task)
             if state.get("plan"):
@@ -162,6 +204,15 @@ class OrchestrationStateStore:
         usage: dict[str, Any] | None = None,
         **metadata: Any,
     ) -> dict[str, Any]:
+        if self._sqlite is not None:
+            return self._sqlite.update_task(
+                task_id,
+                status=status,
+                preset=preset,
+                result=result,
+                usage=usage,
+                **metadata,
+            )
         with _LOCK:
             state = self._read()
             task = next((item for item in state["tasks"] if item.get("id") == task_id), None)
@@ -191,6 +242,9 @@ class OrchestrationStateStore:
             for key in (
                 "dependencies", "attempts", "max_retries", "routing",
                 "escalation", "turns", "provider", "post_mortem",
+                "success_criteria", "budget", "verification", "trace_id",
+                "correlation_id", "lease_owner", "lease_expires_at",
+                "last_checkpoint", "idempotency_key",
             ):
                 if key in metadata:
                     task[key] = metadata[key]
@@ -201,6 +255,8 @@ class OrchestrationStateStore:
             return task
 
     def append_post_mortem(self, entry: dict[str, Any]) -> dict[str, Any]:
+        if self._sqlite is not None:
+            return self._sqlite.append_post_mortem(entry)
         with _LOCK:
             state = self._read()
             record = {"created_at": now_iso(), **entry}
@@ -219,6 +275,10 @@ class OrchestrationStateStore:
     def record_cost(
         self, preset: str, provider: str, usage: dict[str, Any], *, session_id: str,
     ) -> dict[str, Any]:
+        if self._sqlite is not None:
+            return self._sqlite.record_cost(
+                preset, provider, usage, session_id=session_id
+            )
         with _LOCK:
             state = self._read()
             costs = state.setdefault("costs", {})
@@ -234,6 +294,8 @@ class OrchestrationStateStore:
             return self.cost_summary(session_id, state=state)
 
     def cost_summary(self, session_id: str = "", *, state: dict[str, Any] | None = None) -> dict[str, Any]:
+        if self._sqlite is not None:
+            return self._sqlite.cost_summary(session_id)
         with _LOCK:
             current = state or self._read()
             costs = current.get("costs") or {}
@@ -243,14 +305,98 @@ class OrchestrationStateStore:
             }
 
     def reset_costs(self) -> None:
+        if self._sqlite is not None:
+            self._sqlite.reset_costs()
+            return
         with _LOCK:
             state = self._read()
             state["costs"] = {"historical": {"presets": {}, "providers": {}, "total": {}}, "sessions": {}}
             self._write(state)
 
     def clear(self) -> None:
+        if self._sqlite is not None:
+            self._sqlite.clear()
+            return
         with _LOCK:
             self._write(_empty_state())
+
+    def claim_task(
+        self, task_id: str, owner: str, *, lease_seconds: float = 300
+    ) -> dict[str, Any]:
+        if self._sqlite is None:
+            return self.update_task(
+                task_id,
+                status="delegada",
+                lease_owner=owner,
+                lease_expires_at=datetime.now(UTC).timestamp() + lease_seconds,
+            )
+        return self._sqlite.claim_task(task_id, owner, lease_seconds=lease_seconds)
+
+    def renew_lease(
+        self, task_id: str, owner: str, *, lease_seconds: float = 300
+    ) -> dict[str, Any]:
+        if self._sqlite is None:
+            return self.update_task(
+                task_id,
+                lease_owner=owner,
+                lease_expires_at=datetime.now(UTC).timestamp() + lease_seconds,
+            )
+        return self._sqlite.renew_lease(task_id, owner, lease_seconds=lease_seconds)
+
+    def release_task(
+        self, task_id: str, owner: str, *, status: str = "pendiente"
+    ) -> dict[str, Any]:
+        if self._sqlite is None:
+            return self.update_task(
+                task_id, status=status, lease_owner=None, lease_expires_at=None
+            )
+        return self._sqlite.release_task(task_id, owner, status=status)
+
+    def checkpoint_task(
+        self, task_id: str, label: str, payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        if self._sqlite is None:
+            checkpoint = {
+                "id": uuid.uuid4().hex,
+                "task_id": task_id,
+                "label": label,
+                "payload": dict(payload or {}),
+                "created_at": now_iso(),
+            }
+            self.update_task(task_id, last_checkpoint=checkpoint)
+            return checkpoint
+        return self._sqlite.checkpoint_task(task_id, label, payload)
+
+    def checkpoints(self, task_id: str) -> list[dict[str, Any]]:
+        if self._sqlite is None:
+            task = next(
+                (item for item in self.get()["tasks"] if item.get("id") == task_id),
+                None,
+            )
+            return [task["last_checkpoint"]] if task and task.get("last_checkpoint") else []
+        return self._sqlite.checkpoints(task_id)
+
+    def cancel_task(self, task_id: str, reason: str = "") -> dict[str, Any]:
+        if self._sqlite is None:
+            return self.update_task(
+                task_id,
+                status="cancelada",
+                result=reason or "cancelada por operador",
+                verification={"verified": False, "reason": "cancelled"},
+            )
+        return self._sqlite.cancel_task(task_id, reason)
+
+    def resume_expired(self) -> list[dict[str, Any]]:
+        if self._sqlite is None:
+            return []
+        return self._sqlite.resume_expired()
+
+    def events(
+        self, *, limit: int = 100, task_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        if self._sqlite is None:
+            return []
+        return self._sqlite.events(limit=limit, task_id=task_id)
 
 
 @ToolRegistry.register
@@ -258,7 +404,11 @@ class OrchestrationStateTool(BaseTool):
     name = "orchestration_state"
     description = "Consultar o actualizar el plan persistente y sus tareas delegadas."
     parameters = {
-        "action": {"type": "string", "required": True, "enum": ["get", "post_mortems", "add_task", "update_task", "set_plan", "clear"]},
+        "action": {"type": "string", "required": True, "enum": [
+            "get", "post_mortems", "events", "add_task", "update_task",
+            "set_plan", "claim", "renew", "release", "checkpoint",
+            "checkpoints", "resume_expired", "cancel", "clear",
+        ]},
         "name": {"type": "string", "required": False},
         "description": {"type": "string", "required": False},
         "title": {"type": "string", "required": False},
@@ -267,6 +417,19 @@ class OrchestrationStateTool(BaseTool):
         "preset": {"type": "string", "required": False},
         "result": {"type": "string", "required": False},
         "usage": {"type": "object", "required": False},
+        "owner": {"type": "string", "required": False},
+        "lease_seconds": {"type": "number", "required": False},
+        "label": {"type": "string", "required": False},
+        "payload": {"type": "object", "required": False},
+        "limit": {"type": "integer", "required": False},
+        "reason": {"type": "string", "required": False},
+        "success_criteria": {"type": "array", "required": False},
+        "budget": {"type": "object", "required": False},
+        "idempotency_key": {"type": "string", "required": False},
+        "verification": {"type": "object", "required": False},
+        "correlation_id": {"type": "string", "required": False},
+        "trace_id": {"type": "string", "required": False},
+        "state_path": {"type": "string", "required": False},
     }
 
     def execute(self, **kwargs: Any) -> ToolResult:
@@ -277,6 +440,11 @@ class OrchestrationStateTool(BaseTool):
                 return ToolResult(True, store.get())
             if action == "post_mortems":
                 return ToolResult(True, {"post_mortems": store.get().get("post_mortems", [])})
+            if action == "events":
+                return ToolResult(True, {"events": store.events(
+                    limit=int(kwargs.get("limit", 100)),
+                    task_id=kwargs.get("task_id"),
+                )})
             if action == "set_plan":
                 return ToolResult(True, store.set_plan(kwargs.get("name", ""), kwargs.get("description", "")))
             if action == "add_task":
@@ -284,12 +452,58 @@ class OrchestrationStateTool(BaseTool):
                     kwargs.get("title", ""), kwargs.get("description", ""),
                     task_id=kwargs.get("task_id"), status=kwargs.get("status", "pendiente"),
                     preset=kwargs.get("preset"),
+                    success_criteria=kwargs.get("success_criteria") or [],
+                    budget=kwargs.get("budget") or {},
+                    idempotency_key=kwargs.get("idempotency_key"),
+                    correlation_id=kwargs.get("correlation_id"),
+                    trace_id=kwargs.get("trace_id"),
                 )
                 return ToolResult(True, {"task": task})
+            if action == "claim":
+                return ToolResult(True, {"task": store.claim_task(
+                    str(kwargs.get("task_id", "")),
+                    str(kwargs.get("owner", "")),
+                    lease_seconds=float(kwargs.get("lease_seconds", 300)),
+                )})
+            if action == "renew":
+                return ToolResult(True, {"task": store.renew_lease(
+                    str(kwargs.get("task_id", "")),
+                    str(kwargs.get("owner", "")),
+                    lease_seconds=float(kwargs.get("lease_seconds", 300)),
+                )})
+            if action == "release":
+                return ToolResult(True, {"task": store.release_task(
+                    str(kwargs.get("task_id", "")),
+                    str(kwargs.get("owner", "")),
+                    status=str(kwargs.get("status", "pendiente")),
+                )})
+            if action == "checkpoint":
+                return ToolResult(True, {"checkpoint": store.checkpoint_task(
+                    str(kwargs.get("task_id", "")),
+                    str(kwargs.get("label", "")),
+                    kwargs.get("payload") or {},
+                )})
+            if action == "checkpoints":
+                return ToolResult(True, {"checkpoints": store.checkpoints(
+                    str(kwargs.get("task_id", ""))
+                )})
+            if action == "resume_expired":
+                return ToolResult(True, {"resumed": store.resume_expired()})
+            if action == "cancel":
+                return ToolResult(True, {"task": store.cancel_task(
+                    str(kwargs.get("task_id", "")),
+                    str(kwargs.get("reason", "")),
+                )})
             if action == "update_task":
+                update_metadata = {
+                    key: kwargs[key]
+                    for key in ("success_criteria", "budget", "verification")
+                    if kwargs.get(key) is not None
+                }
                 task = store.update_task(
                     str(kwargs.get("task_id", "")), status=kwargs.get("status"),
                     preset=kwargs.get("preset"), result=kwargs.get("result"), usage=kwargs.get("usage"),
+                    **update_metadata,
                 )
                 return ToolResult(True, {"task": task})
             if action == "clear":

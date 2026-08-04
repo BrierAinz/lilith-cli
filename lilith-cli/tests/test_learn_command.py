@@ -80,6 +80,25 @@ def test_suggest_from_state_path_reads_json(tmp_path):
     assert suggestions[0].sample_tasks  # picked up from tasks
 
 
+def test_suggest_from_state_path_reads_transactional_sqlite(tmp_path):
+    from lilith_tools.orchestration_state import OrchestrationStateStore
+
+    state = tmp_path / "orchestration_state.sqlite3"
+    store = OrchestrationStateStore(state)
+    first = store.add_task("analizar logs", task_id="t1")
+    second = store.add_task("comparar resultados", task_id="t2")
+    for task in (first, second):
+        store.append_post_mortem(
+            {"task_id": task["id"], "preset": "investigador-minimax", "success": True}
+        )
+
+    suggestions = suggest_from_state_path(state)
+
+    assert len(suggestions) == 1
+    assert suggestions[0].preset == "investigador-minimax"
+    assert suggestions[0].sample_tasks
+
+
 def test_suggest_from_state_path_missing_or_corrupt_returns_empty(tmp_path):
     assert suggest_from_state_path(tmp_path / "nope.json") == []
     bad = tmp_path / "bad.json"

@@ -1,6 +1,6 @@
 """PC control, browser automation, RAG tools."""
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 # ── Top-level exports (used by lilith-cli/agent.py) ─────────────────
 # These imports trigger the @ToolRegistry.register decorators in each

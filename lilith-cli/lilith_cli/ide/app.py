@@ -38,7 +38,7 @@ from textual.widgets import (
 )
 
 if TYPE_CHECKING:
-    from ..agent import AgentSession
+    from ..session_runtime import SessionRuntime
 
 from ..config import CONFIG_DIR
 from .config import IDEConfig
@@ -155,7 +155,7 @@ class LilithIDEApp(
 
     def __init__(
         self,
-        session: AgentSession,
+        session: SessionRuntime,
         root: Path | None = None,
         *,
         title: str = "Lilith IDE — Hlidskjalf Console",
@@ -714,7 +714,7 @@ class LilithIDEApp(
 
 # ── Public entry point ──────────────────────────────────────────────
 
-def run_ide(session: AgentSession, root: Path | None = None) -> None:
+def run_ide(session: SessionRuntime, root: Path | None = None) -> None:
     """Launch the Lilith IDE TUI."""
     app = LilithIDEApp(session, root=root)
     app.run()

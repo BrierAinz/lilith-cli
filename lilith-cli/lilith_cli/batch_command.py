@@ -2,7 +2,7 @@
 
 The ``/batch`` command lets users queue several natural-language prompts and
 have Lilith execute them one after the other, sharing the same
-:class:`AgentSession`. Each prompt is dispatched through the existing
+:class:`SessionRuntime`. Each prompt is dispatched through the existing
 :func:`repl.run_oneshot` so streaming and tool use behave exactly like a
 one-shot ``lilith prompt`` invocation.
 
@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any
 from .render import console, render_error
 
 if TYPE_CHECKING:
-    from .agent import AgentSession
+    from .session_runtime import SessionRuntime
 
 
 _BATCH_DIR: Path = Path.home() / ".yggdrasil"
@@ -116,7 +116,7 @@ def _parse_file(path_text: str) -> list[str]:
     return prompts
 
 
-async def _execute_batch(session: "AgentSession", name: str, prompts: list[str]) -> None:
+async def _execute_batch(session: "SessionRuntime", name: str, prompts: list[str]) -> None:
     """Dispatch each prompt sequentially via :func:`repl.run_oneshot`."""
     from .repl import run_oneshot
 
@@ -146,7 +146,7 @@ async def _execute_batch(session: "AgentSession", name: str, prompts: list[str])
         )
 
 
-async def run_batch_command(session: "AgentSession", args: str) -> None:
+async def run_batch_command(session: "SessionRuntime", args: str) -> None:
     """Ejecuta ``/batch list|show|run|save|delete`` o dispatch inline.
 
     Examples:

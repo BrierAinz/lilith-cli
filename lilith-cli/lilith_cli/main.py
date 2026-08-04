@@ -172,10 +172,10 @@ def chat(
     cfg = load_config(config_path)
     _apply_overrides(cfg, model=model, provider=provider, local=local, no_tools=no_tools)
 
-    from .agent import AgentSession
+    from .session_runtime import create_session
     from .repl import run_repl
 
-    session = AgentSession(cfg)
+    session = create_session(cfg)
     asyncio.run(run_repl(session))
 
 
@@ -195,10 +195,10 @@ def ide(
     cfg = load_config(config_path)
     _apply_overrides(cfg, model=model, provider=provider, local=local, no_tools=no_tools)
 
-    from .agent import AgentSession
+    from .session_runtime import create_session
     from .ide import run_ide
 
-    session = AgentSession(cfg)
+    session = create_session(cfg)
     project_root = Path(root).resolve() if root else Path.cwd()
     run_ide(session, root=project_root)
 
@@ -271,12 +271,12 @@ def prompt(
             raise SystemExit(2)
         cfg.max_iterations = max_iterations
 
-    from .agent import AgentSession
+    from .session_runtime import create_session
 
-    session = AgentSession(cfg)
+    session = create_session(cfg)
 
     # ── Machine mode (quiet / json) ─────────────────────────────────
-    # Reuses the same AgentSession + process_message_stream loop as the
+    # Reuses the same SessionRuntime + process_message_stream loop as the
     # Rich UI, but renders nothing: clean stdout for sub-agent consumers.
     if quiet or output_format == "json":
         from .machine_output import run_oneshot_machine
@@ -405,7 +405,7 @@ def delegate(
 
     Compatibility: without any of the new flags (--preset/--agentic/--structured/
     --max-tokens/--max-turns) the command keeps the original one-shot behaviour
-    (AgentSession + run_oneshot). When ANY of those flags is supplied, the call
+    (SessionRuntime + run_oneshot). When ANY of those flags is supplied, the call
     routes through ``lilith_tools.delegate.DelegateSubagentTool`` so the delegation
     gets the full agentic/structured/multi-turn surface and is automatically
     recorded in the orchestration state (delegated -> completada/fallida).
@@ -433,10 +433,10 @@ def delegate(
         elif provider_profile.model:
             cfg.model = provider_profile.model
 
-        from .agent import AgentSession
+        from .session_runtime import create_session
         from .repl import run_oneshot
 
-        session = AgentSession(cfg)
+        session = create_session(cfg)
         asyncio.run(run_oneshot(session, text))
         return
 
@@ -1286,10 +1286,10 @@ def subagent(
     if p.get("system_prompt"):
         cfg.system_prompt = p["system_prompt"]
 
-    from .agent import AgentSession
+    from .session_runtime import create_session
     from .repl import run_oneshot
 
-    session = AgentSession(cfg)
+    session = create_session(cfg)
     asyncio.run(run_oneshot(session, text))
 
 
@@ -1320,10 +1320,10 @@ def default_command(
         cfg = load_config(config_path)
         _apply_overrides(cfg, model=model, provider=provider, local=local, no_tools=no_tools)
 
-        from .agent import AgentSession
+        from .session_runtime import create_session
         from .repl import run_oneshot
 
-        session = AgentSession(cfg)
+        session = create_session(cfg)
         asyncio.run(run_oneshot(session, prompt_text))
         return
 

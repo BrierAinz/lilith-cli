@@ -43,7 +43,7 @@ from .config import CONFIG_DIR
 from .render import console, render_error
 
 if TYPE_CHECKING:
-    from .agent import AgentSession
+    from .session_runtime import SessionRuntime
 
 
 _NOTES_PATH: Path = CONFIG_DIR / "notes.json"
@@ -297,7 +297,7 @@ def _search_notes(query: str, with_ids: bool) -> None:
 # ── Entry point ────────────────────────────────────────────────────
 
 
-async def run_note_command(session: "AgentSession", args: str) -> None:  # noqa: ARG001
+async def run_note_command(session: "SessionRuntime", args: str) -> None:  # noqa: ARG001
     """Entry point dispatched by :mod:`lilith_cli.repl` for ``/note``.
 
     ``session`` is accepted for signature compatibility with the other

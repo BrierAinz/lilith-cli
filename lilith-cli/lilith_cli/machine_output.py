@@ -1,7 +1,7 @@
 """Machine-readable one-shot output for ``lilith prompt``.
 
 This module turns ``lilith prompt`` into a safe interface for another AI
-to consume as a sub-agent. It reuses ``AgentSession.process_message_stream``
+to consume as a sub-agent. It reuses ``SessionRuntime.process_message_stream``
 (the same agent loop the interactive Rich UI uses) but consumes the event
 stream *without* rendering: no banners, no separators, no thinking panels,
 no tool cards, no timers, and no ANSI escape sequences on stdout.
@@ -27,7 +27,7 @@ import time
 from typing import TYPE_CHECKING, Any, TextIO
 
 if TYPE_CHECKING:
-    from .agent import AgentSession
+    from .session_runtime import SessionRuntime
 
 SCHEMA_VERSION = "1.0"
 
@@ -64,7 +64,7 @@ def _err(msg: str, *, err: TextIO | None = None) -> None:
     print(msg, file=stream, flush=True)
 
 
-async def _run_agent_stream(session: AgentSession, text: str) -> dict[str, Any]:
+async def _run_agent_stream(session: SessionRuntime, text: str) -> dict[str, Any]:
     """Consume ``session.process_message_stream`` and collect the result.
 
     Returns a dict with ``response``, ``usage``, ``tool_errors`` and
@@ -130,7 +130,7 @@ def _normalise_usage(raw: dict[str, Any]) -> dict[str, int]:
 
 
 async def run_oneshot_machine(
-    session: AgentSession,
+    session: SessionRuntime,
     text: str,
     *,
     output_format: str = "text",
@@ -142,7 +142,7 @@ async def run_oneshot_machine(
     Parameters
     ----------
     session:
-        The ``AgentSession`` to run the prompt through (same object the
+        The ``SessionRuntime`` to run the prompt through (same object the
         Rich UI uses).
     text:
         The user prompt.

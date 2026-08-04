@@ -15,6 +15,12 @@ All notable changes to `lilith-cli` will be documented in this file.
   invocation keeps the interactive Rich rendering unchanged, reusing
   the same `AgentSession` event stream (no duplicated agent logic).
 
+### Changed
+- CLI commands, REPL, IDE and headless consumers now depend on the structural
+  `SessionRuntime` contract and create sessions through a lazy factory.
+  `AgentSession` remains the compatible default implementation and existing
+  monkeypatch and embedding seams continue to work.
+
 ## [4.6.0] - 2026-08-03
 
 ### Added

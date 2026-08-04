@@ -16,7 +16,7 @@ from .render import console, render_error
 
 
 if TYPE_CHECKING:
-    from .agent import AgentSession
+    from .session_runtime import SessionRuntime
 
 
 _WORKFLOW_DIR: Path = Path.home() / ".yggdrasil" / "workflows"
@@ -99,7 +99,7 @@ def _save_workflows(workflows: dict[str, list[str]]) -> None:
 
 
 async def _run_workflow_steps(
-    session: "AgentSession",
+    session: "SessionRuntime",
     name: str,
     steps: list[str],
 ) -> None:
@@ -137,7 +137,7 @@ def _steps_from_args(args: str) -> list[str]:
     return [text] if text else []
 
 
-async def run_workflow_command(session: "AgentSession", args: str) -> None:
+async def run_workflow_command(session: "SessionRuntime", args: str) -> None:
     """Execute /workflow list|run <name>|show <name>|save <name> <steps>."""
     text = args.strip()
 

@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 from .render import console, render_error
 
 if TYPE_CHECKING:
-    from .agent import AgentSession
+    from .session_runtime import SessionRuntime
 
 
 _MAX_BYTES = 64 * 1024  # 64 KiB — más que eso es casi seguro un accidente
@@ -93,8 +93,8 @@ def _preview(text: str, limit: int = 120) -> str:
     return flat
 
 
-async def _send_to_agent(session: "AgentSession", text: str) -> None:
-    """Reenvía ``text`` al loop del agente vía :meth:`AgentSession.process_message`.
+async def _send_to_agent(session: "SessionRuntime", text: str) -> None:
+    """Reenvía ``text`` al loop del agente vía :meth:`SessionRuntime.process_message`.
 
     Si la sesión expone ``process_message_stream`` lo usamos; si no, caemos
     a ``process_message``. Cualquier excepción se propaga como ``render_error``
@@ -115,7 +115,7 @@ async def _send_to_agent(session: "AgentSession", text: str) -> None:
         await result
 
 
-async def run_paste_command(session: "AgentSession", args: str) -> None:
+async def run_paste_command(session: "SessionRuntime", args: str) -> None:
     """Lee el portapapeles y lo envía como prompt (``/paste [--prepend TEXTO]``).
 
     Examples:

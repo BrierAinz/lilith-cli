@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING
 from .render import console, render_error
 
 if TYPE_CHECKING:
-    from .agent import AgentSession
+    from .session_runtime import SessionRuntime
 
 
 def _print_usage() -> None:
@@ -96,7 +96,7 @@ def _parse_args(args: str) -> tuple[str, str, bool, bool] | None:
     return url, nombre, sobrescribir, reindex
 
 
-async def run_ingest_command(session: "AgentSession", args: str) -> None:  # noqa: ARG001
+async def run_ingest_command(session: "SessionRuntime", args: str) -> None:  # noqa: ARG001
     """/ingest — trae una URL como markdown al índice de Mimir."""
     parsed = _parse_args(args)
     if parsed is None:

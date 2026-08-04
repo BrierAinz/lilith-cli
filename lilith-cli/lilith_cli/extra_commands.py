@@ -53,7 +53,7 @@ from rich.syntax import Syntax
 from rich.tree import Tree as RichTree
 
 if TYPE_CHECKING:
-    from .agent import AgentSession
+    from .session_runtime import SessionRuntime
 
 
 # -- Error UX helper ----------------------------------------------------
@@ -123,7 +123,7 @@ def _redact_text(text: str, patterns: list[str] | None = None) -> str:
     return redacted
 
 
-async def run_redact_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_redact_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /redact para ocultar información sensible.
 
     Examples:
@@ -179,7 +179,7 @@ async def run_redact_command(session: AgentSession, args: str) -> None:  # noqa:
     console.print(redacted)
 
 
-async def run_watch_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_watch_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /watch para suscribirse a eventos del sistema de archivos.
 
     Examples:
@@ -316,7 +316,7 @@ def _print_watch_events(result, *, limit: int = 20) -> None:
     console.print()
 
 
-async def run_macro_command(session: AgentSession, args: str) -> None:
+async def run_macro_command(session: SessionRuntime, args: str) -> None:
     """Ejecuta /macro [record|stop|play|list|stats|show|edit|copy|rename|import|validate|delete].
 
     Las macros se guardan en ~/.yggdrasil/macros.json como secuencias de
@@ -358,7 +358,7 @@ def _print_env_json(result) -> None:
     _sys.stdout.flush()
 
 
-async def run_env_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_env_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /env [name|info|prefix <PREFIX>|unset <name>|snapshot|diff] [--json].
 
     Examples:
@@ -651,7 +651,7 @@ def _print_sys_info(result) -> None:
     console.print(table)
 
 
-async def run_git_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_git_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /git <subcomando> [args] usando GitOperationTool.
 
     Examples:
@@ -672,7 +672,7 @@ async def run_git_command(session: AgentSession, args: str) -> None:  # noqa: AR
     _print_tool_result(result)
 
 
-async def run_diff_staged_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_diff_staged_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /diff-staged para mostrar cambios preparados en git.
 
     Examples:
@@ -784,7 +784,7 @@ def _render_diff_staged_stats(numstat_output: str) -> None:
         )
 
 
-async def run_diff_unstaged_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_diff_unstaged_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Show unstaged working-tree changes (/diff-unstaged).
 
     The mirror of /diff-staged but for changes that are NOT yet
@@ -842,7 +842,7 @@ async def run_diff_unstaged_command(session: AgentSession, args: str) -> None:  
     console.print()
 
 
-async def run_todos_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_todos_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /todos [add|done|remove|list|due|clear] usando las herramientas de todo.
 
     Examples:
@@ -911,7 +911,7 @@ async def run_todos_command(session: AgentSession, args: str) -> None:  # noqa: 
     _print_tool_result(result)
 
 
-async def run_search_command(session: AgentSession, args: str) -> None:
+async def run_search_command(session: SessionRuntime, args: str) -> None:
     """Ejecuta /search para buscar en historial, un archivo o varios archivos.
 
     Examples:
@@ -1021,7 +1021,7 @@ def _validate_lint_tool(linter: str | None) -> str | None:
     return None
 
 
-async def run_lint_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_lint_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /lint sobre una ruta explícita, siempre en modo reporte.
 
     No acepta una ruta vacía ni ``.``: el destino debe ser relativo y quedar
@@ -1257,7 +1257,7 @@ def _print_review_summary(summary: dict[str, Any]) -> None:
         print(f"  · {path}  +{a}/-{r}  hunks={h}")
 
 
-async def run_review_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_review_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /review para revisar el diff de un PR o rama.
 
     Examples:
@@ -1379,7 +1379,7 @@ def _run_review_git(*, op: str, args: str = "") -> ToolResult:
 
 
 async def _run_review_agent_task(
-    session: AgentSession,
+    session: SessionRuntime,
     *,
     diff_text: str,
     staged: bool,
@@ -1431,7 +1431,7 @@ async def _run_review_agent_task(
         state.update(status="error", content="", error=f"{type(exc).__name__}: {exc}")
 
 
-async def _run_review_agent_command(session: AgentSession, tokens: list[str]) -> None:
+async def _run_review_agent_command(session: SessionRuntime, tokens: list[str]) -> None:
     """Inicia, consulta o cancela una revisión de código en segundo plano."""
     action = tokens[0].lower() if len(tokens) == 1 else ""
     task = getattr(session, "_review_agent_task", None)
@@ -1520,7 +1520,7 @@ async def _run_review_agent_command(session: AgentSession, tokens: list[str]) ->
     )
 
 
-async def run_template_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_template_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /template para listar y aplicar plantillas de prompts.
 
     Examples:
@@ -1614,7 +1614,7 @@ def _get_template(name: str) -> str | None:
         return None
 
 
-async def run_compact_command(session: AgentSession, args: str) -> None:
+async def run_compact_command(session: SessionRuntime, args: str) -> None:
     """Compact history (/compact [n] [--dry-run] [--force] [--keep-last N])."""
     tokens = args.split()
     dry_run = "--dry-run" in tokens
@@ -1715,7 +1715,7 @@ async def run_compact_command(session: AgentSession, args: str) -> None:
 _REPLAY_DIR = CONFIG_DIR / "replays"
 
 
-async def run_replay_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_replay_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /replay para repetir una secuencia de comandos guardada.
 
     Examples:
@@ -1812,7 +1812,7 @@ def _parse_changelog_entries(text: str) -> list[dict]:
     return entries
 
 
-async def run_changelog_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_changelog_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Show changelog history (/changelog [version|--list])."""
     text = args.strip()
 
@@ -1865,7 +1865,7 @@ async def run_changelog_command(session: AgentSession, args: str) -> None:  # no
 _SECRET_KEY = ""
 
 
-async def run_secret_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_secret_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /secret para gestionar variables secretas de la sesión.
 
     Examples:
@@ -1984,7 +1984,7 @@ def _save_user_tips() -> None:
         )
 
 
-async def run_tip_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_tip_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Show, list, count, or add tips (/tip [n|list|count|add <texto>])."""
     _ensure_tips_loaded()
     raw = args.strip()
@@ -2031,7 +2031,7 @@ async def run_tip_command(session: AgentSession, args: str) -> None:  # noqa: AR
 _ALIAS_FILE = CONFIG_DIR / "aliases.json"
 
 
-async def run_alias_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_alias_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /alias para crear atajos de comandos de barra.
 
     Examples:
@@ -2121,7 +2121,7 @@ def _save_aliases(aliases: dict[str, str]) -> None:
 _STREAM_CONFIG_FILE = CONFIG_DIR / "stream_config.json"
 
 
-async def run_stream_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_stream_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /stream para mostrar o cambiar opciones de streaming.
 
     Examples:
@@ -2171,7 +2171,7 @@ def _save_stream_config(config: dict[str, Any]) -> None:
 # ── /auto command ────────────────────────────────────────────────────
 
 
-async def run_auto_command(session: AgentSession, args: str) -> None:
+async def run_auto_command(session: SessionRuntime, args: str) -> None:
     """Ejecuta /auto [on|off] para activar el modo auto (ejecución automática de herramientas).
 
     Examples:
@@ -2199,7 +2199,7 @@ async def run_auto_command(session: AgentSession, args: str) -> None:
 # ── /file command ────────────────────────────────────────────────────
 
 
-async def run_file_command(session: AgentSession, args: str) -> None:
+async def run_file_command(session: SessionRuntime, args: str) -> None:
     """Ejecuta /file para añadir el contenido de un archivo al contexto del usuario.
 
     Examples:
@@ -2257,7 +2257,7 @@ async def run_file_command(session: AgentSession, args: str) -> None:
 # ── /export command ──────────────────────────────────────────────────
 
 
-async def run_export_command(session: AgentSession, args: str) -> None:
+async def run_export_command(session: SessionRuntime, args: str) -> None:
     """Export conversation (/export [name] [--format json|md] [--output <path>])."""
     # Manual parser to preserve paths with backslashes/spaces
     # argparse + shlex destroys Windows paths, so we parse flags manually.
@@ -2482,7 +2482,7 @@ def _capture_parse_args(args: str) -> tuple[str | None, str | None, bool, bool, 
     )
 
 
-def _capture_usage_dict(session: AgentSession) -> dict[str, Any]:
+def _capture_usage_dict(session: SessionRuntime) -> dict[str, Any]:
     """Devuelve el uso total de la sesión como diccionario seguro."""
     usage = getattr(session, "total_usage", {}) or {}
     return dict(usage) if isinstance(usage, dict) else {"uso": usage}
@@ -2524,7 +2524,7 @@ def _capture_tool_args_preview(entry: dict[str, Any]) -> str:
     return preview if len(preview) <= 80 else preview[:77] + "..."
 
 
-async def run_capture_command(session: AgentSession, args: str) -> None:
+async def run_capture_command(session: SessionRuntime, args: str) -> None:
     """Guarda una transcripción Markdown limpia de la sesión activa."""
     theme = get_theme()
     text = (args or "").strip()
@@ -2817,7 +2817,7 @@ def _run_saved_sessions_command(args: str) -> None:
     console.print(f"[success]✓ Sesión eliminada: {conversation['name']}[/]")
 
 
-async def run_history_command(session: AgentSession, args: str) -> None:
+async def run_history_command(session: SessionRuntime, args: str) -> None:
     """Ejecuta /history para mostrar los últimos mensajes de la conversación.
 
     Examples:
@@ -3025,7 +3025,7 @@ def _format_history_timestamp(ts: Any) -> str:
 # ── /last-tool command ──────────────────────────────────────────────
 
 
-async def run_last_tool_command(session: AgentSession, args: str) -> None:
+async def run_last_tool_command(session: SessionRuntime, args: str) -> None:
     """Ejecuta /last-tool para mostrar detalles de la última llamada a herramienta.
 
     Examples:
@@ -3083,7 +3083,7 @@ async def run_last_tool_command(session: AgentSession, args: str) -> None:
 # ── /theme command ──────────────────────────────────────────────────
 
 
-async def run_theme_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_theme_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /theme [name|current|preview <name>] para cambiar o inspeccionar el tema.
 
     Examples:
@@ -3173,7 +3173,7 @@ async def run_theme_command(session: AgentSession, args: str) -> None:  # noqa: 
 # ── /config command ───────────────────────────────────────────────────
 
 
-async def run_config_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_config_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /config para mostrar o editar la configuración de la sesión.
 
     Examples:
@@ -3208,7 +3208,7 @@ async def run_config_command(session: AgentSession, args: str) -> None:  # noqa:
 # ── /plan command ─────────────────────────────────────────────────────
 
 
-async def run_plan_command(session: AgentSession, args: str) -> None:
+async def run_plan_command(session: SessionRuntime, args: str) -> None:
     """Ejecuta /plan [create|show|done|clear|list]."""
     text = args.strip()
     if not text or text.lower() in ("show", "status"):
@@ -3283,7 +3283,7 @@ async def run_plan_command(session: AgentSession, args: str) -> None:
 # ── /bookmark command ─────────────────────────────────────────────────
 
 
-async def run_bookmark_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_bookmark_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /bookmark para guardar y reutilizar fragmentos de texto.
 
     Examples:
@@ -3379,7 +3379,7 @@ def _save_bookmarks(bookmarks: dict[str, str]) -> None:
 # ── /agent command ───────────────────────────────────────────────────
 
 
-async def run_agent_command(session: AgentSession, args: str) -> None:
+async def run_agent_command(session: SessionRuntime, args: str) -> None:
     """Ejecuta /agent [mode|start|stop|status] para controlar el agente.
 
     Examples:
@@ -3432,7 +3432,7 @@ async def run_agent_command(session: AgentSession, args: str) -> None:
 # ── /redo command ────────────────────────────────────────────────────
 
 
-async def _stream_agent_reply(session: AgentSession, text: str) -> None:
+async def _stream_agent_reply(session: SessionRuntime, text: str) -> None:
     """Consume process_message_stream y renderiza los chunks de texto."""
     async for event in session.process_message_stream(text):
         if event.get("type") == "text":
@@ -3442,7 +3442,7 @@ async def _stream_agent_reply(session: AgentSession, text: str) -> None:
     console.print()
 
 
-async def run_redo_command(session: AgentSession, args: str) -> None:
+async def run_redo_command(session: SessionRuntime, args: str) -> None:
     """Ejecuta /redo para reenviar el último mensaje del usuario.
 
     Examples:
@@ -3463,7 +3463,7 @@ async def run_redo_command(session: AgentSession, args: str) -> None:
 # ── /continue command ─────────────────────────────────────────────────
 
 
-async def run_continue_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_continue_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /continue para pedir al modelo que siga su última respuesta.
 
     Examples:
@@ -3482,7 +3482,7 @@ async def run_continue_command(session: AgentSession, args: str) -> None:  # noq
 # ── /summary command ──────────────────────────────────────────────────
 
 
-async def run_summary_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_summary_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /summary para resumir toda la conversación.
 
     Examples:
@@ -3500,7 +3500,7 @@ async def run_summary_command(session: AgentSession, args: str) -> None:  # noqa
 # ── /recap command ───────────────────────────────────────────────────
 
 
-async def run_recap_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_recap_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /recap [n] para resumir las últimas n rondas de la conversación.
 
     Examples:
@@ -3535,7 +3535,7 @@ async def run_recap_command(session: AgentSession, args: str) -> None:  # noqa: 
 # ── /copy command ─────────────────────────────────────────────────────
 
 
-async def run_copy_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_copy_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /copy para copiar el último mensaje del asistente al portapapeles.
 
     Examples:
@@ -3586,7 +3586,7 @@ async def run_copy_command(session: AgentSession, args: str) -> None:  # noqa: A
 # ── /status command ───────────────────────────────────────────────────
 
 
-async def run_status_command(session: AgentSession, args: str) -> None:
+async def run_status_command(session: SessionRuntime, args: str) -> None:
     """Show session status with color-coded usage levels (/status)."""
     from rich.table import Table
 
@@ -3652,7 +3652,7 @@ async def run_status_command(session: AgentSession, args: str) -> None:
 # ── /profile command ─────────────────────────────────────────────────
 
 
-async def run_profile_command(session: AgentSession, args: str) -> None:
+async def run_profile_command(session: SessionRuntime, args: str) -> None:
     """Gestiona perfiles de configuración (/profile [list|save|show|load|delete])."""
     text = args.strip()
 
@@ -3782,7 +3782,7 @@ _TOUR_STEPS: list[tuple[str, str]] = [
 ]
 
 
-async def run_tour_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_tour_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /tour para iniciar un recorrido interactivo por Lilith.
 
     Subcomandos disponibles:
@@ -3884,12 +3884,12 @@ async def run_tour_command(session: AgentSession, args: str) -> None:  # noqa: A
     )
 
 
-def _get_tour_cursor(session: AgentSession) -> int | None:
+def _get_tour_cursor(session: SessionRuntime) -> int | None:
     """Devuelve el cursor actual del recorrido (1-based) o ``None``."""
     return getattr(session, "_tour_cursor", None)
 
 
-def _set_tour_cursor(session: AgentSession, step: int) -> None:
+def _set_tour_cursor(session: SessionRuntime, step: int) -> None:
     """Persiste el cursor del recorrido en la sesión."""
     try:
         session._tour_cursor = step  # type: ignore[attr-defined]
@@ -3898,7 +3898,7 @@ def _set_tour_cursor(session: AgentSession, step: int) -> None:
         pass
 
 
-def _reset_tour_cursor(session: AgentSession) -> None:
+def _reset_tour_cursor(session: SessionRuntime) -> None:
     """Limpia el cursor del recorrido en la sesión."""
     try:
         if hasattr(session, "_tour_cursor"):
@@ -3946,7 +3946,7 @@ def _render_tour_step(step: int) -> None:
 # ── /pin command ─────────────────────────────────────────────────────────
 
 
-async def run_pin_command(session: AgentSession, args: str) -> None:
+async def run_pin_command(session: SessionRuntime, args: str) -> None:
     """Gestiona mensajes fijados de la conversación actual.
 
     Examples:
@@ -4052,7 +4052,7 @@ def _pin_storage_path() -> Path:
     return base / "pins.json"
 
 
-def _get_session_id(session: AgentSession) -> str:
+def _get_session_id(session: SessionRuntime) -> str:
     """Id estable de la sesión, generando un uuid si no lo tiene."""
     sid = getattr(session, "session_id", None) or getattr(session, "_session_id", None)
     if not sid:
@@ -4064,7 +4064,7 @@ def _get_session_id(session: AgentSession) -> str:
     return str(sid)
 
 
-def _load_pin_entries(session: AgentSession) -> list[dict[str, Any]]:
+def _load_pin_entries(session: SessionRuntime) -> list[dict[str, Any]]:
     """Mensajes fijados de la sesión: espejo en memoria y, si no, el de disco.
 
     El espejo ``session._pinned_messages`` lo consumen la serialización de la
@@ -4088,7 +4088,7 @@ def _load_pin_entries(session: AgentSession) -> list[dict[str, Any]]:
     return [entry for entry in entries if isinstance(entry, dict)]
 
 
-def _save_pin_entries(session: AgentSession, entries: list[dict[str, Any]]) -> None:
+def _save_pin_entries(session: SessionRuntime, entries: list[dict[str, Any]]) -> None:
     """Guarda los fijados en el espejo de la sesión y en disco."""
     session._pinned_messages = [dict(entry) for entry in entries]
 
@@ -4126,7 +4126,7 @@ def _make_pin_entry(message: dict[str, Any], index: int) -> dict[str, Any]:
 
 
 def _pin_message_at_index(
-    session: AgentSession,
+    session: SessionRuntime,
     pins: list[dict[str, Any]],
     index: int,
 ) -> dict[str, Any]:
@@ -4140,7 +4140,7 @@ def _pin_message_at_index(
 
 
 def _pin_default_message(
-    session: AgentSession, pins: list[dict[str, Any]]
+    session: SessionRuntime, pins: list[dict[str, Any]]
 ) -> dict[str, Any]:
     """Pin the most recent assistant message (or last history message)."""
     msg = _resolve_last_assistant_message(session)
@@ -4218,7 +4218,7 @@ class PinMessageTool(BaseTool):
 
     def execute(
         self,
-        session: AgentSession,
+        session: SessionRuntime,
         index: int = 0,
         list: bool = False,
         unpin: int = -1,
@@ -4460,7 +4460,7 @@ def _print_model_list() -> None:
     console.print(table)
 
 
-async def run_model_info_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_model_info_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /model-info para mostrar información detallada de modelos.
 
     Examples:
@@ -4614,7 +4614,7 @@ def _render_todos_due_table(todos: list) -> None:
     console.print()
 
 
-async def run_json_mode_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_json_mode_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /json-mode para alternar la salida estructurada JSON del LLM.
 
     Examples:
@@ -4642,7 +4642,7 @@ async def run_json_mode_command(session: AgentSession, args: str) -> None:  # no
     render_error("Uso: /json-mode [on|off|status]")
 
 
-async def run_hooks_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_hooks_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Gestiona hooks del lifecycle (/hooks [list|add <event> <file>|remove <event> <file>])."""
 
     from .hooks import _EVENTS, _HOOKS_DIR, list_hooks
@@ -4712,7 +4712,7 @@ async def run_hooks_command(session: AgentSession, args: str) -> None:  # noqa: 
 _FORKS_DIR = Path.home() / ".yggdrasil" / "forks"
 
 
-def _serialize_session(session: AgentSession) -> dict[str, Any]:
+def _serialize_session(session: SessionRuntime) -> dict[str, Any]:
     """Return a JSON-serializable snapshot of the session state."""
     return {
         "version": 1,
@@ -4737,7 +4737,7 @@ def _serialize_session(session: AgentSession) -> dict[str, Any]:
     }
 
 
-def _deserialize_session(session: AgentSession, data: dict[str, Any]) -> None:
+def _deserialize_session(session: SessionRuntime, data: dict[str, Any]) -> None:
     """Restore a session snapshot produced by `_serialize_session`."""
     from .config import YggdrasilConfig
 
@@ -4850,7 +4850,7 @@ def _edit_fork_history(snapshot: dict[str, Any], draft_path: Path) -> str | None
     return None
 
 
-async def run_fork_command(session: AgentSession, args: str) -> None:
+async def run_fork_command(session: SessionRuntime, args: str) -> None:
     """Ejecuta /fork para ramificar la sesión actual.
 
     Examples:
@@ -5032,7 +5032,7 @@ def _repo_map_entries(root: Path) -> list[tuple[str, str, int]]:
     return entries
 
 
-async def run_map_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_map_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Muestra un mapa conciso de módulos Python y símbolos públicos.
 
     Uso: /map [directorio] [--json]
@@ -5081,7 +5081,7 @@ async def run_map_command(session: AgentSession, args: str) -> None:  # noqa: AR
 # ── /recent command ──────────────────────────────────────────────────
 
 
-async def run_recent_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_recent_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """List files edited or written during the current session.
 
     Reads ``session._file_edit_history`` (populated by agent.py when
@@ -5187,7 +5187,7 @@ def _format_size(num_bytes: int) -> str:
 # ── /cls (clear screen) ─────────────────────────────────────────────
 
 
-async def run_clear_screen_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_clear_screen_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Limpia la pantalla del terminal sin tocar el historial.
 
     Equivalente a escribir ``cls`` (Windows) o ``clear`` (Unix) en el shell,
@@ -5213,7 +5213,7 @@ async def run_clear_screen_command(session: AgentSession, args: str) -> None:  #
         sys.stdout.flush()
 
 
-async def run_tree_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_tree_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /tree para mostrar el árbol de archivos del directorio actual.
 
     Diferente a system_info.directory_list: muestra una jerarquía visual con
@@ -5315,7 +5315,7 @@ def _load_editor() -> None:
 _load_editor()
 
 
-async def run_editor_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_editor_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /editor para abrir archivos en el editor preferido.
 
     Examples:
@@ -5723,7 +5723,7 @@ def _render_test_usage() -> None:
     console.print()
 
 
-async def run_test_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_test_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /test como wrapper directo de pytest.
 
     Descripción:
@@ -5879,7 +5879,7 @@ def _speak_text(text: str) -> bool:
         return False
 
 
-async def run_voice_command(session: AgentSession, args: str) -> None:
+async def run_voice_command(session: SessionRuntime, args: str) -> None:
     """TTS toggle (/voice [on|off|status|test <text>])."""
     text = args.strip()
     state = getattr(session, "_voice_enabled", False)
@@ -5942,7 +5942,7 @@ def _parse_multi_file_spec(text: str) -> list[dict]:
     return edits
 
 
-async def run_multi_file_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_multi_file_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Atomic multi-file edit (/multi-file '[file] old -> new ; ...')."""
     from lilith_tools.filesystem import BatchEditTool
 
@@ -6146,7 +6146,7 @@ async def run_release_command(session, args):  # noqa: ARG001
 # ── /explain command ───────────────────────────
 
 
-async def run_explain_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_explain_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Explain a file or a Lilith feature (/explain [path] | --feature <name>)."""
     text = args.strip()
     feature: str | None = None
@@ -6229,7 +6229,7 @@ async def run_explain_command(session: AgentSession, args: str) -> None:  # noqa
 # ── /whereami command ───────────────────────
 
 
-async def run_whereami_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_whereami_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Show project context with a Rich panel (/whereami)."""
     import platform as _platform
     import sys as _sys
@@ -6291,7 +6291,7 @@ async def run_whereami_command(session: AgentSession, args: str) -> None:  # noq
 # ── /lint-fix command ──────────────────────
 
 
-async def run_lint_fix_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_lint_fix_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Audita lint sin modificar archivos (/lint-fix <ruta>).
 
     El nombre histórico se conserva para no romper scripts, pero este comando
@@ -6405,7 +6405,7 @@ from lilith_tools.env import EnvGetTool, EnvListTool, SysInfoTool
 # ── /doctor command ───────────────────────────────────────
 
 
-async def run_doctor_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_doctor_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Run environment diagnostics (/doctor [--fix] [--json] [--quiet] [--deep])."""
     import json as _json
 
@@ -6468,7 +6468,7 @@ async def run_doctor_command(session: AgentSession, args: str) -> None:  # noqa:
         console.print()
 
 
-def _run_deep_checks(session: AgentSession) -> list[dict]:
+def _run_deep_checks(session: SessionRuntime) -> list[dict]:
     """Run extended diagnostic checks for --deep mode.
 
     Adds:
@@ -6717,7 +6717,7 @@ def _render_qr_ascii(
     return buf.getvalue()
 
 
-async def run_qr_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_qr_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Genera códigos QR en la terminal o como PNG.
 
     Examples:
@@ -6945,7 +6945,7 @@ async def run_qr_command(session: AgentSession, args: str) -> None:  # noqa: ARG
 # ── /conclave command ─────────────────────────────────────────────────────
 
 
-async def run_conclave_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_conclave_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Fan-out the same question across 2-4 Hlidskjalf presets (/conclave).
 
     Examples:
@@ -7140,7 +7140,7 @@ _GOAL_MARKER = "[LILITH_SESSION_GOAL]"
 _GOAL_STATES = {"active", "paused", "completed"}
 
 
-def _goal_from_session(session: AgentSession) -> dict[str, Any] | None:
+def _goal_from_session(session: SessionRuntime) -> dict[str, Any] | None:
     """Return the session goal, recovering it from saved conversation history."""
     # History is the source of truth: /resume and /fork replace it in-place,
     # so consulting a cache first could leak the previous conversation's goal.
@@ -7166,7 +7166,7 @@ def _goal_from_session(session: AgentSession) -> dict[str, Any] | None:
     return None
 
 
-def _sync_goal_message(session: AgentSession, goal: dict[str, Any] | None) -> None:
+def _sync_goal_message(session: SessionRuntime, goal: dict[str, Any] | None) -> None:
     """Keep one model-visible goal message in history (and therefore in saves)."""
     history = [
         message
@@ -7210,7 +7210,7 @@ def _parse_goal_budget(value: str) -> int:
     return budget
 
 
-def _goal_snapshot(session: AgentSession, goal: dict[str, Any]) -> dict[str, Any]:
+def _goal_snapshot(session: SessionRuntime, goal: dict[str, Any]) -> dict[str, Any]:
     """Add current token accounting to a goal without mutating it."""
     total = int((getattr(session, "_total_usage", {}) or {}).get("total_tokens", 0))
     used = max(0, total - int(goal.get("started_tokens", 0)))
@@ -7223,7 +7223,7 @@ def _goal_snapshot(session: AgentSession, goal: dict[str, Any]) -> dict[str, Any
     }
 
 
-def _render_goal(session: AgentSession, goal: dict[str, Any] | None) -> None:
+def _render_goal(session: SessionRuntime, goal: dict[str, Any] | None) -> None:
     """Render the current goal and its lifecycle state in Spanish."""
     if goal is None:
         console.print("[dim]No hay un objetivo de sesión activo.[/]")
@@ -7248,7 +7248,7 @@ def _render_goal(session: AgentSession, goal: dict[str, Any] | None) -> None:
     console.print()
 
 
-async def run_goal_command(session: AgentSession, args: str) -> None:
+async def run_goal_command(session: SessionRuntime, args: str) -> None:
     """Gestiona un objetivo persistente y visible para el modelo por sesión."""
     text = args.strip()
     goal = _goal_from_session(session)
@@ -7321,7 +7321,7 @@ async def run_goal_command(session: AgentSession, args: str) -> None:
     _render_goal(session, goal)
 
 
-async def run_help_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_help_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Show available commands grouped by category (/help [category])."""
     from rich.table import Table
 
@@ -7775,7 +7775,7 @@ def _deps_render_licenses(licenses) -> None:
     console.print()
 
 
-async def run_deps_command(session: AgentSession, args: str) -> None:
+async def run_deps_command(session: SessionRuntime, args: str) -> None:
     """Manage project dependencies from common manifests.
 
     Usage:
@@ -8155,7 +8155,7 @@ def _compare_print_help() -> None:
     console.print("  [dim]La última comparación se guarda en:[/dim] [green]" + str(_COMPARE_CACHE_FILE) + "[/green]")
 
 
-async def run_compare_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_compare_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /compare para comparar archivos en tres modos: files, json, text.
 
     Examples:
@@ -8231,7 +8231,7 @@ async def run_compare_command(session: AgentSession, args: str) -> None:  # noqa
         _compare_text_stats(path_a, path_b)
 
 
-def _compare_recent_paths(session: AgentSession, count: int = 2) -> list[str]:
+def _compare_recent_paths(session: SessionRuntime, count: int = 2) -> list[str]:
     """Return up to ``count`` distinct paths from the session's
     _file_edit_history, most-recent-first.
 
@@ -8297,7 +8297,7 @@ def _append_log_entry(entry: dict[str, Any]) -> None:
         logger.warning("No se pudo escribir en el log: %s", exc)
 
 
-async def run_log_command(session: AgentSession, args: str) -> None:
+async def run_log_command(session: SessionRuntime, args: str) -> None:
     """Ejecuta /log para mostrar un resumen paginado de la sesión activa.
 
     A diferencia de /history, /log ofrece una vista agregada de la sesión
@@ -8768,7 +8768,7 @@ def _render_snippet_table(rows: list[tuple[str, str, str, int, str]]) -> None:
     console.print(table)
 
 
-async def run_snippet_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_snippet_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /snippet para guardar, listar, recuperar y buscar fragmentos de codigo.
 
     Examples:
@@ -8987,7 +8987,7 @@ def _save_snippets(snippets: dict[str, dict]) -> None:
 # ── Feedback command ─────────────────────────────────────────────────
 
 
-async def run_feedback_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_feedback_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Gestiona feedback local con ``/feedback [add|clear|help]``."""
     feedback_path = CONFIG_DIR / "feedback.json"
     text = args.strip()
@@ -9114,7 +9114,7 @@ from ._learn_section import (
 _LEARN_CACHE: dict[str, list[SkillSuggestion]] = {}
 
 
-async def run_learn_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_learn_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Suggest reusable delegation skills from historical post-mortems (/learn).
 
     Examples:
@@ -9289,7 +9289,7 @@ def _render_learn_table() -> None:
 # ── /cd command ───────────────────────────────────────────────────────────────
 
 
-async def run_pwd_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_pwd_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Muestra el directorio de trabajo actual sin modificarlo."""
     if args.strip():
         render_error("Uso: /pwd")
@@ -9298,7 +9298,7 @@ async def run_pwd_command(session: AgentSession, args: str) -> None:  # noqa: AR
     console.print(f"[info]Directorio actual:[/] [bold cyan]{Path.cwd()}[/]")
 
 
-async def run_cd_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_cd_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Muestra o cambia el directorio de trabajo de la sesión.
 
     Examples:
@@ -9373,7 +9373,7 @@ def _format_elapsed(seconds: float) -> str:
 _TIMER_STATE = None  # type: dict[str, Any] | None
 
 
-async def run_timer_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_timer_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Cronómetro y cuenta atrás en memoria.
 
     Examples:
@@ -9609,7 +9609,7 @@ def _pr_extract_base(args: str, all_tokens: list[str], flags_with_value: tuple[s
     return "main"
 
 
-async def run_pr_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_pr_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Empuja la rama actual y abre un Pull Request en GitHub.
 
     Examples:
@@ -9727,7 +9727,7 @@ async def run_pr_command(session: AgentSession, args: str) -> None:  # noqa: ARG
 # ── /format command ────────────────────────────────────────────────────
 
 
-async def run_format_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_format_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Formatea un archivo con un formatter externo (/format <ruta> [--check]).
 
     El comando sigue la misma política de seguridad que ``/lint-fix``:
@@ -9997,7 +9997,7 @@ def _save_warn_pct(pct: float) -> None:
     )
 
 
-def _context_snapshot(session: AgentSession) -> dict:
+def _context_snapshot(session: SessionRuntime) -> dict:
     """Build a snapshot of the session's current context usage.
 
     Mirrors the logic in :func:`render.render_context` so the JSON path
@@ -10072,7 +10072,7 @@ def _context_snapshot(session: AgentSession) -> dict:
     }
 
 
-async def run_context_command(session: AgentSession, args: str) -> None:
+async def run_context_command(session: SessionRuntime, args: str) -> None:
     """Ejecuta /context para inspeccionar el uso de la ventana de contexto.
 
     Examples:
@@ -10418,7 +10418,7 @@ _SEVERITY_STYLE = {
 }
 
 
-async def run_security_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_security_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /security-review para auditar patrones de seguridad.
 
     Recorre un árbol de directorios aplicando un conjunto de regex
@@ -10567,7 +10567,7 @@ async def run_security_command(session: AgentSession, args: str) -> None:  # noq
     console.print()
 
 
-async def run_diff_branch_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_diff_branch_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Muestra el diff entre HEAD y una referencia arbitraria (/diff-branch).
 
     Acepta un branch, tag o commit arbitrario como ref y compara contra HEAD.
@@ -10782,7 +10782,7 @@ def _check_patch_targets_in_repo(patch_text: str, repo_root: Path) -> list[str]:
     return bad
 
 
-async def run_apply_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_apply_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /apply para aplicar un parche unified-diff al árbol de trabajo.
 
     Examples:

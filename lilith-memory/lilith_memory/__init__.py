@@ -1,6 +1,6 @@
 """Lilith Memory - Vector memory store with SQLite backend + semantic chunker + ontology graph."""
 
-__version__ = "1.5.0"
+__version__ = "1.6.0"
 
 from lilith_memory.chunker import (
     Chunk,

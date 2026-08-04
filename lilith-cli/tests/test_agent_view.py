@@ -169,7 +169,9 @@ class TestAgentDiffIntegration:
             assert file.read_text(encoding="utf-8") == "modified\n"
 
             app._handle_slash("/undo-last")
-            # Give the worker a couple of event-loop cycles to finish.
-            await pilot.pause()
+            # Wait for the filesystem worker itself. A fixed number of event-loop
+            # cycles is racy when the full suite is under subprocess/I/O load.
+            assert app._active_worker is not None
+            await app._active_worker.wait()
             await pilot.pause()
             assert file.read_text(encoding="utf-8") == "original\n"

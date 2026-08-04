@@ -910,7 +910,7 @@ wheels = [
 
 [[package]]
 name = "lilith-cli"
-version = "4.5.0"
+version = "4.6.0"
 source = { editable = "lilith-cli" }
 dependencies = [
     { name = "cyclopts" },
@@ -984,7 +984,7 @@ provides-extras = ["litellm"]
 
 [[package]]
 name = "lilith-memory"
-version = "1.5.0"
+version = "1.6.0"
 source = { editable = "lilith-memory" }
 dependencies = [
     { name = "lilith-core" },
@@ -995,7 +995,7 @@ requires-dist = [{ name = "lilith-core", editable = "lilith-core" }]
 
 [[package]]
 name = "lilith-orchestrator"
-version = "1.13.0"
+version = "1.14.0"
 source = { editable = "lilith-orchestrator" }
 dependencies = [
     { name = "lilith-core" },

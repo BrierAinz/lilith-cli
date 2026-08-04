@@ -6939,44 +6939,6 @@ async def run_qr_command(session: AgentSession, args: str) -> None:  # noqa: ARG
 # ── /json command ───────────────────────────────────────────────────────────────
 
 
-async def run_json_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
-    """Validate and pretty-print JSON (/json <text|file>)."""
-    import json
-
-    text = args.strip()
-    if not text:
-        render_error("Uso: /json <texto_json|ruta_archivo>")
-        return
-
-    # Try as file path first, fall back to literal text
-    target = Path(text).expanduser()
-    if target.is_file():
-        try:
-            content = target.read_text(encoding="utf-8")
-            source = f"archivo: {target.name}"
-        except OSError as exc:
-            render_error(f"No se pudo leer {target}: {exc}")
-            return
-    else:
-        content = text
-        source = "texto"
-
-    try:
-        parsed = json.loads(content)
-    except json.JSONDecodeError as exc:
-        render_error(f"JSON inválido: {exc}")
-        return
-
-    pretty = json.dumps(parsed, indent=2, ensure_ascii=False, sort_keys=True)
-    type_name = type(parsed).__name__
-    if isinstance(parsed, (dict, list)):
-        size = len(parsed)
-    else:
-        size = "?"
-    console.print(f"[info]Válido ({source}):[/info] [bold cyan]{type_name}[/bold cyan] [dim]({size} items)[/dim]")
-    console.print(pretty)
-    console.print()
-
 # ── /reverse command ───────────────────────────────────────────────────────────────
 
 
@@ -10980,6 +10942,11 @@ async def run_apply_command(session: AgentSession, args: str) -> None:  # noqa: 
 
 
 # ── Comandos utilitarios ────────────────────────────────────────────
+# json_commands.py mantiene esta utilidad autocontenida; se reexporta aquí
+# para conservar la interfaz pública usada por repl.py y consumidores existentes.
+from .json_commands import run_json_command  # noqa: E402,F401
+
+
 # Se movieron a utility_commands.py (grupo autocontenido). Se reexportan
 # para no romper los imports existentes de repl.py y de los tests.
 from .utility_commands import (  # noqa: E402,F401

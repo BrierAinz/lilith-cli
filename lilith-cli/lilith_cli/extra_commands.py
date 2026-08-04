@@ -9163,7 +9163,7 @@ async def run_learn_command(session: AgentSession, args: str) -> None:  # noqa: 
 
     Behaviour:
       * Reads post-mortems from the active orchestration state file
-        (``~/.yggdrasil/orchestration_state.json`` by default; override
+        (SQLite transaccional por defecto; override
         via ``YGGDRASIL_ORCHESTRATION_STATE``).
       * Groups successful delegations by preset; presets with ``>=2``
         successes are surfaced as candidates.
@@ -9243,12 +9243,9 @@ async def run_learn_command(session: AgentSession, args: str) -> None:  # noqa: 
 
 def _learn_state_path() -> Path:
     """Return the active state path, honouring the env override."""
-    import os as _os
-    override = _os.environ.get("YGGDRASIL_ORCHESTRATION_STATE")
-    return (
-        Path(override).expanduser() if override
-        else Path.home() / ".yggdrasil" / "orchestration_state.json"
-    )
+    from lilith_tools.orchestration_state import default_state_path
+
+    return default_state_path()
 
 
 def _learn_cached_or_refresh() -> list[SkillSuggestion]:
@@ -9355,7 +9352,7 @@ async def run_cd_command(session: AgentSession, args: str) -> None:  # noqa: ARG
     # Las rutas con espacios se escriben entre comillas por costumbre de shell
     # (y porque otros comandos del REPL, como /random, las parsean con shlex).
     # Sin desenvolverlas la ruta se toma como relativa y en Windows falla
-    # siempre: "D:\Proyectos\Influencer IA" no existe dentro del cwd.
+    # siempre: "D:\Proyectos\60_Private\Influencer-IA" no existe dentro del cwd.
     if len(raw_path) >= 2 and raw_path[0] == raw_path[-1] and raw_path[0] in ('"', "'"):
         raw_path = raw_path[1:-1].strip()
         if not raw_path:

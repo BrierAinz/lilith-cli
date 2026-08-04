@@ -58,6 +58,9 @@ def _isolate_orchestration_state(tmp_path, monkeypatch):
     monkeypatch.setenv(
         "YGGDRASIL_ORCHESTRATION_STATE", str(tmp_path / "orchestration_state.json")
     )
+    monkeypatch.setenv(
+        "YGGDRASIL_PROVIDER_HEALTH_DB", str(tmp_path / "provider_health.sqlite3")
+    )
 
 
 @pytest.fixture

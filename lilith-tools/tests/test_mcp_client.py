@@ -310,13 +310,24 @@ class TestMcpSession:
     ):
         from lilith_tools import mcp_client as mcp_mod
 
+        forced: list[str] = []
+        original_force_close = mcp_mod.MCPClient.force_close
+
         def _boom(self):
             raise RuntimeError("simulated shutdown failure")
 
+        def _record_force_close(self):
+            forced.append(self.server_name)
+            return original_force_close(self)
+
         monkeypatch.setattr(mcp_mod.MCPClient, "close", _boom)
+        monkeypatch.setattr(
+            mcp_mod.MCPClient, "force_close", _record_force_close
+        )
         # Must not raise even though every client's close() explodes.
         with mcp_session({"fake": fake_server_cfg}) as _manager:
             pass
+        assert forced == ["fake"]
 
 
 # ── Defaults sanity check ────────────────────────────────────────────

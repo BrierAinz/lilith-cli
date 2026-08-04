@@ -20,6 +20,10 @@ All notable changes to `lilith-cli` will be documented in this file.
   `SessionRuntime` contract and create sessions through a lazy factory.
   `AgentSession` remains the compatible default implementation and existing
   monkeypatch and embedding seams continue to work.
+- Pre/post tool-hook context construction, gating, result rewriting and
+  fail-open accounting now live in an isolated `ToolHookDispatcher` instead
+  of the conversation loop. `AgentSession.attach_hooks()` and its legacy
+  telemetry fields remain compatible.
 
 ## [4.6.0] - 2026-08-03
 

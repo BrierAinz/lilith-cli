@@ -1,0 +1,41 @@
+name: Question
+description: Ask a focused usage or architecture question.
+title: "[Question]: "
+labels:
+  - question
+  - "status: needs-triage"
+body:
+  - type: checkboxes
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked the README, package documentation, and existing issues.
+          required: true
+        - label: I removed credentials and private data from the question.
+          required: true
+  - type: dropdown
+    attributes:
+      label: Area
+      options:
+        - Installation
+        - CLI or chat REPL
+        - TUI IDE
+        - Configuration
+        - Providers
+        - Memory and RAG
+        - Skills and orchestration
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Question
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: What have you tried?
+  - type: input
+    attributes:
+      label: Environment
+      description: Lilith version or commit, Python version, operating system, and terminal when relevant.

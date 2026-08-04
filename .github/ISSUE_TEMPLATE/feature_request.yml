@@ -1,0 +1,46 @@
+name: Feature request
+description: Propose a focused improvement to Lilith.
+title: "[Feature]: "
+labels:
+  - enhancement
+  - "status: needs-triage"
+body:
+  - type: checkboxes
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and pull requests.
+          required: true
+  - type: dropdown
+    attributes:
+      label: Area
+      options:
+        - CLI or chat REPL
+        - TUI IDE
+        - Core
+        - Memory and RAG
+        - Skills
+        - Orchestrator
+        - Installation or packaging
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Problem
+      description: What limitation or workflow problem should be solved?
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Proposed outcome
+      description: Describe the behavior and result, not only an implementation.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    attributes:
+      label: Additional context

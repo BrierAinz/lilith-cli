@@ -13,6 +13,7 @@ dependencies = [
     "lilith-skills",
     "lilith-orchestrator",
     "lilith-memory",
+    "lilith-tools",
     "pydantic>=2",
     "httpx",
     "rich",
@@ -26,7 +27,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest",
+    "pytest>=9.0.3",
     "pytest-asyncio",
     "pytest-textual-snapshot",
 ]
@@ -45,3 +46,4 @@ lilith-core = { workspace = true }
 lilith-skills = { workspace = true }
 lilith-orchestrator = { workspace = true }
 lilith-memory = { workspace = true }
+lilith-tools = { workspace = true }

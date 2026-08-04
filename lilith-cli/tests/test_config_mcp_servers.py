@@ -14,9 +14,6 @@ from __future__ import annotations
 
 import textwrap
 
-import pytest
-
-
 # ── Default state ─────────────────────────────────────────────────────
 
 
@@ -123,6 +120,7 @@ def test_default_config_yaml_parses_cleanly(tmp_path, monkeypatch):
     cfg = load_config(yaml_path)
     assert cfg.mcp_servers is None
     assert cfg.effective_mcp_servers == {}
+    assert cfg.providers["sakana"].use_responses is True
 
 
 # ── Field-level behaviour ─────────────────────────────────────────────

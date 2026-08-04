@@ -4,11 +4,11 @@ Uses httpx directly for OpenAI-compatible endpoints (fast, lightweight),
 with optional litellm fallback for non-OpenAI providers (Anthropic, etc.).
 Streaming, tool-calling, and exponential-backoff retry included.
 
-Sakana Fugu is treated as an **OpenAI-compatible** provider (its
-``/v1/chat/completions`` endpoint speaks the OpenAI wire format). The
-Sakana-specific Responses API at ``/v1/responses`` is still supported
-behind an opt-in ``providers.sakana.use_responses: true`` flag, used
-by the original Sakana tool-calling experiments.
+Sakana Fugu supports both its Responses API at ``/v1/responses`` and an
+OpenAI-compatible ``/v1/chat/completions`` endpoint. Newly generated
+configuration uses Responses; setting
+``providers.sakana.use_responses: false`` explicitly keeps Chat
+Completions available for existing profiles.
 """
 
 from __future__ import annotations
@@ -317,10 +317,9 @@ class LLMProviderWrapper:
 
         Sakana exposes BOTH an OpenAI-compatible Chat Completions
         endpoint at ``/v1/chat/completions`` AND a Responses API at
-        ``/v1/responses``. The default is Chat Completions (matches
-        the OpenAI wire format and Lilith's main session default);
-        opt into the Responses API by setting
-        ``providers.sakana.use_responses: true`` in the YAML.
+        ``/v1/responses``. The bundled config template enables Responses
+        for new installations. Existing profiles can keep Chat Completions
+        by setting ``providers.sakana.use_responses: false`` in the YAML.
         """
         if "sakana.ai" not in (self._resolve_base_url() or "").lower():
             return False

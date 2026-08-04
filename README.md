@@ -4,7 +4,7 @@
 
 Lilith is a terminal-first coding environment: an interactive agent REPL, a full TUI IDE built on [Textual](https://textual.textualize.io/) (file tree, multi-tab editor, LSP, integrated terminal, git operations, agent diff preview), and orchestration commands for delegating work to sub-agents.
 
-> Part of the [BrierStudios](https://github.com/BrierStudios) Yggdrasil ecosystem. This repository contains the open-source Lilith stack: the CLI/IDE and its two support libraries.
+> Born in the Yggdrasil ecosystem. This repository contains the complete open-source Lilith stack required by the CLI and terminal IDE.
 
 ## Packages
 
@@ -15,6 +15,7 @@ Lilith is a terminal-first coding environment: an interactive agent REPL, a full
 | [`lilith-skills`](lilith-skills/) | Skill management, agent cards and cross-agent context |
 | [`lilith-orchestrator`](lilith-orchestrator/) | Agent routing, sub-agent presets, workflows and MCP integration |
 | [`lilith-memory`](lilith-memory/) | Vector memory store: SQLite backend, semantic chunker, hashed-embedding RAG |
+| [`lilith-tools`](lilith-tools/) | Coding, filesystem, MCP, search, delegation and operator tools used by the CLI |
 
 ## Installation
 

@@ -1,4 +1,4 @@
-"""Yggdrasil CLI v6.0 — Unified entry point.
+"""Yggdrasil CLI — Unified entry point.
 
 Usage:
   yggdrasil              # Launch interactive REPL
@@ -47,7 +47,7 @@ from . import __version__  # single-source-of-truth
 
 app = App(
     name="yggdrasil",
-    help="Yggdrasil CLI v6.0 — Where Ancient Meets Digital",
+    help=f"Yggdrasil CLI v{__version__} — Where Ancient Meets Digital",
     version=__version__,
 )
 
@@ -228,8 +228,38 @@ def prompt(
             help="Override the tool-calling loop cap for this run",
         ),
     ] = None,
+    quiet: Annotated[
+        bool,
+        Parameter(
+            name=["--quiet", "-q"],
+            help="Machine mode: stdout carries only the final response (no ANSI, banners or panels); diagnostics go to stderr",
+        ),
+    ] = False,
+    output_format: Annotated[
+        str,
+        Parameter(
+            name="--output-format",
+            help="Output format: 'text' (default) or 'json' (single stable JSON document; implies --quiet)",
+        ),
+    ] = "text",
 ) -> None:
-    """Modo one-shot: enviar un prompt y mostrar la respuesta."""
+    """Modo one-shot: enviar un prompt y mostrar la respuesta.
+
+    Sin flags, la salida es la experiencia Rich interactiva de siempre.
+    Con ``--quiet`` o ``--output-format json`` la salida es limpia y
+    apta para que otra IA la consuma como sub-agente: stdout lleva solo
+    la respuesta final (text) o un único documento JSON estable (json);
+    errores y diagnósticos van a stderr con código de salida no cero.
+    """
+    if output_format not in ("text", "json"):
+        # Plain-text error to stderr — never Rich, never stdout — so a
+        # machine consumer gets: empty stdout, parseable stderr, exit 2.
+        print(
+            f"error: --output-format inválido: {output_format!r}. Valores: text, json",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
     cfg = load_config(config_path)
     _apply_overrides(cfg, model=model, provider=provider, local=local, no_tools=no_tools)
     if yes:
@@ -242,9 +272,25 @@ def prompt(
         cfg.max_iterations = max_iterations
 
     from .agent import AgentSession
-    from .repl import run_oneshot
 
     session = AgentSession(cfg)
+
+    # ── Machine mode (quiet / json) ─────────────────────────────────
+    # Reuses the same AgentSession + process_message_stream loop as the
+    # Rich UI, but renders nothing: clean stdout for sub-agent consumers.
+    if quiet or output_format == "json":
+        from .machine_output import run_oneshot_machine
+
+        exit_code = asyncio.run(
+            run_oneshot_machine(session, text, output_format=output_format)
+        )
+        if exit_code:
+            raise SystemExit(exit_code)
+        return
+
+    # ── Default Rich path (unchanged) ───────────────────────────────
+    from .repl import run_oneshot
+
     asyncio.run(run_oneshot(session, text))
 
 
@@ -499,11 +545,8 @@ def _render_delegate_tool_result(preset_name: str, result: Any) -> None:
 # ── Doctor (healthcheck) ────────────────────────────────────────────
 
 
-# Default cost ceiling for the per-provider 1-token ping. Same rationale
-# as ``/subagents test``: small enough to be cheap on every provider,
-# large enough to leave room for reasoning_content on Kimi / DeepSeek /
-# GLM-5.1 (which burn the budget on chain-of-thought).
-_DOCTOR_PING_MAX_TOKENS = 64
+# Keep pings cheap while leaving room for reasoning-first models.
+_DOCTOR_PING_MAX_TOKENS = 256
 
 # Hard wall-clock cap on the whole ping. Even though the provider may
 # have its own per-call timeout, the doctor never blocks longer than
@@ -663,12 +706,51 @@ async def _ping_one_provider(
             f"({len(content)}c visibles, {len(reasoning)}c reasoning)"
         )
     else:
+        # Distinguish exhausted budgets from other empty responses.
         row["status"] = "warn"
-        row["message"] = f"respondio en {elapsed_ms}ms pero sin contenido"
+        finish_reason = response.get("finish_reason") or "?"
+        usage = response.get("usage") or {}
+        usage_bits: list[str] = []
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            if key in usage and usage[key] is not None:
+                usage_bits.append(f"{key}={usage[key]}")
+        usage_str = f" usage({', '.join(usage_bits)})" if usage_bits else ""
+        if finish_reason == "length":
+            row["message"] = (
+                f"respondio en {elapsed_ms}ms pero agoto el presupuesto "
+                f"(finish_reason=length, max_tokens={_DOCTOR_PING_MAX_TOKENS})"
+                f"{usage_str}"
+            )
+        else:
+            row["message"] = (
+                f"respondio en {elapsed_ms}ms pero sin contenido "
+                f"(finish_reason={finish_reason})"
+                f"{usage_str}"
+            )
     return row
 
 
-async def _run_provider_pings(cfg: Any, *, force: bool = False) -> list[dict[str, str]]:
+_LOOPBACK_HOSTNAMES = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _is_loopback_base_url(base_url: str | None) -> bool:
+    """Return whether ``base_url`` uses a supported loopback host."""
+    if not base_url:
+        return False
+    from urllib.parse import urlparse
+
+    try:
+        host = urlparse(str(base_url)).hostname
+    except (TypeError, ValueError):
+        return False
+    if host is None:
+        return False
+    return host.strip().lower() in _LOOPBACK_HOSTNAMES
+
+
+async def _run_provider_pings(
+    cfg: Any, *, force: bool = False
+) -> list[dict[str, str]]:
     """Ping every provider profile in parallel with a hard ceiling."""
     providers = (cfg.providers or {}) if cfg else {}
     if not providers:
@@ -699,7 +781,20 @@ async def _run_provider_pings(cfg: Any, *, force: bool = False) -> list[dict[str
                 row["status"] = "warn"
                 row["message"] = f"opcional: {row.get('message', '')}"
             return row
-        except asyncio.TimeoutError:
+        except TimeoutError:
+            # A stopped local model server is a warning; remote timeouts are errors.
+            base_url = getattr(profile, "base_url", None)
+            if _is_loopback_base_url(base_url):
+                return {
+                    "check": f"ping:{name}",
+                    "status": "warn",
+                    "message": (
+                        f"servicio local no disponible "
+                        f"(timeout {timeout:.0f}s "
+                        f"en {base_url})"
+                    ),
+                    "latency_ms": int(timeout * 1000),
+                }
             return {
                 "check": f"ping:{name}",
                 "status": "warn" if getattr(profile, "optional", False) else "error",

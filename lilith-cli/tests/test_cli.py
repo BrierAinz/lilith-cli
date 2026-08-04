@@ -27,6 +27,24 @@ def test_app_instance():
     assert app.version == "4.6.0"
 
 
+def test_app_help_carries_live_version():
+    """The cyclopts ``help`` string is built from ``__version__``.
+
+    The help line MUST reference the live ``__version__`` (no hardcoded
+    ``v6.0`` / ``v6.6``). If a future release bumps ``__version__`` the
+    help line moves with it; this test catches accidental reverts.
+    """
+    from lilith_cli import __version__
+    from lilith_cli.main import app
+
+    assert __version__ in app.help
+    # The two most common historical literals must not survive in help.
+    for forbidden in ("v6.0", "v6.6"):
+        assert forbidden not in app.help, (
+            f"app.help still carries hardcoded literal {forbidden!r}"
+        )
+
+
 def test_config_loads():
     """Config module should be importable and have expected attributes."""
     from lilith_cli.config import CONFIG_DIR, load_config, save_config

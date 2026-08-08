@@ -7,6 +7,8 @@ from lilith_tools import forja_tools
 from lilith_tools.forja_tools import (
     ForjaCharactersTool,
     ForjaControlnetsTool,
+    ForjaDesignBatchStatusTool,
+    ForjaDesignBatchTool,
     ForjaGenerateTool,
 )
 from lilith_tools.registry import ToolRegistry
@@ -32,6 +34,144 @@ def with_token(monkeypatch):
 
 def test_registrado_en_el_registry():
     assert "forja_generate" in ToolRegistry.list_tools()
+
+
+def test_design_batch_registrado_en_el_registry():
+    tools = ToolRegistry.list_tools()
+    assert "forja_design_batch" in tools
+    assert "forja_design_batch_status" in tools
+
+
+def test_design_batch_una_orden_espera_y_devuelve_finales_absolutos(
+    with_token, monkeypatch
+):
+    captured: dict = {}
+    states = iter(
+        [
+            {"run_id": "run-1", "status": "running", "requested": 2, "candidates": []},
+            {
+                "run_id": "run-1",
+                "status": "completed",
+                "requested": 2,
+                "completed": 2,
+                "review_board_url": "/api/v1/pipelines/runs/run-1/artifacts/board",
+                "manifest_url": "/api/v1/pipelines/runs/run-1/artifacts/manifest",
+                "candidates": [
+                    {
+                        "index": 1,
+                        "final_url": "/api/v1/pipelines/runs/run-1/artifacts/final-1",
+                        "source_url": "/api/v1/pipelines/runs/run-1/artifacts/source-1",
+                    },
+                    {
+                        "index": 2,
+                        "final_url": "/api/v1/pipelines/runs/run-1/artifacts/final-2",
+                        "source_url": "/api/v1/pipelines/runs/run-1/artifacts/source-2",
+                    },
+                ],
+            },
+        ]
+    )
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        captured.update({"url": url, "json": json, "headers": headers, "timeout": timeout})
+        return _FakeResponse(
+            202,
+            {
+                "run_id": "run-1",
+                "status": "queued",
+                "status_url": "/api/v1/agent/design-batches/run-1",
+                "deduplicated": False,
+            },
+        )
+
+    def fake_get(url, headers=None, timeout=None):
+        captured["get_url"] = url
+        return _FakeResponse(200, next(states))
+
+    monkeypatch.setattr(forja_tools.requests, "post", fake_post)
+    monkeypatch.setattr(forja_tools.requests, "get", fake_get)
+    monkeypatch.setattr(forja_tools.time, "sleep", lambda _seconds: None)
+
+    result = ForjaDesignBatchTool().execute(
+        brief="original frost wolf apparel graphic",
+        count=2,
+        product="black t-shirt",
+        directions="bold crest\nminimal sigil",
+    )
+
+    assert result.success
+    assert captured["url"].endswith("/api/v1/agent/design-batches")
+    assert captured["json"]["directions"] == ["bold crest", "minimal sigil"]
+    assert captured["json"]["count"] == 2
+    assert captured["get_url"].endswith("/api/v1/agent/design-batches/run-1")
+    assert result.data["status"] == "completed"
+    assert result.data["candidates"][0]["final_url"].startswith("http://127.0.0.1:8000/")
+    assert result.data["review_board_url"].startswith("http://127.0.0.1:8000/")
+
+
+def test_design_batch_sin_espera_devuelve_run_persistente(with_token, monkeypatch):
+    monkeypatch.setattr(
+        forja_tools.requests,
+        "post",
+        lambda *args, **kwargs: _FakeResponse(
+            202,
+            {
+                "run_id": "run-2",
+                "status": "queued",
+                "status_url": "/api/v1/agent/design-batches/run-2",
+                "deduplicated": False,
+            },
+        ),
+    )
+    result = ForjaDesignBatchTool().execute(brief="raven crest", wait=False)
+    assert result.success
+    assert result.data["run_id"] == "run-2"
+    assert result.data["status_url"] == (
+        "http://127.0.0.1:8000/api/v1/agent/design-batches/run-2"
+    )
+
+
+def test_design_batch_status_recupera_lote_sin_esperar(with_token, monkeypatch):
+    monkeypatch.setattr(
+        forja_tools.requests,
+        "get",
+        lambda *args, **kwargs: _FakeResponse(
+            200,
+            {"run_id": "run-3", "status": "running", "requested": 10, "candidates": []},
+        ),
+    )
+    result = ForjaDesignBatchStatusTool().execute(run_id="run-3", wait=False)
+    assert result.success
+    assert result.data["status"] == "running"
+    assert result.data["status_url"].endswith("/api/v1/agent/design-batches/run-3")
+
+
+def test_design_batch_rechaza_respuesta_de_creacion_no_json(with_token, monkeypatch):
+    monkeypatch.setattr(
+        forja_tools.requests,
+        "post",
+        lambda *args, **kwargs: _FakeResponse(202, None, text="<html>gateway</html>"),
+    )
+
+    result = ForjaDesignBatchTool().execute(brief="raven crest", wait=False)
+
+    assert not result.success
+    assert result.data is None
+    assert "no JSON" in result.error
+
+
+def test_design_batch_status_rechaza_respuesta_no_json(with_token, monkeypatch):
+    monkeypatch.setattr(
+        forja_tools.requests,
+        "get",
+        lambda *args, **kwargs: _FakeResponse(200, None, text="upstream vacio"),
+    )
+
+    result = ForjaDesignBatchStatusTool().execute(run_id="run-4", wait=False)
+
+    assert not result.success
+    assert result.data is None
+    assert "no JSON" in result.error
 
 
 def test_prompt_vacio_es_error(with_token):

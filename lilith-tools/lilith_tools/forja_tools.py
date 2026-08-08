@@ -9,6 +9,7 @@ proceso (header ``X-Forja-Token``).
 
 import mimetypes
 import os
+import time
 
 import requests
 
@@ -319,6 +320,270 @@ class ForjaGenerateTool(BaseTool):
             pass
         body["controls"] = [signal]
         return body
+
+
+def _absolute_api_url(base_url: str, value: object) -> object:
+    if isinstance(value, str) and value.startswith("/"):
+        return f"{base_url}{value}"
+    return value
+
+
+def _batch_response_object(response, *, operation: str) -> tuple[dict | None, str]:
+    """Validate successful batch responses before accessing their contract."""
+    try:
+        payload = response.json()
+    except (TypeError, ValueError):
+        return None, f"Forja devolvio un cuerpo no JSON al {operation} el lote"
+    if not isinstance(payload, dict):
+        return None, f"Forja devolvio un JSON no-objeto al {operation} el lote"
+    return payload, ""
+
+
+def _absolute_batch_payload(base_url: str, payload: dict) -> dict:
+    result = dict(payload)
+    for key in ("status_url", "review_board_url", "manifest_url"):
+        if key in result:
+            result[key] = _absolute_api_url(base_url, result[key])
+    candidates = []
+    for raw in result.get("candidates", []):
+        if not isinstance(raw, dict):
+            continue
+        candidate = dict(raw)
+        for key in ("source_url", "final_url"):
+            if key in candidate:
+                candidate[key] = _absolute_api_url(base_url, candidate[key])
+        candidates.append(candidate)
+    if "candidates" in result:
+        result["candidates"] = candidates
+    return result
+
+
+@ToolRegistry.register
+class ForjaDesignBatchTool(BaseTool):
+    """Turn one creative brief into a durable batch of final apparel artwork."""
+
+    name = "forja_design_batch"
+    description = (
+        "Usalo cuando Ainz pida 'hazme N disenos de X'. Una sola llamada crea "
+        "un lote PERSISTENTE en la Forja: deriva direcciones visuales distintas, "
+        "genera cada candidato, reintenta fallos, elimina el fondo conectado, "
+        "normaliza PNG finales de impresion a 300 DPI y crea un review board. "
+        "Pasa `brief` como una direccion creativa completa, preferentemente en "
+        "ingles; NO llames forja_generate N veces. `count` default 10 (max 20). "
+        "Con wait=true espera hasta entregar los finales; si la sesion se corta, "
+        "el trabajo continua en Forja y se recupera con forja_design_batch_status."
+    )
+    parameters = {
+        "brief": {
+            "type": "string",
+            "description": "Brief creativo completo del arte; preferentemente en ingles.",
+            "required": True,
+        },
+        "count": {
+            "type": "integer",
+            "description": "Cantidad de disenos distintos (1-20).",
+            "default": 10,
+        },
+        "product": {
+            "type": "string",
+            "description": "Producto destino, por ejemplo black t-shirt.",
+            "default": "t-shirt",
+        },
+        "directions": {
+            "type": "string",
+            "description": (
+                "Opcional: una direccion visual por linea. Vacio deja que Forja "
+                "derive automaticamente las variantes."
+            ),
+            "default": "",
+        },
+        "negative_prompt": {
+            "type": "string",
+            "description": "Restricciones negativas adicionales.",
+            "default": "",
+        },
+        "model": {"type": "string", "description": "Checkpoint opcional.", "default": ""},
+        "steps": {"type": "integer", "description": "Pasos por candidato.", "default": 30},
+        "retries": {
+            "type": "integer",
+            "description": "Reintentos automaticos por candidato (0-5).",
+            "default": 5,
+        },
+        "wait": {
+            "type": "boolean",
+            "description": "Esperar los finales en esta misma llamada.",
+            "default": True,
+        },
+        "wait_timeout_s": {
+            "type": "number",
+            "description": "Espera total maxima; el lote continua si vence.",
+            "default": 7200,
+        },
+        "force": {
+            "type": "boolean",
+            "description": "Crear otro lote aunque un brief identico ya exista.",
+            "default": False,
+        },
+    }
+
+    def execute(
+        self,
+        brief: str = "",
+        count: int = 10,
+        product: str = "t-shirt",
+        directions: str = "",
+        negative_prompt: str = "",
+        model: str = "",
+        steps: int = 30,
+        retries: int = 5,
+        wait: bool = True,
+        wait_timeout_s: float = 7200,
+        force: bool = False,
+    ) -> ToolResult:
+        if not brief or not brief.strip():
+            return ToolResult(success=False, data=None, error="brief vacio")
+        token, err = _require_token()
+        if not token:
+            return ToolResult(success=False, data=None, error=err)
+        try:
+            count = int(count)
+            steps = int(steps)
+            retries = int(retries)
+        except (TypeError, ValueError):
+            return ToolResult(success=False, data=None, error="count, steps y retries deben ser enteros")
+        if not 1 <= count <= 20:
+            return ToolResult(success=False, data=None, error="count debe estar entre 1 y 20")
+        if not 1 <= steps <= 150:
+            return ToolResult(success=False, data=None, error="steps debe estar entre 1 y 150")
+        if not 0 <= retries <= 5:
+            return ToolResult(success=False, data=None, error="retries debe estar entre 0 y 5")
+
+        base_url = _resolve_base_url()
+        body = {
+            "brief": brief.strip(),
+            "count": count,
+            "product": product.strip() or "t-shirt",
+            "directions": [line.strip() for line in directions.splitlines() if line.strip()],
+            "negative_prompt": negative_prompt,
+            "steps": steps,
+            "retries": retries,
+            "force": bool(force),
+        }
+        if model.strip():
+            body["model"] = model.strip()
+        try:
+            response = requests.post(
+                f"{base_url}/api/v1/agent/design-batches",
+                json=body,
+                headers=_auth_headers(token),
+                timeout=30,
+            )
+        except requests.exceptions.RequestException as exc:
+            return ToolResult(
+                success=False,
+                data=None,
+                error=_connection_error_msg(base_url, exc),
+            )
+        if response.status_code != 202:
+            return ToolResult(success=False, data=None, error=_format_non_200(response))
+        payload, error = _batch_response_object(response, operation="crear")
+        if payload is None:
+            return ToolResult(success=False, data=None, error=error)
+        created = _absolute_batch_payload(base_url, payload)
+        if not wait:
+            return ToolResult(success=True, data=created, error="")
+        return _wait_for_design_batch(
+            base_url,
+            token,
+            str(created.get("run_id", "")),
+            wait_timeout_s=wait_timeout_s,
+        )
+
+
+def _wait_for_design_batch(
+    base_url: str,
+    token: str,
+    run_id: str,
+    *,
+    wait_timeout_s: float,
+) -> ToolResult:
+    if not run_id:
+        return ToolResult(success=False, data=None, error="Forja no devolvio run_id")
+    try:
+        timeout = max(30.0, min(43_200.0, float(wait_timeout_s)))
+    except (TypeError, ValueError):
+        timeout = 7200.0
+    deadline = time.monotonic() + timeout
+    status_url = f"{base_url}/api/v1/agent/design-batches/{run_id}"
+    latest: dict = {"run_id": run_id, "status": "queued", "status_url": status_url}
+    terminal = {"completed", "failed", "blocked", "cancelled"}
+    while time.monotonic() < deadline:
+        try:
+            response = requests.get(status_url, headers=_auth_headers(token), timeout=30)
+        except requests.exceptions.RequestException as exc:
+            return ToolResult(
+                success=False,
+                data=latest,
+                error=_connection_error_msg(base_url, exc),
+            )
+        if response.status_code != 200:
+            return ToolResult(success=False, data=latest, error=_format_non_200(response))
+        payload, error = _batch_response_object(response, operation="consultar")
+        if payload is None:
+            return ToolResult(success=False, data=latest, error=error)
+        latest = _absolute_batch_payload(base_url, payload)
+        latest["status_url"] = status_url
+        status = str(latest.get("status", ""))
+        if status in terminal:
+            if status == "completed":
+                return ToolResult(success=True, data=latest, error="")
+            detail = latest.get("error") or f"design batch termino en estado {status}"
+            return ToolResult(success=False, data=latest, error=str(detail))
+        time.sleep(2.0)
+    latest["continues_in_background"] = True
+    latest["status_url"] = status_url
+    return ToolResult(success=True, data=latest, error="")
+
+
+@ToolRegistry.register
+class ForjaDesignBatchStatusTool(BaseTool):
+    name = "forja_design_batch_status"
+    description = (
+        "Consulta o espera un lote persistente creado por forja_design_batch. "
+        "Usalo con su run_id si Lilith se reinicio o la espera anterior vencio."
+    )
+    parameters = {
+        "run_id": {"type": "string", "description": "Id del lote.", "required": True},
+        "wait": {"type": "boolean", "description": "Esperar a que termine.", "default": True},
+        "wait_timeout_s": {"type": "number", "description": "Espera maxima.", "default": 7200},
+    }
+
+    def execute(
+        self, run_id: str = "", wait: bool = True, wait_timeout_s: float = 7200
+    ) -> ToolResult:
+        if not run_id or not run_id.strip():
+            return ToolResult(success=False, data=None, error="run_id vacio")
+        token, err = _require_token()
+        if not token:
+            return ToolResult(success=False, data=None, error=err)
+        base_url = _resolve_base_url()
+        if wait:
+            return _wait_for_design_batch(
+                base_url, token, run_id.strip(), wait_timeout_s=wait_timeout_s
+            )
+        url = f"{base_url}/api/v1/agent/design-batches/{run_id.strip()}"
+        try:
+            response = requests.get(url, headers=_auth_headers(token), timeout=30)
+        except requests.exceptions.RequestException as exc:
+            return ToolResult(success=False, data=None, error=_connection_error_msg(base_url, exc))
+        if response.status_code != 200:
+            return ToolResult(success=False, data=None, error=_format_non_200(response))
+        payload, error = _batch_response_object(response, operation="consultar")
+        if payload is None:
+            return ToolResult(success=False, data=None, error=error)
+        data = _absolute_batch_payload(base_url, payload)
+        data["status_url"] = url
+        return ToolResult(success=True, data=data, error="")
 
 
 @ToolRegistry.register

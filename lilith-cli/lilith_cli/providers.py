@@ -58,14 +58,6 @@ _MODEL_PRICING: dict[str, tuple[float, float]] = {
     "gpt-4o":                 (2.5, 10.0),
     "gpt-4o-mini":            (0.15, 0.6),
     "o3":                     (15.0, 60.0),
-    # DeepSeek
-    "deepseek-chat":          (0.27, 1.1),
-    "deepseek-v4-flash":      (0.07, 0.27),
-    "deepseek-reasoner":      (0.55, 2.19),
-    # Qwen / Alibaba
-    "qwen-max-latest":        (2.4, 9.6),
-    "qwen-plus-latest":       (0.4, 1.2),
-    "qwen3.7-max":            (2.4, 9.6),
     # Kimi
     "kimi-for-coding":        (1.0, 3.0),
     "moonshot-v1-128k":       (2.0, 2.0),
@@ -96,14 +88,6 @@ _MODEL_CONTEXTS: dict[str, int] = {
     "gpt-4o": 128_000,
     "gpt-4o-mini": 128_000,
     "o3": 200_000,
-    # DeepSeek
-    "deepseek-chat": 64_000,
-    "deepseek-v4-flash": 64_000,
-    "deepseek-reasoner": 64_000,
-    # Qwen / Alibaba
-    "qwen-max-latest": 128_000,
-    "qwen-plus-latest": 128_000,
-    "qwen3.7-max": 128_000,
     # Kimi
     "k3": 1_048_576,
     "kimi-for-coding": 256_000,
@@ -149,12 +133,6 @@ _MODEL_CONTEXTS: dict[str, int] = {
     "gpt-4o": 128_000,
     "gpt-4o-mini": 128_000,
     "o3": 200_000,
-    "deepseek-chat": 64_000,
-    "deepseek-v4-flash": 64_000,
-    "deepseek-reasoner": 64_000,
-    "qwen-max-latest": 32_000,
-    "qwen-plus-latest": 128_000,
-    "qwen3.7-max": 32_000,
     "k3": 1_048_576,
     "kimi-for-coding": 128_000,
     "moonshot-v1-128k": 128_000,

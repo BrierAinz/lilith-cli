@@ -64,8 +64,8 @@ def test_suggest_from_state_path_reads_json(tmp_path):
         json.dumps(
             {
                 "post_mortems": [
-                    _pm("batch-deepseek", task_id="t1"),
-                    _pm("batch-deepseek", task_id="t2"),
+                    _pm("investigador-minimax", task_id="t1"),
+                    _pm("investigador-minimax", task_id="t2"),
                 ],
                 "tasks": [
                     {"id": "t1", "description": "convertir docs"},

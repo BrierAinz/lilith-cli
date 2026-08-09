@@ -42,7 +42,7 @@ def test_agent_card_from_dict():
         "name": "Thor",
         "role": "DevOps",
         "level": 2,
-        "model": "deepseek",
+        "model": "fixture-model",
         "tools": ["terminal"],
         "description": "Hammer",
     }

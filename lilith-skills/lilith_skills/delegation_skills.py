@@ -83,7 +83,7 @@ DEFAULT_SKILLS = (
     DelegationSkill(
         name="batch-docs",
         description="Procesamiento por lotes de documentación",
-        preset="batch-deepseek",
+        preset="investigador-minimax",
         prompt_template="Procesa en lote: {TASK}\nProyecto: {PROJECT}\nContexto: {CONTEXT}",
     ),
     DelegationSkill(

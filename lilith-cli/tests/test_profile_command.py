@@ -124,7 +124,7 @@ def test_profiles_path_uses_config_dir(tmp_path, monkeypatch):
 
 def test_default_profiles_structure():
     """Los perfiles por defecto tienen los modelos esperados."""
-    assert _DEFAULT_PROFILES["fast"]["model"] == "deepseek-v4-flash"
+    assert _DEFAULT_PROFILES["fast"]["model"] == "glm-5.2"
     assert _DEFAULT_PROFILES["reasoning"]["model"] == "claude-opus-4"
     assert _DEFAULT_PROFILES["local"]["model"] == "local-model"
 

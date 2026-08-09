@@ -457,7 +457,6 @@ class DelegateSubagentTool(BaseTool):
         "Delegar una tarea autocontenida a un sub-agente y devolver su respuesta. "
         "Presets disponibles: ejecutor-kimi (loops largos, scripting, refactors); "
         "investigador-minimax (documentos largos, research multi-fuente); "
-        "batch-deepseek (volumen, boilerplate, conversiones masivas); "
         "orquestador-fugu (deep research, síntesis, decisiones de arquitectura); "
         "opencode-glm52 (trabajo genérico barato); "
         "grok-research (contexto 1M, research); "
@@ -475,7 +474,7 @@ class DelegateSubagentTool(BaseTool):
             "type": "string",
             "description": (
                 "Nombre del preset de Hlidskjalf: ejecutor-kimi | "
-                "investigador-minimax | batch-deepseek | orquestador-fugu | "
+                "investigador-minimax | orquestador-fugu | "
                 "opencode-glm52 | grok-research"
             ),
             "required": True,

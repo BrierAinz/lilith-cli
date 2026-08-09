@@ -10,6 +10,7 @@ proceso (header ``X-Forja-Token``).
 import mimetypes
 import os
 import time
+from typing import ClassVar
 
 import requests
 
@@ -584,6 +585,106 @@ class ForjaDesignBatchStatusTool(BaseTool):
         data = _absolute_batch_payload(base_url, payload)
         data["status_url"] = url
         return ToolResult(success=True, data=data, error="")
+
+
+@ToolRegistry.register
+class ForjaPromoteDesignTool(BaseTool):
+    """Promote one generated candidate into the governed apparel workflow."""
+
+    name = "forja_promote_design"
+    description = (
+        "Usalo despues de forja_design_batch cuando Ainz elija un candidato. "
+        "Una llamada fija su SHA-256, registra la seleccion humana, crea el "
+        "diseno inmutable en Atelier e inicia apparel-v1. No aprueba derechos, "
+        "proveedor ni muestra fisica. Repetir la misma promocion es idempotente."
+    )
+    parameters: ClassVar[dict[str, dict[str, object]]] = {
+        "run_id": {"type": "string", "description": "Run del lote.", "required": True},
+        "candidate_index": {
+            "type": "integer",
+            "description": "Numero visible del candidato elegido (1-20).",
+            "required": True,
+        },
+        "authority": {
+            "type": "string",
+            "description": "Autoridad que hizo la seleccion.",
+            "default": "Ainz",
+        },
+        "design_id": {
+            "type": "string",
+            "description": "ID permanente opcional; Forja genera uno si se omite.",
+            "default": "",
+        },
+        "name": {
+            "type": "string",
+            "description": "Nombre opcional; usa la direccion visual si se omite.",
+            "default": "",
+        },
+        "project_id": {"type": "string", "description": "Proyecto opcional.", "default": ""},
+        "collection_id": {
+            "type": "string",
+            "description": "Coleccion opcional.",
+            "default": "",
+        },
+    }
+
+    def execute(
+        self,
+        run_id: str = "",
+        candidate_index: int = 0,
+        authority: str = "Ainz",
+        design_id: str = "",
+        name: str = "",
+        project_id: str = "",
+        collection_id: str = "",
+    ) -> ToolResult:
+        normalized_run_id = run_id.strip()
+        if (
+            len(normalized_run_id) != 32
+            or any(character not in "0123456789abcdefABCDEF" for character in normalized_run_id)
+        ):
+            return ToolResult(success=False, data=None, error="run_id debe ser hexadecimal de 32 caracteres")
+        try:
+            index = int(candidate_index)
+        except (TypeError, ValueError):
+            return ToolResult(success=False, data=None, error="candidate_index debe ser entero")
+        if not 1 <= index <= 20:
+            return ToolResult(success=False, data=None, error="candidate_index debe estar entre 1 y 20")
+        if not authority or not authority.strip():
+            return ToolResult(success=False, data=None, error="authority vacia")
+        token, err = _require_token()
+        if not token:
+            return ToolResult(success=False, data=None, error=err)
+
+        body = {"authority": authority.strip()}
+        for key, value in {
+            "design_id": design_id,
+            "name": name,
+            "project_id": project_id,
+            "collection_id": collection_id,
+        }.items():
+            if value and value.strip():
+                body[key] = value.strip()
+        base_url = _resolve_base_url()
+        url = (
+            f"{base_url}/api/v1/atelier/studio/batches/{normalized_run_id}"
+            f"/candidates/{index}/promote"
+        )
+        try:
+            response = requests.post(
+                url,
+                json=body,
+                headers=_auth_headers(token),
+                timeout=60,
+            )
+        except requests.exceptions.RequestException as exc:
+            return ToolResult(success=False, data=None, error=_connection_error_msg(base_url, exc))
+        if response.status_code != 201:
+            return ToolResult(success=False, data=None, error=_format_non_200(response))
+        payload, error = _batch_response_object(response, operation="promover")
+        if payload is None:
+            return ToolResult(success=False, data=None, error=error)
+        return ToolResult(success=True, data=payload, error="")
 
 
 @ToolRegistry.register

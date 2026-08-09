@@ -1,8 +1,9 @@
 """Tests del tool forja_generate (integración Forja↔Yggdrasil, lado Yggdrasil)."""
 
+from unittest.mock import Mock
+
 import pytest
 import requests
-
 from lilith_tools import forja_tools
 from lilith_tools.forja_tools import (
     ForjaCharactersTool,
@@ -10,6 +11,7 @@ from lilith_tools.forja_tools import (
     ForjaDesignBatchStatusTool,
     ForjaDesignBatchTool,
     ForjaGenerateTool,
+    ForjaPromoteDesignTool,
 )
 from lilith_tools.registry import ToolRegistry
 
@@ -40,6 +42,7 @@ def test_design_batch_registrado_en_el_registry():
     tools = ToolRegistry.list_tools()
     assert "forja_design_batch" in tools
     assert "forja_design_batch_status" in tools
+    assert "forja_promote_design" in tools
 
 
 def test_design_batch_una_orden_espera_y_devuelve_finales_absolutos(
@@ -172,6 +175,50 @@ def test_design_batch_status_rechaza_respuesta_no_json(with_token, monkeypatch):
     assert not result.success
     assert result.data is None
     assert "no JSON" in result.error
+
+
+def test_promote_design_prepara_atelier_en_una_llamada(with_token, monkeypatch):
+    captured: dict = {}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        captured.update({"url": url, "json": json, "headers": headers, "timeout": timeout})
+        return _FakeResponse(
+            201,
+            {
+                "deduplicated": False,
+                "source": {"candidate_index": 2, "sha256": "b" * 64},
+                "design": {"design_id": "FORJA-ABCDEF12-02"},
+                "run": {"run_id": "c" * 32, "status": "queued"},
+                "approvals": [],
+            },
+        )
+
+    monkeypatch.setattr(forja_tools.requests, "post", fake_post)
+
+    result = ForjaPromoteDesignTool().execute(
+        run_id="a" * 32,
+        candidate_index=2,
+        authority="Ainz",
+        name="Frost Raven",
+    )
+
+    assert result.success
+    assert result.data["design"]["design_id"] == "FORJA-ABCDEF12-02"
+    assert captured["url"].endswith(f"/{'a' * 32}/candidates/2/promote")
+    assert captured["json"] == {"authority": "Ainz", "name": "Frost Raven"}
+    assert captured["timeout"] == 60
+
+
+def test_promote_design_valida_run_e_indice_antes_de_http(with_token, monkeypatch):
+    post = Mock()
+    monkeypatch.setattr(forja_tools.requests, "post", post)
+
+    bad_run = ForjaPromoteDesignTool().execute(run_id="no", candidate_index=1)
+    bad_index = ForjaPromoteDesignTool().execute(run_id="a" * 32, candidate_index=21)
+
+    assert not bad_run.success
+    assert not bad_index.success
+    post.assert_not_called()
 
 
 def test_prompt_vacio_es_error(with_token):

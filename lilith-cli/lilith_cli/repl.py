@@ -1203,7 +1203,7 @@ async def _process_with_streaming(
                     if trace is not None:
                         trace.handle(event)
 
-                    # ── Reasoning (Kimi / GLM-5.1 / DeepSeek thinking) ──
+                    # ── Provider reasoning stream ──
                     if event_type == "reasoning":
                         chunk = event.get("content", "")
                         if chunk:

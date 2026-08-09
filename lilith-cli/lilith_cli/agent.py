@@ -1321,7 +1321,7 @@ class AgentSession:
             response_format = {"type": "json_object"} if getattr(self, "_json_mode", False) else None
             async for chunk in self.provider.stream(messages, tools=tools, response_format=response_format):
                 # Reasoning chunks (reasoning_content deltas from Kimi,
-                # GLM-5.1, DeepSeek, …) are a separate event type: forward
+                # GLM-family models, etc.) are a separate event type: forward
                 # them as-is so the UI renders a thinking panel instead of
                 # gluing the reasoning onto the final message.
                 if chunk.get("type") == "reasoning":

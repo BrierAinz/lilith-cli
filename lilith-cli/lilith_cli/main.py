@@ -385,7 +385,7 @@ def _load_subagent_presets(config_path: Path | str | None = None) -> dict[str, A
 def delegate(
     target: Annotated[
         str,
-        Parameter(help="Provider profile name (sakana, kimi, deepseek, mimo, m2, ...) OR Hlidskjalf preset name when --preset is used"),
+        Parameter(help="Provider profile name (sakana, kimi, minimax, ...) OR Hlidskjalf preset name when --preset is used"),
     ],
     text: Annotated[str, Parameter(help="Prompt to send")],
     model: Annotated[str | None, Parameter(name=["--model", "-m"])] = None,
@@ -1244,7 +1244,7 @@ def timeline(
 def subagent(
     preset: Annotated[
         str,
-        Parameter(help="Hlidskjalf preset name (ejecutor-kimi, investigador-minimax, batch-deepseek, orquestador-fugu)"),
+        Parameter(help="Hlidskjalf preset name (ejecutor-kimi, investigador-minimax, orquestador-fugu)"),
     ],
     text: Annotated[str, Parameter(help="Prompt to send via the preset")],
     config_path: Annotated[str | None, Parameter(name="--config")] = None,

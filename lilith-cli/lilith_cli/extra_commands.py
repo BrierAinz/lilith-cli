@@ -4324,8 +4324,6 @@ _MODEL_PROVIDER_HINTS: dict[str, str] = {
     "claude": "Anthropic",
     "gpt": "OpenAI",
     "o3": "OpenAI",
-    "deepseek": "DeepSeek",
-    "qwen": "Alibaba / Qwen",
     "kimi": "Moonshot",
     "moonshot": "Moonshot",
     "seed": "BytePlus",
@@ -4345,12 +4343,6 @@ _MODEL_CAPABILITIES: dict[str, list[str]] = {
     "gpt-4o": ["chat", "tool-calling", "vision", "streaming"],
     "gpt-4o-mini": ["chat", "tool-calling", "vision", "streaming"],
     "o3": ["chat", "reasoning", "tool-calling", "streaming"],
-    "deepseek-chat": ["chat", "tool-calling", "streaming"],
-    "deepseek-v4-flash": ["chat", "tool-calling", "streaming"],
-    "deepseek-reasoner": ["chat", "reasoning", "streaming"],
-    "qwen-max-latest": ["chat", "tool-calling", "streaming"],
-    "qwen-plus-latest": ["chat", "tool-calling", "streaming"],
-    "qwen3.7-max": ["chat", "tool-calling", "streaming"],
     "kimi-for-coding": ["chat", "tool-calling", "long-context", "streaming"],
     "moonshot-v1-128k": ["chat", "long-context", "streaming"],
     "seed-1-6-250915": ["chat", "tool-calling", "streaming"],
@@ -5420,8 +5412,8 @@ _PROFILES_PATH: Path = Path.home() / ".yggdrasil" / "profiles.json"
 
 _DEFAULT_PROFILES: dict[str, dict[str, Any]] = {
     "fast": {
-        "provider": "deepseek",
-        "model": "deepseek-v4-flash",
+        "provider": "opencode-go",
+        "model": "glm-5.2",
         "theme": "norse",
         "description": "Rápido y económico",
     },

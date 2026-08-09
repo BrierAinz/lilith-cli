@@ -41,23 +41,23 @@ _STRUCTURED_PROMPT = (
 )
 
 
-def test_estructurado_batch_deepseek(delegate_tool, require_provider_keys) -> None:
-    """batch-deepseek returns a validated structured dict."""
-    require_provider_keys("batch-deepseek")
+def test_estructurado_investigador_minimax(delegate_tool, require_provider_keys) -> None:
+    """investigador-minimax returns a validated structured dict."""
+    require_provider_keys("investigador-minimax")
 
     result = delegate_tool.execute(
-        preset="batch-deepseek",
+        preset="investigador-minimax",
         prompt=_STRUCTURED_PROMPT,
         structured=True,
         max_tokens=512,
     )
 
-    assert result.success, f"batch-deepseek structured failed — error={result.error!r}"
+    assert result.success, f"investigador-minimax structured failed — error={result.error!r}"
 
     data = result.data or {}
     structured = data.get("structured")
     assert structured is not None, (
-        f"batch-deepseek structured run returned no `structured` key — data={data!r}"
+        f"investigador-minimax structured run returned no `structured` key — data={data!r}"
     )
     assert isinstance(structured, dict), (
         f"`structured` must be a dict, got {type(structured).__name__}"

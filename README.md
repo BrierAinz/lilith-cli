@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/BrierAinz/BrierAinz/main/assets/brierstudios-strip.svg" width="100%" alt="BrierStudios — Yggdrasil ecosystem">
+  <img src="./assets/github-banner.svg" width="100%" alt="Lilith CLI — terminal-first AI workspace">
 </p>
 
 # ᛚ Lilith CLI
@@ -13,9 +13,25 @@
 
 **Norse-themed terminal IDE and AI agent interface.**
 
-Lilith is a terminal-first coding environment: an interactive agent REPL, a full TUI IDE built on [Textual](https://textual.textualize.io/) (file tree, multi-tab editor, LSP, integrated terminal, git operations, agent diff preview), and orchestration commands for delegating work to sub-agents.
+Lilith is a terminal-first coding environment: an interactive agent REPL, a full TUI IDE built on [Textual](https://textual.textualize.io/) with file tree, multi-tab editor, LSP, integrated terminal, Git operations and agent diff preview, plus orchestration commands for delegating bounded work.
 
 > Born in the Yggdrasil ecosystem. This repository contains the complete open-source Lilith stack required by the CLI and terminal IDE.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    U[Operator] --> C[lilith-cli]
+    C --> CORE[lilith-core]
+    C --> ORCH[lilith-orchestrator]
+    C --> MEM[lilith-memory]
+    C --> SK[lilith-skills]
+    C --> TOOLS[lilith-tools]
+    ORCH --> CORE
+    ORCH --> SK
+    TOOLS --> CORE
+    MEM --> CORE
+```
 
 ## Packages
 
@@ -48,11 +64,23 @@ lilith prompt "hello"        # one-shot prompt
 lilith status                # ecosystem status
 ```
 
-Full IDE documentation — layout, keyboard shortcuts, chat commands, LSP, session persistence — lives in [`lilith-cli/README.md`](lilith-cli/README.md).
+Full IDE documentation — layout, keyboard shortcuts, chat commands, LSP and session persistence — lives in [`lilith-cli/README.md`](lilith-cli/README.md).
 
 ## Design boundary
 
 Lilith CLI is the public terminal workspace and interface layer. It is intentionally separated from private orchestration and infrastructure repositories so the open-source surface can remain understandable and usable on its own.
+
+## Contributing and security
+
+- [Contributing guide](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [Code of conduct](CODE_OF_CONDUCT.md)
+
+Bug reports and feature proposals use the structured templates under `.github/ISSUE_TEMPLATE/`.
+
+## Repository artwork
+
+The version-controlled social artwork is available at [`assets/social-preview.svg`](assets/social-preview.svg). Repository settings may use a rasterized export of this source when configuring GitHub's social preview.
 
 ## License
 

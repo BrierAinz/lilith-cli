@@ -3115,7 +3115,7 @@ class MacroCommand(BaseCommand):
         console.print("  [bold cyan]/macro list[/]           — Listar macros guardadas")
         console.print("  [bold cyan]/macro stats[/]          — Ver estadísticas agregadas")
         console.print("  [bold cyan]/macro show <nombre>[/]  — Ver comandos de la macro")
-        console.print("  [bold cyan]/macro edit <nombre>[/]  — Editar en \$EDITOR")
+        console.print("  [bold cyan]/macro edit <nombre>[/]  — Editar en $EDITOR")
         console.print("  [bold cyan]/macro copy <origen> <copia>[/] — Copiar una macro")
         console.print("  [bold cyan]/macro rename <actual> <nuevo>[/] — Renombrar una macro")
         console.print("  [bold cyan]/macro import <archivo> [nombre][/]")

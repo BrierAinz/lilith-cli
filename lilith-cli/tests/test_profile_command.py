@@ -21,9 +21,20 @@ from lilith_cli.extra_commands import (
 
 class DummyConfig:
     def __init__(self):
-        self.model = "test"
-        self.provider = "test"
-        self.providers = {}
+        self.model = "deepseek-v4-flash"
+        self.provider = "deepseek"
+        self.providers = {
+            "deepseek": SimpleNamespace(
+                model="deepseek-v4-flash",
+                api_key="deepseek-key",
+                base_url="https://api.deepseek.com/v1",
+            ),
+            "grok": SimpleNamespace(
+                model="grok-4.20-0309-reasoning",
+                api_key="grok-key",
+                base_url="https://api.x.ai/v1",
+            ),
+        }
         self.api_key = ""
         self.system_prompt = ""
         self.temperature = 0.7
@@ -64,15 +75,15 @@ async def test_profile_list_pre_populated(profiles_file):
     output = "".join(str(p) for p in prints)
     assert "fast" in output
     assert "reasoning" in output
-    assert "local" in output
+    assert "local" not in output
 
 
 @pytest.mark.asyncio
 async def test_profile_save_load_and_show(profiles_file):
     """/profile save, load y show persisten y aplican perfiles."""
     session = DummySession()
-    session.config.model = "custom-model"
-    session.config.provider = "custom-provider"
+    session.config.model = "deepseek-v4-pro"
+    session.config.provider = "deepseek"
     prints = []
 
     def capture(text: str = ""):
@@ -89,10 +100,10 @@ async def test_profile_save_load_and_show(profiles_file):
     output = "".join(str(p) for p in prints)
     assert "Perfil guardado: custom" in output
     assert "Perfil cargado: custom" in output
-    assert "custom-model" in output
-    assert "custom-provider" in output
-    assert session.config.model == "custom-model"
-    assert session.config.provider == "custom-provider"
+    assert "deepseek-v4-pro" in output
+    assert "deepseek" in output
+    assert session.config.model == "deepseek-v4-pro"
+    assert session.config.provider == "deepseek"
 
 
 @pytest.mark.asyncio
@@ -125,8 +136,9 @@ def test_profiles_path_uses_config_dir(tmp_path, monkeypatch):
 def test_default_profiles_structure():
     """Los perfiles por defecto tienen los modelos esperados."""
     assert _DEFAULT_PROFILES["fast"]["model"] == "deepseek-v4-flash"
-    assert _DEFAULT_PROFILES["reasoning"]["model"] == "claude-opus-4"
-    assert _DEFAULT_PROFILES["local"]["model"] == "local-model"
+    assert _DEFAULT_PROFILES["reasoning"]["model"] == "grok-4.20-0309-reasoning"
+    assert _DEFAULT_PROFILES["orchestration"]["model"] == "fugu-ultra"
+    assert set(_DEFAULT_PROFILES) == {"fast", "reasoning", "orchestration"}
 
 
 @pytest.mark.asyncio
@@ -159,8 +171,8 @@ async def test_profile_list_y_load_incluyen_tema(profiles_file):
     _save_profiles(
         {
             "minimalista": {
-                "provider": "local",
-                "model": "modelo-local",
+                "provider": "grok",
+                "model": "grok-4.20-0309-reasoning",
                 "theme": "minimal",
             }
         }
@@ -179,11 +191,11 @@ async def test_profile_list_y_load_incluyen_tema(profiles_file):
             await run_profile_command(session, "load minimalista")
 
         output = "".join(str(item) for item in prints)
-        assert "provider=local" in output
-        assert "model=modelo-local" in output
+        assert "provider=grok" in output
+        assert "model=grok-4.20-0309-reasoning" in output
         assert "theme=minimal" in output
-        assert session.config.provider == "local"
-        assert session.config.model == "modelo-local"
+        assert session.config.provider == "grok"
+        assert session.config.model == "grok-4.20-0309-reasoning"
         assert extra_commands.get_theme().name == "minimal"
     finally:
         extra_commands.set_theme(previous_theme)

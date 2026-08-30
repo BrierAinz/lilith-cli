@@ -21,32 +21,13 @@ if TYPE_CHECKING:
     from .session_runtime import SessionRuntime
 
 
-# Rango aceptado por las APIs tipo OpenAI/Anthropic. Por encima de ~1.2 la
+# Rango aceptado por las APIs OpenAI-compatible. Por encima de ~1.2 la
 # salida se vuelve incoherente, pero el límite duro es lo que rechaza el
 # servidor, así que validamos contra eso y avisamos del resto.
 _MIN = 0.0
 _MAX = 2.0
 _DEFAULT = 0.7
 _ALTA = 1.2
-
-
-def _es_kimi(session: "SessionRuntime") -> bool:
-    """¿El proveedor activo ignora la temperatura?
-
-    ``kimi-for-coding`` devuelve 400 con cualquier valor que no sea 1.0, así
-    que ``providers.py`` la fuerza. Conviene decirlo en vez de fingir que el
-    cambio tuvo efecto.
-    """
-    base = getattr(session.config, "base_url", None) or ""
-    if not base:
-        provider = getattr(session, "provider", None)
-        resolver = getattr(provider, "_resolve_base_url", None)
-        if callable(resolver):
-            try:
-                base = resolver() or ""
-            except Exception:  # noqa: BLE001 — nunca romper por introspección
-                base = ""
-    return "kimi.com" in str(base).lower()
 
 
 def _mostrar(session: "SessionRuntime") -> None:
@@ -56,11 +37,6 @@ def _mostrar(session: "SessionRuntime") -> None:
         f"  [dim]rango {_MIN}–{_MAX} · por defecto {_DEFAULT} · "
         f"más alto = más aleatorio[/]"
     )
-    if _es_kimi(session):
-        console.print(
-            "  [warning]⚠ El proveedor activo (kimi) fuerza temperature=1.0; "
-            "este valor no se aplica.[/]"
-        )
 
 
 async def run_temperature_command(session: "SessionRuntime", args: str) -> None:
@@ -110,12 +86,6 @@ async def run_temperature_command(session: "SessionRuntime", args: str) -> None:
         console.print(
             "  [warning]⚠ Por encima de 1.2 la salida suele volverse incoherente.[/]"
         )
-    if _es_kimi(session):
-        console.print(
-            "  [warning]⚠ El proveedor activo (kimi) fuerza temperature=1.0; "
-            "el cambio no llegará al modelo.[/]"
-        )
-
     if persistir:
         try:
             save_config(session.config)

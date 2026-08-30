@@ -1,15 +1,18 @@
 """Rich-based terminal renderer for Yggdrasil CLI.
 
 Provides themed output helpers: markdown, streaming text, tool-call cards,
-thinking panels, turn separators, welcome banners, and a theme system
-with Norse / Cyberpunk / Minimal / Lilith presets.
+thinking panels, turn separators, welcome banners, and Lilith's semantic
+visual language (identity, provider, activity phases, and accessibility).
 """
 
 from __future__ import annotations
 
 import json
+import os
+import sys
 import time
 from contextlib import contextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 
@@ -28,9 +31,72 @@ from rich.text import Text
 from rich.theme import Theme
 
 from lilith_cli import __version__
+from lilith_cli.session_telemetry import get_session_telemetry
 
 
 # ── Theme system ───────────────────────────────────────────────────
+
+
+_SEMANTIC_THEME_DEFAULTS: dict[str, str] = {
+    "accent": "bright_magenta",
+    "accent.soft": "dim magenta",
+    "muted": "grey50",
+    "provider": "bold bright_cyan",
+    "state.observe": "dim italic grey70",
+    "state.reason": "italic magenta",
+    "state.execute": "bold cyan",
+    "state.verify": "bold green",
+    "surface.title": "bold bright_magenta",
+}
+
+_SEMANTIC_PT_DEFAULTS: dict[str, str] = {
+    "prompt.label": "#9a8fa2 bold",
+    "provider": "#73d2de bold",
+    "usage": "#817889",
+    "info": "#9b8ea5",
+    "warning": "#d7a85b",
+    "focus": "#d95f8d bold",
+}
+
+
+def _lilith_palette(
+    primary: str,
+    secondary: str,
+    text: str,
+    muted: str,
+) -> dict[str, str]:
+    """Build a complete semantic palette for Lilith-native themes."""
+    return {
+        "realm": primary,
+        "frost": secondary,
+        "grove": "green3",
+        "bark": muted,
+        "rune": primary,
+        "error": "bold red3",
+        "success": "green3",
+        "warning": "yellow3",
+        "info": secondary,
+        "tool.name": f"bold {secondary}",
+        "tool.arg": f"dim {text}",
+        "tool.result": "green3",
+        "thinking": f"dim italic {primary}",
+        "usage": f"dim {muted}",
+        "model": f"bold {secondary}",
+        "status.ok": "green3",
+        "status.fail": "red3",
+        "status.warn": "yellow3",
+        "turn": primary,
+        "duration": f"dim italic {muted}",
+        "accent": primary,
+        "accent.soft": f"dim {primary}",
+        "muted": muted,
+        "provider": f"bold {secondary}",
+        "state.observe": f"dim italic {muted}",
+        "state.reason": f"italic {primary}",
+        "state.execute": f"bold {secondary}",
+        "state.verify": "bold green3",
+        "surface.title": f"bold {primary}",
+    }
 
 
 class CLITheme:
@@ -72,7 +138,7 @@ class CLITheme:
         self.name = name
         self.label = label
         self.description = description
-        self.theme = theme
+        self.theme = {**_SEMANTIC_THEME_DEFAULTS, **theme}
         self.banner = banner
         self.banner_title = banner_title
         self.banner_subtitle = banner_subtitle
@@ -81,7 +147,7 @@ class CLITheme:
         self.prompt_prefix = prompt_prefix
         self.thinking_label = thinking_label
         self.spinner_label = spinner_label
-        self.pt_style = pt_style or {
+        base_pt_style = pt_style or {
             "": "#e0e0e0",
             "prompt": "#ffd700 bold",
             "prompt.dots": "#888888",
@@ -89,6 +155,7 @@ class CLITheme:
             "completion-menu.completion.current": "bg:#0f3460 #ffd700",
             "auto-suggestion": "#555555 italic",
         }
+        self.pt_style = {**_SEMANTIC_PT_DEFAULTS, **base_pt_style}
 
 
 # ── Banner art ────────────────────────────────────────────────────
@@ -127,10 +194,148 @@ _LILITH_BANNER = f"""
   Demon of Information terminal
 """
 
+_OBSIDIAN_BANNER = f"""
+             ◇       ◇
+         L I L I T H
+       O B S I D I A N
+            v{__version__}
+"""
+
+_BLOOD_MOON_BANNER = f"""
+             ◖  ●  ◗
+         L I L I T H
+        B L O O D  M O O N
+            v{__version__}
+"""
+
+_VIOLET_VOID_BANNER = f"""
+             ◌  ◇  ◌
+         L I L I T H
+        V I O L E T  V O I D
+            v{__version__}
+"""
+
+_MONOCHROME_BANNER = f"""
+         L I L I T H  /  C L I
+                 v{__version__}
+"""
+
 
 # ── Theme presets ──────────────────────────────────────────────────
 
 THEMES: dict[str, CLITheme] = {
+    "obsidian": CLITheme(
+        name="obsidian",
+        label="Obsidian Moon",
+        description="Obsidiana, carmesí y plata — identidad principal de Lilith",
+        theme=_lilith_palette("#c94f7c", "#73d2de", "#e8e3ec", "#84798c"),
+        banner=_OBSIDIAN_BANNER,
+        banner_title="[surface.title]LILITH // SESIÓN[/]",
+        banner_subtitle="[muted]OBSIDIAN MOON · inteligencia abisal[/]",
+        border_style="#8f3f62",
+        rule_chars="─",
+        prompt_prefix="❯",
+        thinking_label="[state.reason]RAZONANDO[/]",
+        spinner_label="OBSERVANDO",
+        pt_style={
+            "": "#e8e3ec",
+            "prompt": "#d95f8d bold",
+            "prompt.label": "#9a8fa2 bold",
+            "prompt.dots": "#655c6b",
+            "provider": "#73d2de bold",
+            "usage": "#817889",
+            "info": "#9b8ea5",
+            "warning": "#d7a85b",
+            "focus": "#d95f8d bold",
+            "completion-menu": "bg:#151019 #e8e3ec",
+            "completion-menu.completion.current": "bg:#5b2940 #ffffff",
+            "auto-suggestion": "#655c6b italic",
+        },
+    ),
+    "blood-moon": CLITheme(
+        name="blood-moon",
+        label="Blood Moon",
+        description="Carmesí profundo y cobre — ceremonial, intenso y sobrio",
+        theme=_lilith_palette("#d14b57", "#d9a066", "#f0e4e1", "#8f7777"),
+        banner=_BLOOD_MOON_BANNER,
+        banner_title="[surface.title]LILITH // BLOOD MOON[/]",
+        banner_subtitle="[muted]voluntad · ejecución · memoria[/]",
+        border_style="#a63d49",
+        rule_chars="━",
+        prompt_prefix="❯",
+        thinking_label="[state.reason]RAZONANDO[/]",
+        spinner_label="OBSERVANDO",
+        pt_style={
+            "": "#f0e4e1",
+            "prompt": "#e35d6a bold",
+            "prompt.label": "#b89b99 bold",
+            "prompt.dots": "#6f5557",
+            "provider": "#d9a066 bold",
+            "usage": "#8f7777",
+            "info": "#b89b99",
+            "warning": "#d9a066",
+            "focus": "#e35d6a bold",
+            "completion-menu": "bg:#1b0e10 #f0e4e1",
+            "completion-menu.completion.current": "bg:#6e2630 #ffffff",
+            "auto-suggestion": "#6f5557 italic",
+        },
+    ),
+    "violet-void": CLITheme(
+        name="violet-void",
+        label="Violet Void",
+        description="Violeta espectral y azul frío — razonamiento y profundidad",
+        theme=_lilith_palette("#a56de2", "#65b8d6", "#ebe6f2", "#81778c"),
+        banner=_VIOLET_VOID_BANNER,
+        banner_title="[surface.title]LILITH // VIOLET VOID[/]",
+        banner_subtitle="[muted]silencio · profundidad · síntesis[/]",
+        border_style="#7c52aa",
+        rule_chars="─",
+        prompt_prefix="❯",
+        thinking_label="[state.reason]RAZONANDO[/]",
+        spinner_label="OBSERVANDO",
+        pt_style={
+            "": "#ebe6f2",
+            "prompt": "#b77cf2 bold",
+            "prompt.label": "#9c91a7 bold",
+            "prompt.dots": "#665d70",
+            "provider": "#65b8d6 bold",
+            "usage": "#81778c",
+            "info": "#9c91a7",
+            "warning": "#d1a35f",
+            "focus": "#b77cf2 bold",
+            "completion-menu": "bg:#130e1b #ebe6f2",
+            "completion-menu.completion.current": "bg:#553775 #ffffff",
+            "auto-suggestion": "#665d70 italic",
+        },
+    ),
+    "monochrome": CLITheme(
+        name="monochrome",
+        label="Monochrome",
+        description="Alto contraste sin dependencia del color — accesible y preciso",
+        theme=_lilith_palette("white", "grey85", "white", "grey58"),
+        banner=_MONOCHROME_BANNER,
+        banner_title="[surface.title]LILITH // MONOCHROME[/]",
+        banner_subtitle="[muted]alto contraste · movimiento reducido[/]",
+        border_style="white",
+        rule_chars="-",
+        prompt_prefix=">",
+        thinking_label="[state.reason]RAZONANDO[/]",
+        spinner_label="PROCESANDO",
+        pt_style={
+            "": "#ffffff",
+            "prompt": "#ffffff bold",
+            "prompt.label": "#bfbfbf bold",
+            "prompt.dots": "#808080",
+            "provider": "#ffffff bold",
+            "usage": "#a0a0a0",
+            "info": "#bfbfbf",
+            "warning": "#ffffff bold",
+            "focus": "#ffffff reverse",
+            "completion-menu": "bg:#111111 #ffffff",
+            "completion-menu.completion.current": "bg:#ffffff #000000",
+            "auto-suggestion": "#808080 italic",
+        },
+    ),
     "norse": CLITheme(
         name="norse",
         label="Norse",
@@ -307,14 +512,14 @@ THEMES: dict[str, CLITheme] = {
 
 # ── Active theme management ────────────────────────────────────────
 
-_active_theme_name: str = "norse"
+_active_theme_name: str = "obsidian"
 # Si ya apilamos un tema sobre el de base (ver set_theme).
 _theme_pushed: bool = False
 
 
 def get_theme() -> CLITheme:
     """Return the currently active CLI theme."""
-    return THEMES.get(_active_theme_name, THEMES["norse"])
+    return THEMES.get(_active_theme_name, THEMES["obsidian"])
 
 
 def set_theme(name: str) -> CLITheme:
@@ -347,10 +552,54 @@ def list_themes() -> list[CLITheme]:
     return list(THEMES.values())
 
 
+def render_theme_preview(theme: CLITheme) -> None:
+    """Render a representative, non-mutating preview of *theme*."""
+    sample = Table.grid(padding=(0, 1))
+    sample.add_column(width=13)
+    sample.add_column()
+    sample.add_row(Text("OBSERVANDO", style=theme.theme["state.observe"]), "leyendo contexto")
+    sample.add_row(Text("RAZONANDO", style=theme.theme["state.reason"]), "contrastando opciones")
+    sample.add_row(Text("EJECUTANDO", style=theme.theme["state.execute"]), "file_read  ·  18ms")
+    sample.add_row(Text("COMPLETADO", style=theme.theme["state.verify"]), "3 herramientas  ·  1.2s")
+
+    prompt = Text()
+    prompt.append("TÚ ", style=theme.pt_style.get("prompt.label", theme.border_style))
+    prompt.append(theme.prompt_prefix, style=theme.pt_style.get("prompt", theme.border_style))
+    prompt.append("  describe el siguiente cambio", style=theme.pt_style.get("", "white"))
+
+    console.print()
+    console.print(
+        Panel(
+            Group(prompt, Text(), sample),
+            title=f"[bold {theme.border_style}]{theme.label}[/]",
+            subtitle=f"[dim]{theme.name} · vista previa[/]",
+            border_style=theme.border_style,
+            expand=False,
+            padding=(1, 2),
+        )
+    )
+    console.print()
+
+
 # ── Initialise console with default theme ──────────────────────────
 
-YGGDRASIL_THEME = Theme(THEMES["norse"].theme)
-console = Console(theme=YGGDRASIL_THEME)
+YGGDRASIL_THEME = Theme(THEMES["obsidian"].theme)
+# Lilith deliberately uses a small Unicode visual vocabulary. Windows pipes
+# may still inherit cp1252 even when the interactive terminal supports UTF-8;
+# reconfigure only those legacy streams so redirected output remains valid.
+if os.name == "nt":
+    for _stream in (sys.stdout, sys.stderr):
+        _encoding = str(getattr(_stream, "encoding", "") or "").lower()
+        if "utf" not in _encoding and hasattr(_stream, "reconfigure"):
+            try:
+                _stream.reconfigure(encoding="utf-8", errors="replace")
+            except (AttributeError, OSError, ValueError):
+                pass
+# Rich's legacy Windows renderer raises UnicodeEncodeError for symbols such as
+# ◇ and ❯ when output is redirected through a non-UTF code page. The modern
+# renderer degrades those glyphs to the stream's replacement character instead
+# of crashing; Windows Terminal still renders the full UTF-8 identity.
+console = Console(theme=YGGDRASIL_THEME, legacy_windows=False)
 
 
 def print_json(payload: Any, **dumps_kwargs: Any) -> None:
@@ -418,18 +667,51 @@ def render_welcome(
     provider: str = "",
     tools_count: int = 0,
     has_memory: bool = False,
+    *,
+    project: str | None = None,
+    focus_mode: bool = False,
 ) -> None:
-    """Show the welcome banner using the active theme."""
+    """Show Lilith's session identity and readiness at REPL startup."""
     theme = get_theme()
+    project_name = project or Path.cwd().name
+
+    if focus_mode:
+        compact = Text()
+        compact.append("LILITH", style="surface.title")
+        compact.append("  /  ", style="muted")
+        compact.append((provider or "sin proveedor").upper(), style="provider")
+        if model:
+            compact.append(f" · {model}", style="model")
+        console.print(Panel(compact, border_style=theme.border_style, expand=False))
+        return
+
     # strip("\n") — a bare strip() would eat the first line's leading
     # spaces and break the ASCII-art alignment.
     lines = [line.rstrip() for line in theme.banner.strip("\n").splitlines()]
     banner_text = Text("\n".join(lines), style=f"bold {theme.border_style}")
 
+    identity = Table.grid(padding=(0, 2))
+    identity.add_column(style="muted", justify="right")
+    identity.add_column()
+    identity.add_row("PROVEEDOR", Text((provider or "—").upper(), style="provider"))
+    identity.add_row("MODELO", Text(model or "—", style="model"))
+    identity.add_row("PROYECTO", Text(project_name, style="accent.soft"))
+
+    runtime = Text()
+    runtime.append(f"{tools_count} herramientas", style="tool.name")
+    runtime.append("  ·  ", style="muted")
+    runtime.append("memoria online" if has_memory else "memoria offline", style=(
+        "status.ok" if has_memory else "status.warn"
+    ))
+    runtime.append("  ·  ", style="muted")
+    runtime.append(f"tema {theme.name}", style="accent.soft")
+
+    body = Group(banner_text, Text(), identity, Text(), runtime)
+
     console.print()
     console.print(
         Panel(
-            banner_text,
+            body,
             title=theme.banner_title,
             subtitle=theme.banner_subtitle,
             border_style=theme.border_style,
@@ -438,19 +720,13 @@ def render_welcome(
         ),
     )
 
-    # Session info line.
-    info_parts: list[str] = []
-    if model:
-        info_parts.append(f"Modelo: [model]{model}[/]")
-    if provider:
-        info_parts.append(f"Proveedor: [model]{provider}[/]")
-    if tools_count:
-        info_parts.append(f"Herramientas: {tools_count}")
-    mem_icon = "[status.ok]✓[/]" if has_memory else "[status.fail]✗[/]"
-    info_parts.append(f"Memoria: {mem_icon}")
-
-    console.print(f"[dim]{'  ·  '.join(info_parts)}[/]")
-    console.print("[dim]Escribe [bold cyan]/help[/] para ver los comandos disponibles.[/]")
+    hint = Text("Comandos: ", style="muted")
+    hint.append("/help", style="accent")
+    hint.append("  ·  apariencia: ", style="muted")
+    hint.append("/theme", style="accent")
+    hint.append("  ·  concentración: ", style="muted")
+    hint.append("/focus", style="accent")
+    console.print(hint)
     console.print()
 
 
@@ -473,14 +749,16 @@ def render_user_separator(text: str) -> None:
     label = text[:60] + "…" if len(text) > 60 else text
     label = label.replace("\n", " ")
     console.print()
-    console.print(Rule(f"[dim]▸ Tú[/]  [turn]{label}[/]", style="dim", characters="·"))
+    console.print(Rule(f"[muted]TÚ ❯[/]  [turn]{label}[/]", style="muted", characters="·"))
     console.print()
 
 
 def render_assistant_separator() -> None:
     """Show a labeled separator before the assistant's response."""
     theme = get_theme()
-    console.print(Rule("[dim]◂ Lilith[/]", style=theme.border_style, characters=theme.rule_chars))
+    console.print(
+        Rule("[surface.title]LILITH ◇[/]", style=theme.border_style, characters=theme.rule_chars)
+    )
     console.print()
 
 
@@ -503,7 +781,7 @@ def render_turn_end(duration: float, usage: dict[str, int] | None = None) -> Non
         parts.append(f"[usage]{prompt}↑ {completion}↓ {total}Σ[/]")
 
     if parts:
-        console.print(f"[dim]{'  ·  '.join(parts)}[/]")
+        console.print(f"[state.verify]◇ COMPLETADO[/]  [muted]{'  ·  '.join(parts)}[/]")
 
 
 # ── Markdown ────────────────────────────────────────────────────────
@@ -552,7 +830,7 @@ def build_stream_tail(text: str, tail_lines: int = 12) -> TailView:
 
 def render_error(text: str) -> None:
     """Show an error message in bold red."""
-    console.print(f"[error]✗ {text}[/]")
+    console.print(f"[error]FALLO[/]  [muted]·[/]  [error]{text}[/]")
 
 
 # ── Thinking / reasoning ────────────────────────────────────────────
@@ -573,7 +851,7 @@ def build_thinking_panel(text: str, *, tail_lines: int | None = None) -> Panel:
             display = "…\n" + "\n".join(lines[-tail_lines:])
     return Panel(
         Text(display, style="thinking"),
-        title=theme.thinking_label,
+        title="[state.reason]RAZONANDO[/]  [muted]· pensamiento del modelo[/]",
         border_style=theme.border_style,
         expand=False,
         padding=(0, 1),
@@ -592,7 +870,8 @@ def render_tool_call(name: str, args: dict[str, Any], result: str | None = None)
     """Show a tool execution card with name, args, and optional result."""
     # Build the header.
     header = Text()
-    header.append("⟡ ", style="bold cyan")
+    header.append("EJECUTANDO  ", style="state.execute")
+    header.append("·  ", style="muted")
     header.append(name, style="tool.name")
 
     # Args block.
@@ -615,7 +894,13 @@ def render_tool_call(name: str, args: dict[str, Any], result: str | None = None)
 
     renderable = Group(*body_parts) if body_parts else Text(args_text, style="tool.arg")
     console.print(
-        Panel(renderable, title=header, border_style="cyan", expand=False, padding=(0, 1)),
+        Panel(
+            renderable,
+            title=header,
+            border_style=get_theme().border_style,
+            expand=False,
+            padding=(0, 1),
+        ),
     )
 
 
@@ -819,7 +1104,7 @@ def render_cost(
 def render_context(session: Any, *, full: bool = False) -> None:
     """Render context usage as a Rich progress bar.
 
-    Reads ``session._total_usage``, ``session.history``,
+    Reads session telemetry, ``session.history``,
     ``session.config.model`` and, when *full=True*, also displays the
     breakdown of the system prompt, tools schema and history sizes.
     """
@@ -829,7 +1114,7 @@ def render_context(session: Any, *, full: bool = False) -> None:
     model = getattr(session.config, "model", "unknown")
     max_tokens = estimate_context_window(model)
 
-    usage = getattr(session, "_total_usage", {}) or {}
+    usage = get_session_telemetry(session).total_usage
     used = usage.get("total_tokens", 0) or usage.get("prompt_tokens", 0)
     percentage = min(used / max_tokens, 1.0) if max_tokens else 0.0
 
@@ -992,15 +1277,41 @@ def make_thinking_spinner() -> dict[str, Any]:
 
     label = Text()
     label.append(f"{prefix} ", style=f"bold {theme.border_style}")
-    label.append(theme.spinner_label, style="italic cyan")
-    label.append("…", style="dim")
+    label.append(theme.spinner_label, style="state.observe")
+    label.append("  ·  preparando contexto", style="muted")
 
-    status = Status(
-        label,
-        spinner="dots",
-        console=console,
-        speed=0.8,
+    reduced_motion = (
+        theme.name == "monochrome"
+        or os.environ.get("LILITH_REDUCED_MOTION", "").strip().lower()
+        in {"1", "true", "yes", "on"}
+        or os.environ.get("TERM", "").strip().lower() == "dumb"
     )
+
+    if reduced_motion:
+        class _StaticStatus:
+            """Status-compatible single frame for accessible terminals."""
+
+            def __init__(self, initial: Text) -> None:
+                self.label = initial
+
+            def __enter__(self) -> _StaticStatus:
+                console.print(self.label)
+                return self
+
+            def __exit__(self, *_args: object) -> None:
+                return None
+
+            def update(self, new_label: Text) -> None:
+                self.label = new_label
+
+        status: Any = _StaticStatus(label)
+    else:
+        status = Status(
+            label,
+            spinner="dots",
+            console=console,
+            speed=0.8,
+        )
 
     stop_event = threading.Event()
 
@@ -1012,8 +1323,7 @@ def make_thinking_spinner() -> dict[str, Any]:
         """Update the spinner label text."""
         label = Text()
         label.append(f"{prefix} ", style=f"bold {theme.border_style}")
-        label.append(new_text, style="italic cyan")
-        label.append("…", style="dim")
+        label.append(new_text.upper(), style="state.observe")
         status.update(label)
 
     return {

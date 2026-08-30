@@ -10,13 +10,9 @@ import os
 
 # Each preset may require one or more API keys; all must be present.
 keys_by_preset: dict[str, tuple[str, ...]] = {
-    "ejecutor-kimi": ("KIMI_API_KEY",),
-    "investigador-minimax": ("MINIMAX_API_KEY",),
     "batch-deepseek": ("DEEPSEEK_API_KEY",),
-    "orquestador-fugu": ("SAKANA_API_KEY",),
-    "opencode-glm52": ("OPENCODE_API_KEY",),
     "grok-research": ("XAI_API_KEY",),
-    "hf-glm52": ("HF_TOKEN",),
+    "orquestador-fugu": ("SAKANA_API_KEY",),
 }
 
 

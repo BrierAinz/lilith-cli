@@ -16,7 +16,14 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
-from .config import CONFIG_DIR, CONFIG_FILE, find_project_config, load_config
+from .config import (
+    CONFIG_DIR,
+    CONFIG_FILE,
+    find_project_config,
+    load_config,
+    require_supported_model,
+    require_supported_provider,
+)
 from .render import (
     console,
     get_theme,
@@ -25,6 +32,7 @@ from .render import (
     render_status,
     set_theme,
 )
+from .session_telemetry import get_session_telemetry
 
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -268,7 +276,8 @@ class QuickstartCommand(BaseCommand):
         sections.append("  [bold cyan]/status[/]              — estado general de la sesión")
         sections.append("  [bold cyan]/model[/] <modelo>      — cambia el modelo activo")
         sections.append("  [bold cyan]/provider[/] <provider> — cambia el proveedor LLM")
-        sections.append("  [bold cyan]/theme[/] <nombre>      — cambia el tema visual")
+        sections.append("  [bold cyan]/theme[/] <nombre>      — cambia o previsualiza la identidad visual")
+        sections.append("  [bold cyan]/focus[/] [on|off]      — oculta o restaura la telemetría visual")
         sections.append("  [bold cyan]/search[/] <query>      — busca en historial, archivos o proyectos")
         sections.append("  [bold cyan]/git[/] <subcomando>    — ejecuta operaciones de git")
         sections.append("  [bold cyan]/todos[/] add <tarea>   — gestiona tareas pendientes")
@@ -360,6 +369,7 @@ class CommandsCommand(BaseCommand):
             "bifrost",
             "config",
             "theme",
+            "focus",
             "agent",
         },
         "Memoria": {"memory"},
@@ -526,7 +536,14 @@ class ModelCommand(BaseCommand):
             console.print(f"[info]Proveedor: [model]{self.session.config.provider}[/]")
             return
 
-        new_model = args.strip()
+        try:
+            new_model = require_supported_model(
+                self.session.config.provider,
+                args.strip(),
+            )
+        except ValueError as exc:
+            render_error(str(exc))
+            return
         self.session.config.model = new_model
         # Re-initialise provider with the new model.
         from .providers import create_provider
@@ -550,16 +567,23 @@ class ProviderCommand(BaseCommand):
             console.print(f"[info]Perfiles: {providers}")
             return
 
-        new_provider = args.strip()
+        try:
+            new_provider = require_supported_provider(args.strip())
+        except ValueError as exc:
+            render_error(str(exc))
+            return
+        profile = self.session.config.providers.get(new_provider)
+        if profile is None:
+            render_error(f"Proveedor sin perfil configurado: {new_provider}")
+            return
+
         self.session.config.provider = new_provider
-        # Update model from profile if available.
-        profile = self.session.config.providers.get(new_provider.lower())
-        if profile and profile.model:
+        if profile.model:
             self.session.config.model = profile.model
             console.print(f"[success]✓ Modelo del perfil: [model]{profile.model}[/]")
-        if profile and profile.api_key:
+        if profile.api_key:
             self.session.config.api_key = profile.api_key
-        if profile and profile.base_url:
+        if profile.base_url:
             self.session.config.base_url = profile.base_url
 
         from .providers import create_provider
@@ -1925,15 +1949,10 @@ class ResumeCommand(BaseCommand):
 
         # Merge usage if available.
         loaded_usage = data.get("usage", {})
-        if loaded_usage:
-            for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
-                if key in loaded_usage:
-                    self.session._total_usage[key] += loaded_usage.get(key, 0)
-        for model, model_usage in data.get("per_model_usage", {}).items():
-            self.session._ensure_per_model_entry(model)
-            for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
-                self.session._per_model_usage[model][key] += model_usage.get(key, 0)
-            self.session._per_model_usage[model]["cost"] += model_usage.get("cost", 0.0)
+        get_session_telemetry(self.session).merge_usage(
+            loaded_usage,
+            data.get("per_model_usage", {}),
+        )
 
         console.print()
         console.print(
@@ -2105,7 +2124,24 @@ class ThemeCommand(BaseCommand):
     async def execute(self, args: str) -> None:
         from rich.table import Table
 
+        from .render import render_theme_preview
+
         arg = args.strip().lower()
+
+        # ── Preview without mutating or persisting ─────────────────
+        if arg.startswith("preview"):
+            parts = arg.split(maxsplit=1)
+            if len(parts) == 1 or not parts[1]:
+                render_error("Uso: /theme preview <nombre>")
+                return
+            target_name = parts[1]
+            target = next((item for item in list_themes() if item.name == target_name), None)
+            if target is None:
+                available = ", ".join(theme.name for theme in list_themes())
+                render_error(f"Tema desconocido: {target_name}. Disponibles: {available}")
+                return
+            render_theme_preview(target)
+            return
 
         # ── Current theme ─────────────────────────────────
         if arg in ("current", "actual"):
@@ -2120,14 +2156,14 @@ class ThemeCommand(BaseCommand):
         if not arg or arg in ("list", "ls", "lista"):
             current = get_theme()
             table = Table(
-                title="[bold]᛭ Temas Disponibles[/]",
+                title="[surface.title]LILITH · Temas Disponibles[/]",
                 show_lines=False,
                 border_style=current.border_style,
                 header_style=f"bold {current.border_style}",
             )
             table.add_column("Nombre", style="bold", min_width=10)
             table.add_column("Descripción", min_width=30)
-            table.add_column("Prefijo", min_width=4)
+            table.add_column("Prompt", min_width=6)
 
             for t in list_themes():
                 marker = " ◄" if t.name == current.name else ""
@@ -2141,7 +2177,7 @@ class ThemeCommand(BaseCommand):
             console.print(table)
             console.print(
                 f"\n[dim]Tema actual: [bold]{current.label}[/]. "
-                f"Usa /theme <nombre> para cambiar, /theme current para ver el activo.[/]",
+                f"Usa /theme <nombre> para cambiar o /theme preview <nombre>.[/]",
             )
             return
 
@@ -2192,12 +2228,51 @@ class ThemeCommand(BaseCommand):
 
 # Theme preview snippets for the switch confirmation.
 _THEME_DISPLAYS: dict[str, str] = {
+    "obsidian": ("◇ Obsidiana, carmesí y plata\n   La identidad principal de Lilith"),
+    "blood-moon": ("● Carmesí profundo y cobre\n   Ceremonial, intenso y sobrio"),
+    "violet-void": ("◌ Violeta espectral y azul frío\n   Profundidad para razonamiento y síntesis"),
+    "monochrome": ("> Alto contraste sin dependencia del color\n   Accesible y con movimiento reducido"),
     "norse": ("᛭ Runas doradas sobre fondo oscuro\n   Árboles ancestrales y mitología nórdica"),
     "cyberpunk": (
         "⟐ Neon cian y magenta sobre fondo negro\n   Señales digitales desde los nodos periféricos"
     ),
     "minimal": ("› Líneas limpias y silencio\n   Máxima legibilidad, cero decoración"),
 }
+
+
+class FocusCommand(BaseCommand):
+    """Toggle the compact, low-distraction REPL surface."""
+
+    name = "focus"
+    description = "Ocultar o restaurar telemetría visual de la sesión"
+    aliases = ["zen"]
+
+    async def execute(self, args: str) -> None:
+        arg = args.strip().lower()
+        current = bool(getattr(self.session, "_focus_mode", False))
+
+        if arg in ("", "toggle"):
+            enabled = not current
+        elif arg in ("on", "1", "true"):
+            enabled = True
+        elif arg in ("off", "0", "false"):
+            enabled = False
+        elif arg in ("status", "current"):
+            state = "ACTIVO" if current else "INACTIVO"
+            console.print(f"[info]focus: [bold]{state}[/]")
+            return
+        else:
+            render_error("Uso: /focus [on|off|toggle|status]")
+            return
+
+        self.session._focus_mode = enabled
+        if enabled:
+            console.print(
+                "[accent]FOCUS ACTIVO[/]  [muted]· telemetría oculta; "
+                "usa /focus off para restaurarla[/]"
+            )
+        else:
+            console.print("[state.verify]FOCUS DESACTIVADO[/]  [muted]· telemetría restaurada[/]")
 
 
 class ConfirmCommand(BaseCommand):
@@ -3115,7 +3190,7 @@ class MacroCommand(BaseCommand):
         console.print("  [bold cyan]/macro list[/]           — Listar macros guardadas")
         console.print("  [bold cyan]/macro stats[/]          — Ver estadísticas agregadas")
         console.print("  [bold cyan]/macro show <nombre>[/]  — Ver comandos de la macro")
-        console.print("  [bold cyan]/macro edit <nombre>[/]  — Editar en \$EDITOR")
+        console.print("  [bold cyan]/macro edit <nombre>[/]  — Editar en $EDITOR")
         console.print("  [bold cyan]/macro copy <origen> <copia>[/] — Copiar una macro")
         console.print("  [bold cyan]/macro rename <actual> <nuevo>[/] — Renombrar una macro")
         console.print("  [bold cyan]/macro import <archivo> [nombre][/]")
@@ -3200,14 +3275,13 @@ class MacroCommand(BaseCommand):
             console.print(f"[dim]  ▸ {cmd}[/]")
             # Record the executed command so playbacks don't appear as plain
             # user messages in the history.
-            if hasattr(self.session, "_command_history"):
-                self.session._command_history.append(
-                    {
-                        "name": "macro-step",
-                        "args": cmd,
-                        "timestamp": datetime.now(UTC).isoformat(),
-                    },
-                )
+            get_session_telemetry(self.session).record_command(
+                {
+                    "name": "macro-step",
+                    "args": cmd,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                },
+            )
             try:
                 await registry.dispatch(cmd)
             except SystemExit:
@@ -3890,7 +3964,7 @@ class SkillsCommand(BaseCommand):
                 desc_idx = parts.index("--description") + 1
                 if desc_idx < len(parts):
                     description = parts[desc_idx]
-            history = getattr(self.session, "_tool_call_history", [])
+            history = get_session_telemetry(self.session).tool_calls
             last = next((item for item in reversed(history) if item.get("name") == "delegate_subagent"), None)
             if last is None:
                 render_error("No hay una delegación anterior para guardar")
@@ -4039,7 +4113,7 @@ class SubagentsCommand(BaseCommand):
     _TEST_TIMEOUT_SECONDS = 20.0
     # Probe size: small enough to be cheap on every provider, large
     # enough to leave room for reasoning_content before the visible
-    # content. Models with chain-of-thought reasoning (Kimi, DeepSeek,
+    # content. Models with chain-of-thought reasoning (DeepSeek, Grok,
     # GLM-5.1) burn the budget on reasoning_content; with max_tokens=8
     # the visible ``content`` came back empty even though the call
     # succeeded, producing a false "respuesta vacía".
@@ -4211,7 +4285,7 @@ class SubagentsCommand(BaseCommand):
             elapsed = (time.perf_counter() - t0) * 1000
             row["latency_ms"] = int(elapsed)
             content = response.get("content") or ""
-            # Kimi / DeepSeek / GLM-5.1 may burn the whole budget on
+            # DeepSeek / Grok may burn the whole budget on
             # ``reasoning_content`` (chain-of-thought) and leave the
             # visible ``content`` empty. Treat that as "ok" but tag it
             # so the table can show "vacio (solo reasoning)" instead of
@@ -4402,6 +4476,7 @@ class CommandRegistry:
             CompactCommand,
             ResumeCommand,
             ThemeCommand,
+            FocusCommand,
             FileCommand,
             ExportCommand,
             BifrostCommand,
@@ -4446,14 +4521,13 @@ class CommandRegistry:
         cmd_args = parts[1] if len(parts) > 1 else ""
 
         # Record command usage for /metrics telemetry.
-        if hasattr(self.session, "_command_history"):
-            self.session._command_history.append(
-                {
-                    "name": cmd_name,
-                    "args": cmd_args,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                },
-            )
+        get_session_telemetry(self.session).record_command(
+            {
+                "name": cmd_name,
+                "args": cmd_args,
+                "timestamp": datetime.now(UTC).isoformat(),
+            },
+        )
 
         cmd = self.get(cmd_name)
         if cmd is None:

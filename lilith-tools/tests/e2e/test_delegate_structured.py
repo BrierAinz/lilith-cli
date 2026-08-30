@@ -83,23 +83,23 @@ def test_estructurado_batch_deepseek(delegate_tool, require_provider_keys) -> No
     )
 
 
-def test_estructurado_ejecutor_kimi(delegate_tool, require_provider_keys) -> None:
-    """ejecutor-kimi returns a validated structured dict."""
-    require_provider_keys("ejecutor-kimi")
+def test_estructurado_grok_research(delegate_tool, require_provider_keys) -> None:
+    """grok-research returns a validated structured dict."""
+    require_provider_keys("grok-research")
 
     result = delegate_tool.execute(
-        preset="ejecutor-kimi",
+        preset="grok-research",
         prompt=_STRUCTURED_PROMPT,
         structured=True,
         max_tokens=512,
     )
 
-    assert result.success, f"ejecutor-kimi structured failed — error={result.error!r}"
+    assert result.success, f"grok-research structured failed — error={result.error!r}"
 
     data = result.data or {}
     structured = data.get("structured")
     assert structured is not None, (
-        f"ejecutor-kimi structured run returned no `structured` key — data={data!r}"
+        f"grok-research structured run returned no `structured` key — data={data!r}"
     )
     assert isinstance(structured, dict), (
         f"`structured` must be a dict, got {type(structured).__name__}"

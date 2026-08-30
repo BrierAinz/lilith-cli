@@ -80,10 +80,26 @@ def test_delegate_registers_success_and_usage(monkeypatch, tmp_path: Path) -> No
         async def close(self):
             return None
 
-    profile = SimpleNamespace(model="fake-model", max_tokens=None)
-    cfg = SimpleNamespace(provider="fake", model="fake-model", providers={"fake": profile}, max_tokens=100, temperature=0.0)
+    profile = SimpleNamespace(
+        model="deepseek-v4-flash",
+        api_key="test-key",
+        base_url="https://api.deepseek.com/v1",
+        max_tokens=None,
+    )
+    cfg = SimpleNamespace(
+        provider="deepseek",
+        model="deepseek-v4-flash",
+        api_key="test-key",
+        base_url="https://api.deepseek.com/v1",
+        providers={"deepseek": profile},
+        max_tokens=100,
+        temperature=0.0,
+    )
     monkeypatch.setattr("lilith_cli.config.load_config", lambda: cfg)
-    monkeypatch.setattr("lilith_cli.main._load_subagent_presets", lambda config_path=None: {"fake-preset": {"provider": "fake"}})
+    monkeypatch.setattr(
+        "lilith_cli.main._load_subagent_presets",
+        lambda config_path=None: {"fake-preset": {"provider": "deepseek"}},
+    )
     monkeypatch.setattr("lilith_cli.providers.LLMProviderWrapper", lambda _cfg: Provider())
     state_path = tmp_path / "state.json"
     monkeypatch.setenv("YGGDRASIL_ORCHESTRATION_STATE", str(state_path))
@@ -112,10 +128,26 @@ def test_delegate_registers_failure(monkeypatch, tmp_path: Path) -> None:
         async def close(self):
             return None
 
-    profile = SimpleNamespace(model="fake-model", max_tokens=None)
-    cfg = SimpleNamespace(provider="fake", model="fake-model", providers={"fake": profile}, max_tokens=100, temperature=0.0)
+    profile = SimpleNamespace(
+        model="deepseek-v4-flash",
+        api_key="test-key",
+        base_url="https://api.deepseek.com/v1",
+        max_tokens=None,
+    )
+    cfg = SimpleNamespace(
+        provider="deepseek",
+        model="deepseek-v4-flash",
+        api_key="test-key",
+        base_url="https://api.deepseek.com/v1",
+        providers={"deepseek": profile},
+        max_tokens=100,
+        temperature=0.0,
+    )
     monkeypatch.setattr("lilith_cli.config.load_config", lambda: cfg)
-    monkeypatch.setattr("lilith_cli.main._load_subagent_presets", lambda config_path=None: {"fake-preset": {"provider": "fake"}})
+    monkeypatch.setattr(
+        "lilith_cli.main._load_subagent_presets",
+        lambda config_path=None: {"fake-preset": {"provider": "deepseek"}},
+    )
     monkeypatch.setattr("lilith_cli.providers.LLMProviderWrapper", lambda _cfg: Provider())
     state_path = tmp_path / "state.json"
     monkeypatch.setenv("YGGDRASIL_ORCHESTRATION_STATE", str(state_path))

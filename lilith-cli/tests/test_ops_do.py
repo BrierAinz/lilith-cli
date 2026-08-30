@@ -267,7 +267,7 @@ def test_run_do_router_miss_exits_three(
 
     code = ops_do.run_do(
         "task without a clear home",
-        channel="minimax",
+        channel="deepseek",
         timeout=30,
         db=bus_db,
         repo_root=fake_repo_root,

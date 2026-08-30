@@ -29,22 +29,22 @@ _PONG_PROMPT = (
 )
 
 
-def test_one_shot_pong_minimax(
+def test_one_shot_pong_deepseek(
     delegate_tool,
     require_provider_keys,
 ) -> None:
-    """m2 / MiniMax responds with PONG to a one-shot delegation."""
-    require_provider_keys("investigador-minimax")
+    """DeepSeek responds with PONG to a one-shot delegation."""
+    require_provider_keys("batch-deepseek")
 
     result = delegate_tool.execute(
-        preset="investigador-minimax",
+        preset="batch-deepseek",
         prompt=_PONG_PROMPT,
         structured=False,
         max_tokens=32,
     )
 
     assert result.success, (
-        f"one-shot investigador-minimax failed — error={result.error!r}"
+        f"one-shot batch-deepseek failed — error={result.error!r}"
     )
 
     data = result.data or {}
@@ -54,22 +54,22 @@ def test_one_shot_pong_minimax(
     )
 
 
-def test_one_shot_pong_kimi(
+def test_one_shot_pong_grok(
     delegate_tool,
     require_provider_keys,
 ) -> None:
-    """kimi responds with PONG to a one-shot delegation."""
-    require_provider_keys("ejecutor-kimi")
+    """Grok responds with PONG to a one-shot delegation."""
+    require_provider_keys("grok-research")
 
     result = delegate_tool.execute(
-        preset="ejecutor-kimi",
+        preset="grok-research",
         prompt=_PONG_PROMPT,
         structured=False,
         max_tokens=32,
     )
 
     assert result.success, (
-        f"one-shot ejecutor-kimi failed — error={result.error!r}"
+        f"one-shot grok-research failed — error={result.error!r}"
     )
 
     data = result.data or {}

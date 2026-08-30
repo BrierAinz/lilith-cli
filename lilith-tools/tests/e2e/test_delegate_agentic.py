@@ -48,17 +48,17 @@ def _agentic_prompt(workdir: Path, lang: str = "Spanish") -> str:
     )
 
 
-def test_agente_escribe_saludo_ejecutor_kimi(
+def test_agente_escribe_saludo_batch_deepseek(
     delegate_tool,
     tmp_workdir: Path,
     require_provider_keys,
 ) -> None:
-    """ejecutor-kimi runs agentic and writes saludo.txt into the workdir."""
-    require_provider_keys("ejecutor-kimi")
+    """batch-deepseek runs agentic and writes saludo.txt into the workdir."""
+    require_provider_keys("batch-deepseek")
     prompt = _agentic_prompt(tmp_workdir)
 
     result = delegate_tool.execute(
-        preset="ejecutor-kimi",
+        preset="batch-deepseek",
         prompt=prompt,
         agentic=True,
         workdir=str(tmp_workdir),
@@ -67,7 +67,7 @@ def test_agente_escribe_saludo_ejecutor_kimi(
 
     target = tmp_workdir / "saludo.txt"
     assert target.exists(), (
-        f"agentic ejecutor-kimi did not write saludo.txt — "
+        f"agentic batch-deepseek did not write saludo.txt — "
         f"success={result.success} error={result.error!r} "
         f"data_keys={list((result.data or {}).keys())}"
     )
@@ -88,17 +88,17 @@ def test_agente_escribe_saludo_ejecutor_kimi(
         ), data
 
 
-def test_agente_escribe_saludo_investigador_minimax(
+def test_agente_escribe_saludo_grok_research(
     delegate_tool,
     tmp_workdir: Path,
     require_provider_keys,
 ) -> None:
-    """investigador-minimax (provider m2) also writes the greeting file agentically."""
-    require_provider_keys("investigador-minimax")
+    """grok-research also writes the greeting file agentically."""
+    require_provider_keys("grok-research")
     prompt = _agentic_prompt(tmp_workdir, lang="Spanish")
 
     result = delegate_tool.execute(
-        preset="investigador-minimax",
+        preset="grok-research",
         prompt=prompt,
         agentic=True,
         workdir=str(tmp_workdir),
@@ -107,7 +107,7 @@ def test_agente_escribe_saludo_investigador_minimax(
 
     target = tmp_workdir / "saludo.txt"
     assert target.exists(), (
-        f"agentic investigador-minimax did not write saludo.txt — "
+        f"agentic grok-research did not write saludo.txt — "
         f"success={result.success} error={result.error!r}"
     )
     assert "Hola desde Hlidskjalf" in target.read_text(encoding="utf-8")
@@ -123,7 +123,7 @@ def test_agente_dry_run_sin_escribir_devuelve_error(
     Useful as a "smoke" that the agentic mini-loop terminates and
     doesn't write a partial file when no write tool is needed.
     """
-    require_provider_keys("ejecutor-kimi")
+    require_provider_keys("batch-deepseek")
 
     prompt = (
         "TASK: Respond with the single word PONG. Do NOT call any tool. "
@@ -131,7 +131,7 @@ def test_agente_dry_run_sin_escribir_devuelve_error(
     )
 
     result = delegate_tool.execute(
-        preset="ejecutor-kimi",
+        preset="batch-deepseek",
         prompt=prompt,
         agentic=True,
         workdir=str(tmp_workdir),
@@ -139,7 +139,7 @@ def test_agente_dry_run_sin_escribir_devuelve_error(
     )
 
     assert result.success, (
-        f"ejecutor-kimi dry-run failed — error={result.error!r} "
+        f"batch-deepseek dry-run failed — error={result.error!r} "
         f"data={json.dumps(result.data, default=str)[:500]}"
     )
     content = (result.data or {}).get("content") or ""

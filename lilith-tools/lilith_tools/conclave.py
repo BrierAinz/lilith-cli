@@ -49,10 +49,10 @@ DEFAULT_PRESET_TIMEOUT_SECONDS = 60.0
 MIN_PRESETS = 2
 MAX_PRESETS = 4
 # Default presets when the caller doesn't specify any. These are the two
-# research-flavoured presets from the standard Hlidskjalf roster — a
+# complementary presets from the standard Hlidskjalf roster — a
 # minimal, opinionated default that makes "drop me a conclave" useful
 # without forcing the orchestrator to memorise names.
-DEFAULT_PRESETS = ("investigador-minimax", "grok-research")
+DEFAULT_PRESETS = ("batch-deepseek", "grok-research")
 
 
 @ToolRegistry.register
@@ -76,7 +76,7 @@ class ConclaveTool(BaseTool):
         "Cada preset se ejecuta con la maquinaria estandar de "
         "delegate_subagent; un preset que falle o timeout no tumba al resto. "
         "Sintesis: la hace el orquestador a partir de data['responses']. "
-        "Presets por defecto: investigador-minimax + grok-research."
+        "Presets por defecto: batch-deepseek + grok-research."
     )
     parameters = {
         "question": {
@@ -92,7 +92,7 @@ class ConclaveTool(BaseTool):
             "items": {"type": "string"},
             "description": (
                 "Lista de 2-4 nombres de preset. Default: "
-                "['investigador-minimax', 'grok-research']."
+                "['batch-deepseek', 'grok-research']."
             ),
             "required": False,
         },

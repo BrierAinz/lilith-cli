@@ -16,7 +16,9 @@ import sys
 import time
 from typing import TYPE_CHECKING
 
+from .config import require_supported_model, require_supported_provider
 from .render import console, get_theme, render_error, set_theme
+from .session_telemetry import get_session_telemetry
 
 if TYPE_CHECKING:
     from .session_runtime import SessionRuntime
@@ -230,7 +232,7 @@ async def run_bench_command(session: SessionRuntime, args: str) -> None:  # noqa
     Examples:
         /bench
         /bench --turns 3
-        /bench --provider openai --model gpt-4o
+        /bench --provider grok --model grok-4.20-0309-non-reasoning
     """
     import argparse
 
@@ -244,22 +246,32 @@ async def run_bench_command(session: SessionRuntime, args: str) -> None:  # noqa
     except SystemExit:
         return
 
+    try:
+        selected_provider = require_supported_provider(parsed.provider)
+        selected_model = require_supported_model(selected_provider, parsed.model)
+    except ValueError as exc:
+        render_error(str(exc))
+        return
+
     from .providers import create_provider
 
     cfg = session.config
     bench_config = cfg
-    if parsed.provider != cfg.provider or parsed.model != cfg.model:
+    if selected_provider != cfg.provider or selected_model != cfg.model:
         # clone config and override provider/model for the benchmark run
         bench_config = cfg.model_copy() if hasattr(cfg, "model_copy") else cfg
-        bench_config.provider = parsed.provider
-        bench_config.model = parsed.model
+        profile = bench_config.providers[selected_provider]
+        bench_config.provider = selected_provider
+        bench_config.model = selected_model
+        bench_config.api_key = profile.api_key
+        bench_config.base_url = profile.base_url
 
     provider = create_provider(bench_config)
     latencies: list[float] = []
     ttft_values: list[float] = []
     total_tokens = 0
 
-    console.print(f"\n[bold realm]᛭ Benchmark[/] {parsed.model} @ {parsed.provider} ({parsed.turns} turnos)")
+    console.print(f"\n[bold realm]᛭ Benchmark[/] {selected_model} @ {selected_provider} ({parsed.turns} turnos)")
     for i in range(1, parsed.turns + 1):
         timer_start = time.perf_counter()
         first_token_time: float | None = None
@@ -267,7 +279,7 @@ async def run_bench_command(session: SessionRuntime, args: str) -> None:  # noqa
         try:
             async for event in provider.stream(
                 [{"role": "user", "content": parsed.prompt}],
-                model=parsed.model,
+                model=selected_model,
             ):
                 if event.get("content"):
                     if first_token_time is None:
@@ -301,11 +313,11 @@ async def run_bench_command(session: SessionRuntime, args: str) -> None:  # noqa
 
 def _command_metrics(session) -> dict[str, int]:
     """Count slash command invocations from session history."""
-    history = getattr(session, "_command_history", None)
-    if history is None:
+    telemetry = get_session_telemetry(session)
+    if not telemetry.status()["commands"]:
         return {}
     counts: dict[str, int] = {}
-    for entry in history:
+    for entry in telemetry.commands:
         name = entry.get("name")
         if name:
             counts[name] = counts.get(name, 0) + 1
@@ -314,11 +326,11 @@ def _command_metrics(session) -> dict[str, int]:
 
 def _file_edit_metrics(session) -> dict[str, int]:
     """Count file edits per path from session history."""
-    history = getattr(session, "_file_edit_history", None)
-    if history is None:
+    telemetry = get_session_telemetry(session)
+    if not telemetry.status()["files"]:
         return {}
     counts: dict[str, int] = {}
-    for entry in history:
+    for entry in telemetry.file_edits:
         path = entry.get("path")
         if path:
             counts[path] = counts.get(path, 0) + 1
@@ -530,27 +542,23 @@ def _telemetry_status(session) -> dict[str, bool]:
     'no events recorded yet' — the latter is a normal empty state,
     the former is an actionable hint.
     """
-    return {
-        "tools": hasattr(session, "_tool_call_history"),
-        "commands": hasattr(session, "_command_history"),
-        "files": hasattr(session, "_file_edit_history"),
-    }
+    return get_session_telemetry(session).status()
 
 
 def _tool_metrics(session) -> tuple[dict[str, int], dict[str, float], int]:
     """Aggregate tool call counts and average duration from session history.
 
     Returns (counts, averages, total). If the session was never wired with
-    telemetry tracking (``_tool_call_history`` attribute missing), returns
+    tool telemetry tracking, returns
     empty dicts + 0 — caller can detect this via ``_telemetry_status``.
     """
-    history = getattr(session, "_tool_call_history", None)
-    if history is None:
+    telemetry = get_session_telemetry(session)
+    if not telemetry.status()["tools"]:
         return {}, {}, 0
     counts: dict[str, int] = {}
     durations: dict[str, list[float]] = {}
     total = 0
-    for entry in history:
+    for entry in telemetry.tool_calls:
         name = entry.get("name")
         if not name:
             continue

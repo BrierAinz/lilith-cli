@@ -19,6 +19,69 @@ from pydantic import BaseModel, Field, field_validator
 logger = logging.getLogger(__name__)
 
 
+# Lilith's supported inference surface is intentionally small. Keep these
+# constants in config.py so every entry point and migration shares one catalog.
+SUPPORTED_PROVIDERS: tuple[str, ...] = ("deepseek", "grok", "sakana")
+DEFAULT_PROVIDER = "deepseek"
+DEFAULT_MODELS: dict[str, str] = {
+    "deepseek": "deepseek-v4-flash",
+    "grok": "grok-4.20-0309-non-reasoning",
+    "sakana": "fugu-ultra",
+}
+SUPPORTED_MODELS: dict[str, frozenset[str]] = {
+    "deepseek": frozenset({"deepseek-v4-flash", "deepseek-v4-pro"}),
+    "grok": frozenset(
+        {
+            "grok-4.20-0309-non-reasoning",
+            "grok-4.20-0309-reasoning",
+            "grok-4.20-multi-agent-0309",
+            "grok-4.3",
+            "grok-4.5",
+        }
+    ),
+    "sakana": frozenset(
+        {
+            "fugu",
+            "fugu-ultra",
+            "fugu-ultra-v1.0",
+            "fugu-ultra-v1.1",
+        }
+    ),
+}
+PROVIDER_BASE_URLS: dict[str, str] = {
+    "deepseek": "https://api.deepseek.com/v1",
+    "grok": "https://api.x.ai/v1",
+    "sakana": "https://api.sakana.ai/v1",
+}
+PROVIDER_ENV_KEYS: dict[str, str] = {
+    "deepseek": "DEEPSEEK_API_KEY",
+    "grok": "XAI_API_KEY",
+    "sakana": "SAKANA_API_KEY",
+}
+
+
+def require_supported_provider(name: str) -> str:
+    """Return a normalized provider name or reject unsupported backends."""
+    normalized = str(name or "").strip().lower()
+    if normalized not in SUPPORTED_PROVIDERS:
+        available = ", ".join(SUPPORTED_PROVIDERS)
+        raise ValueError(f"Proveedor no soportado: {name!r}. Disponibles: {available}")
+    return normalized
+
+
+def require_supported_model(provider: str, model: str) -> str:
+    """Validate that *model* belongs to Lilith's current provider catalog."""
+    normalized_provider = require_supported_provider(provider)
+    normalized_model = str(model or "").strip()
+    if normalized_model not in SUPPORTED_MODELS[normalized_provider]:
+        available = ", ".join(sorted(SUPPORTED_MODELS[normalized_provider]))
+        raise ValueError(
+            f"Modelo no soportado para {normalized_provider}: {model!r}. "
+            f"Disponibles: {available}"
+        )
+    return normalized_model
+
+
 # ── Pydantic models ────────────────────────────────────────────────
 
 
@@ -62,10 +125,6 @@ class ProviderProfile(BaseModel):
     doctor_timeout: float = Field(default=5.0, gt=0, le=60)
     circuit_breaker_failures: int = Field(default=2, ge=1, le=20)
     circuit_breaker_cooldown: float = Field(default=60.0, ge=1, le=86400)
-    # Provider-specific toggles. ``use_responses`` is honored by Sakana:
-    # when True, the wrapper POSTs to ``/v1/responses``. New generated
-    # configs set it to True; an explicit False keeps Chat Completions.
-    use_responses: bool | None = None
 
 
 class MCPServerConfig(BaseModel):
@@ -96,17 +155,13 @@ class MCPServerConfig(BaseModel):
 class YggdrasilConfig(BaseModel):
     """Root configuration model for the Yggdrasil CLI agent.
 
-    The default provider is **Sakana Fugu Ultra** (OpenAI-compatible
-    endpoint at ``https://api.sakana.ai/v1``) because Lilith is built
-    to act as an orchestrator that spawns and synthesises the work of
-    at least five sub-agents. Fugu Ultra's deep reasoning makes it
-    well suited for that synthesis role; the sub-agents themselves
-    run on lighter, cheaper models (MiniMax-M3, GLM-5.2, …) declared
-    in the ``providers:`` block below.
+    Lilith supports the OpenAI-compatible DeepSeek, xAI and Sakana Fugu
+    endpoints. DeepSeek remains the economical installation default; the
+    active provider is selected from the user's configuration.
     """
 
-    provider: str = "sakana"
-    model: str = "fugu-ultra"
+    provider: str = DEFAULT_PROVIDER
+    model: str = DEFAULT_MODELS[DEFAULT_PROVIDER]
     api_key: str | None = None
     base_url: str | None = None
     system_prompt: str = (
@@ -262,15 +317,13 @@ _DEFAULT_CONFIG_YAML = """\
 # See https://github.com/BrierAinz/Yggdrasil for docs
 #
 # Lilith acts as the orchestrator: it spawns, coordinates and
-# synthesises the work of at least five sub-agents. The default
-# provider is therefore **Sakana Fugu Ultra** (OpenAI-compatible
-# endpoint at https://api.sakana.ai/v1). Sub-agents keep their own
-# cheaper providers under the ``providers:`` block below.
+# synthesises sub-agent work. Its inference surface is deliberately
+# limited to DeepSeek, Grok and Sakana Fugu.
 
-provider: sakana
-model: fugu-ultra
-api_key: ${FUGU_API_KEY}
-base_url: https://api.sakana.ai/v1
+provider: deepseek
+model: deepseek-v4-flash
+api_key: ${DEEPSEEK_API_KEY}
+base_url: https://api.deepseek.com/v1
 
 system_prompt: >
   You are Lilith, the orchestrator of the Yggdrasil ecosystem.
@@ -333,50 +386,26 @@ retry_jitter: 0.25
 # ── Provider profiles ──────────────────────────────────────────
 # Each profile maps a short name (used by `--provider <name>` or by
 # the sub-agent system) to its own base_url / api_key / model.
-# Lilith's main session uses the top-level ``provider`` above
-# (Sakana Fugu Ultra); sub-agents pick one of the profiles below.
-#
-# Sakana exposes BOTH an OpenAI-compatible Chat Completions API and a
-# Responses API at /v1/responses. New configs use Responses by default;
-# set ``sakana.use_responses: false`` explicitly to use Chat Completions.
+# Lilith's main session can use these three provider profiles.
 providers:
 
-  # ── Sakana Fugu (the Lilith session) ──
-  # Responses API endpoint by default. Verified models:
-  # fugu, fugu-ultra, fugu-ultra-20260615.
+  # ── DeepSeek ──
+  deepseek:
+    api_key: ${DEEPSEEK_API_KEY}
+    base_url: https://api.deepseek.com/v1
+    model: deepseek-v4-flash
+
+  # ── xAI / Grok ──
+  grok:
+    api_key: ${XAI_API_KEY}
+    base_url: https://api.x.ai/v1
+    model: grok-4.20-0309-non-reasoning
+
+  # ── Sakana Fugu ──
   sakana:
-    api_key: ${FUGU_API_KEY}
+    api_key: ${SAKANA_API_KEY}
     base_url: https://api.sakana.ai/v1
     model: fugu-ultra
-    # Set false explicitly to use OpenAI-compatible Chat Completions.
-    use_responses: true
-
-  # ── Sub-agent profile: MiniMax (Anthropic-compatible) ──
-  # Used by sub-agents that need a strong general model. Verified
-  # models: MiniMax-M3, M2.7, M2.7-highspeed.
-  minimax:
-    api_key: ${MINIMAX_API_KEY}
-    base_url: https://api.minimax.io/anthropic
-    model: MiniMax-M3
-
-  # ── Sub-agent profile: OpenCode Go (GLM-5.2) ──
-  # OpenCode's gateway exposes many models; we hard-pin to glm-5.2.
-  opencode-go:
-    api_key: ${OPENCODE_API_KEY}
-    base_url: https://opencode.ai/zen/go/v1
-    model: glm-5.2
-
-  # Other examples (preserved from the previous default config):
-  # anthropic:
-  #   api_key: ${ANTHROPIC_API_KEY}
-  #   model: claude-sonnet-4-20250514
-  # ollama:
-  #   base_url: http://localhost:11434
-  #   model: llama3
-  # local:
-  # local:
-  #   base_url: http://localhost:1234/v1
-  #   model: local-model
 
 # ── MCP servers (stdio only this tanda) ───────────────────────────
 # Each entry spawns a subprocess at REPL boot and mounts every tool
@@ -445,6 +474,74 @@ def _merge_yaml_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[st
         else:
             result[key] = value
     return result
+
+
+def _restrict_provider_config(
+    raw_yaml: dict[str, Any],
+    *,
+    use_environment: bool = True,
+) -> dict[str, Any]:
+    """Migrate provider settings to the current provider allow-list.
+
+    Old configuration files may still select Kimi, MiniMax or local
+    profiles. They are ignored in memory and never reach an HTTP client. The
+    on-disk file remains untouched until the user explicitly saves or migrates
+    it, which avoids rewriting unrelated settings during a normal startup.
+    """
+    data = dict(raw_yaml)
+    raw_providers = data.get("providers")
+    if not isinstance(raw_providers, dict):
+        raw_providers = {}
+
+    filtered: dict[str, dict[str, Any]] = {}
+    removed: list[str] = []
+    for raw_name, raw_profile in raw_providers.items():
+        name = str(raw_name).strip().lower()
+        if name not in SUPPORTED_PROVIDERS:
+            removed.append(str(raw_name))
+            continue
+        profile = dict(raw_profile) if isinstance(raw_profile, dict) else {}
+        if not profile.get("api_key"):
+            profile["api_key"] = (
+                os.environ.get(PROVIDER_ENV_KEYS[name])
+                if use_environment
+                else f"${{{PROVIDER_ENV_KEYS[name]}}}"
+            )
+        if profile.get("model") not in SUPPORTED_MODELS[name]:
+            profile["model"] = DEFAULT_MODELS[name]
+        profile["base_url"] = PROVIDER_BASE_URLS[name]
+        filtered[name] = profile
+
+    for name in SUPPORTED_PROVIDERS:
+        if name in filtered:
+            continue
+        filtered[name] = {
+            "api_key": (
+                os.environ.get(PROVIDER_ENV_KEYS[name])
+                if use_environment
+                else f"${{{PROVIDER_ENV_KEYS[name]}}}"
+            ),
+            "base_url": PROVIDER_BASE_URLS[name],
+            "model": DEFAULT_MODELS[name],
+        }
+
+    selected = str(data.get("provider") or DEFAULT_PROVIDER).strip().lower()
+    if selected not in SUPPORTED_PROVIDERS:
+        selected = DEFAULT_PROVIDER
+    profile = filtered[selected]
+    model = str(data.get("model") or "").strip()
+    if model not in SUPPORTED_MODELS[selected]:
+        model = str(profile.get("model") or DEFAULT_MODELS[selected])
+
+    data["provider"] = selected
+    data["model"] = model
+    data["providers"] = filtered
+    data["api_key"] = profile.get("api_key")
+    data["base_url"] = PROVIDER_BASE_URLS[selected]
+
+    if removed:
+        logger.info("Ignoring unsupported provider profiles: %s", ", ".join(sorted(removed)))
+    return data
 
 
 def load_config(config_path: Path | str | None = None) -> YggdrasilConfig:
@@ -521,6 +618,7 @@ def load_config(config_path: Path | str | None = None) -> YggdrasilConfig:
             except Exception as exc:  # pragma: no cover — defensive
                 logger.warning("Could not load project config %s: %s", project_path, exc)
 
+    raw_yaml = _restrict_provider_config(raw_yaml)
     return YggdrasilConfig(**raw_yaml)
 
 
@@ -541,3 +639,50 @@ def save_config(config: YggdrasilConfig, config_path: Path | str | None = None) 
         data["memory"]["db_path"] = str(db_path)
 
     path.write_text(yaml.dump(data, default_flow_style=False, allow_unicode=True), encoding="utf-8")
+
+
+def migrate_provider_config_file(config_path: Path | str | None = None) -> Path:
+    """Persist the provider migration without resolving secret placeholders."""
+    path = Path(config_path) if config_path else CONFIG_FILE
+    raw_yaml = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    migrated = _restrict_provider_config(raw_yaml, use_environment=False)
+    path.write_text(
+        yaml.safe_dump(migrated, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    return path
+
+
+def activate_provider_config_file(
+    provider: str,
+    config_path: Path | str | None = None,
+    *,
+    model: str | None = None,
+) -> Path:
+    """Persist one supported provider as the active Lilith route.
+
+    The file is migrated first without resolving environment placeholders, so
+    this operation never copies an API key from the process into YAML.
+    """
+    selected = require_supported_provider(provider)
+    selected_model = require_supported_model(
+        selected,
+        model or DEFAULT_MODELS[selected],
+    )
+    path = Path(config_path) if config_path else CONFIG_FILE
+    raw_yaml = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    activated = _restrict_provider_config(raw_yaml, use_environment=False)
+    profile = activated["providers"][selected]
+    profile["model"] = selected_model
+    profile["base_url"] = PROVIDER_BASE_URLS[selected]
+    if not profile.get("api_key"):
+        profile["api_key"] = f"${{{PROVIDER_ENV_KEYS[selected]}}}"
+    activated["provider"] = selected
+    activated["model"] = selected_model
+    activated["api_key"] = profile["api_key"]
+    activated["base_url"] = PROVIDER_BASE_URLS[selected]
+    path.write_text(
+        yaml.safe_dump(activated, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    return path

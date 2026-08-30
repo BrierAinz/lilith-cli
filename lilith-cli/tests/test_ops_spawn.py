@@ -151,12 +151,7 @@ def test_ops_spawn_module_imports():
 
     assert callable(ops_spawn.spawn)
     assert isinstance(ops_spawn._CHANNELS, dict)
-    # _CHANNELS must contain the two documented channels: the
-    # sub-agent default (minimax) plus sakana, which is the
-    # orchestrator's own model but is still exposed as a channel so
-    # a sub-agent can opt into it. opencode-go was retired 2026-07-18.
-    assert {"minimax", "sakana"} <= set(ops_spawn._CHANNELS)
-    assert "opencode-go" not in ops_spawn._CHANNELS
+    assert set(ops_spawn._CHANNELS) == {"deepseek", "grok", "sakana"}
     # spawn_app is a cyclopts App whose name is the string 'spawn'.
     name = ops_spawn.spawn_app.name
     assert name == "spawn" or (isinstance(name, tuple) and name[0] == "spawn")
@@ -400,7 +395,7 @@ def test_unknown_channel_lists_valid_channels(
         ops_spawn.spawn(
             agent="hela",
             task="anything",
-            channel="deepseek",
+            channel="retired-provider",
             timeout=10,
             dry_run=True,  # even dry-run should reject early
             db=fake_repo_root / ".ygg" / "lilith_bus.db",
@@ -408,10 +403,9 @@ def test_unknown_channel_lists_valid_channels(
         )
     assert excinfo.value.code == 2
     out = capsys.readouterr().out
+    assert "retired-provider" in out
     assert "deepseek" in out
-    assert "minimax" in out
-    assert "sakana" in out
-    assert "opencode-go" not in out
+    assert "grok" in out
 
 
 def test_empty_agent_list_reports_no_cards(
@@ -426,7 +420,7 @@ def test_empty_agent_list_reports_no_cards(
         ops_spawn.spawn(
             agent="hela",
             task="anything",
-            channel="minimax",
+            channel="deepseek",
             timeout=10,
             dry_run=True,
             db=fake_repo_root_no_yaml / ".ygg" / "lilith_bus.db",

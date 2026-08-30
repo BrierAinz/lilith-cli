@@ -43,8 +43,14 @@ async def test_theme_command_list(capsys):
 
 
 @pytest.mark.asyncio
-async def test_theme_command_current_and_switch(capsys):
+async def test_theme_command_current_and_switch(capsys, monkeypatch, tmp_path):
     """/theme current shows the active theme; switching changes it."""
+    # ThemeCommand persists the selection.  Keep this test away from the
+    # developer's real ~/.yggdrasil/config.yaml.
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("theme: obsidian\n", encoding="utf-8")
+    monkeypatch.setattr("lilith_cli.config.CONFIG_FILE", config_file)
+
     # Start from a known state.
     set_theme("norse")
     cmd = ThemeCommand(_DummySession())

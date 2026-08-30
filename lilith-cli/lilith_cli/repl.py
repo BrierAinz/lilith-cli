@@ -1,6 +1,6 @@
-"""Interactive REPL for Yggdrasil CLI v6.0.
+"""Interactive REPL for Lilith CLI.
 
-Built on ``prompt_toolkit`` with Rich rendering, Norse-themed prompts,
+Built on ``prompt_toolkit`` with Rich rendering, Lilith-native prompts,
 streaming output with thinking panels, slash-command auto-completion,
 conversation history, and auto-save on exit.
 
@@ -225,6 +225,8 @@ _SLASH_COMMANDS = [
 
     "/theme",
     "/themes",
+    "/focus",
+    "/zen",
     "/file",
     "/f",
     "/format",
@@ -364,6 +366,69 @@ def _prompt_continuation(_width: int, _row: int, _column: int) -> list[tuple[str
     return [("class:prompt.dots", f"{get_theme().prompt_prefix} ... ")]
 
 
+def build_bottom_toolbar(
+    session: SessionRuntime,
+    *,
+    multiline: bool,
+    live_tokens: dict[str, int] | None = None,
+) -> list[tuple[str, str]]:
+    """Build the semantic REPL status line.
+
+    Focus mode intentionally keeps only the exit hint. The regular surface
+    exposes identity, interaction mode, context pressure, estimated cost,
+    turn count, active plan, and non-default agent mode.
+    """
+    theme = get_theme()
+    if bool(getattr(session, "_focus_mode", False)):
+        return [
+            ("class:focus", " FOCUS "),
+            ("class:prompt.label", "  TÚ "),
+            ("class:prompt", theme.prompt_prefix),
+            ("class:auto-suggestion", "  /focus off para restaurar telemetría "),
+        ]
+
+    from .providers import estimate_context_window, estimate_cost
+
+    tokens = live_tokens or {}
+    total_usage = getattr(session, "total_usage", {}) or {}
+    prompt_tokens = int(tokens.get("prompt") or total_usage.get("prompt_tokens", 0))
+    completion_tokens = int(
+        tokens.get("completion") or total_usage.get("completion_tokens", 0)
+    )
+    total_tokens = int(tokens.get("total") or total_usage.get("total_tokens", 0))
+    turns = int(tokens.get("turns", 0))
+    model = str(getattr(session.config, "model", "—"))
+    provider = str(getattr(session.config, "provider", "—")).upper()
+    context_window = estimate_context_window(model)
+    context_pct = min(100.0, (total_tokens / context_window * 100)) if context_window else 0.0
+    cost = estimate_cost(model, prompt_tokens, completion_tokens)
+    input_mode = "MULTI" if multiline else "SINGLE"
+
+    parts: list[tuple[str, str]] = [
+        ("class:provider", f" LILITH · {provider}/{model} "),
+        ("", "  "),
+        ("class:prompt", f"{theme.prompt_prefix} {input_mode}"),
+        ("", "  "),
+        ("class:usage", f"CTX {context_pct:.1f}% · {total_tokens} tok · ${cost:.4f} · T{turns}"),
+    ]
+
+    plan_progress = session.get_plan_progress_str()
+    if plan_progress:
+        parts.extend((("", "  "), ("class:info", plan_progress)))
+
+    agent_mode = getattr(session, "agent_mode", "default")
+    if agent_mode and agent_mode != "default":
+        parts.extend((("", "  "), ("class:warning", f"MODO {agent_mode}")))
+
+    parts.extend(
+        (
+            ("", "  "),
+            ("class:auto-suggestion", "Alt+Enter nueva línea · Ctrl+O multiline · /focus"),
+        )
+    )
+    return parts
+
+
 # ── Clipboard helpers ───────────────────────────────────────────────
 
 
@@ -464,7 +529,7 @@ def _auto_save_conversation(session: SessionRuntime) -> Path | None:
         "provider": session.config.provider,
         "messages": session.history,
         "usage": session.total_usage,
-        "per_model_usage": session._per_model_usage,
+        "per_model_usage": session.per_model_usage,
     }
     try:
         filepath.write_text(
@@ -551,18 +616,22 @@ async def run_repl(session: SessionRuntime) -> None:
         from .config import CONFIG_FILE
 
         _raw = _yaml.safe_load(CONFIG_FILE.read_text(encoding="utf-8")) or {}
-        _saved_theme = _raw.get("theme", "norse")
+        _saved_theme = _raw.get("theme", "obsidian")
         if _saved_theme in [t.name for t in list_themes()]:
             set_theme(_saved_theme)
     except Exception:
         pass  # Fall back to default theme.
 
     # ── Render welcome ────────────────────────────────────────────
+    if not hasattr(session, "_focus_mode"):
+        session._focus_mode = False
     render_welcome(
         model=session.config.model,
         provider=session.config.provider,
         tools_count=len(session.get_tool_descriptions()),
         has_memory=session.memory is not None,
+        project=Path.cwd().name,
+        focus_mode=bool(session._focus_mode),
     )
     console.print()
 
@@ -660,40 +729,12 @@ async def run_repl(session: SessionRuntime) -> None:
     _live_tokens = {"prompt": 0, "completion": 0, "total": 0, "turns": 0}
 
     def _bottom_toolbar() -> list[tuple[str, str]]:
-        """Dynamic bottom toolbar showing input mode, turns, and token usage."""
-        t = get_theme()
-        mode = (
-            f"{t.prompt_prefix} MULTILINE"
-            if _multiline_mode["active"]
-            else f"{t.prompt_prefix} SINGLE"
+        """Resolve the toolbar dynamically so /theme and /focus apply at once."""
+        return build_bottom_toolbar(
+            session,
+            multiline=_multiline_mode["active"],
+            live_tokens=_live_tokens,
         )
-        parts = [
-            ("class:prompt", mode),
-            ("", "  "),
-            ("class:auto-suggestion", "Alt+Enter: nueva línea  Ctrl+O: toggle multiline"),
-        ]
-        # Show token bar if we have usage data.
-        s = _live_tokens
-        if s["total"] > 0:
-            parts.append(("", "  "))
-            parts.append(
-                ("class:usage", f"Tokens: {s['prompt']}↑ {s['completion']}↓ {s['total']}Σ"),
-            )
-            parts.append(("", " "))
-            parts.append(("class:usage", f"Turn: {s['turns']}"))
-
-        # Show plan progress when there's an active plan.
-        plan_progress = session.get_plan_progress_str()
-        if plan_progress:
-            parts.append(("", "  "))
-            parts.append(("class:info", plan_progress))
-
-        # Show agent mode in the bottom toolbar.
-        agent_mode = getattr(session, "agent_mode", "default")
-        if agent_mode and agent_mode != "default":
-            parts.append(("", "  "))
-            parts.append(("class:warning", f"Modo: {agent_mode}"))
-        return parts
 
     prompt_session: PromptSession = PromptSession(
         history=history,
@@ -753,11 +794,10 @@ async def run_repl(session: SessionRuntime) -> None:
         while True:
             # Build prompt with turn counter and theme prefix.
             turn_number += 1
-            model_name = session.config.model
             current_theme = get_theme()
             prompt_formatted = [
-                ("class:prompt", f"{current_theme.prompt_prefix} {model_name}"),
-                ("", ": "),
+                ("class:prompt.label", "TÚ "),
+                ("class:prompt", f"{current_theme.prompt_prefix} "),
             ]
 
             try:
@@ -772,7 +812,7 @@ async def run_repl(session: SessionRuntime) -> None:
                 continue
             except EOFError:
                 # Ctrl+D: exit.
-                console.print("\n[dim]Odin te guíe. Hasta la próxima.[/]")
+                console.print("\n[muted]El umbral queda abierto.[/]")
                 break
 
             text = user_input.strip()
@@ -1203,7 +1243,7 @@ async def _process_with_streaming(
                     if trace is not None:
                         trace.handle(event)
 
-                    # ── Reasoning (Kimi / GLM-5.1 / DeepSeek thinking) ──
+                    # ── Reasoning (DeepSeek / Grok thinking) ──
                     if event_type == "reasoning":
                         chunk = event.get("content", "")
                         if chunk:
@@ -1342,7 +1382,7 @@ async def _process_with_streaming(
                         # Also render the tool call card now that we have the result,
                         # so users see the arguments that produced it.
                         render_tool_call(
-                            event["name"], event.get("arguments", {}), result=event["content"]
+                            event["name"], event.get("arguments", {})
                         )
 
                     # ── Turn complete ─────────────────────────────────────

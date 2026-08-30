@@ -26,8 +26,8 @@ class _Cfg:
 
     def __init__(
         self,
-        model: str = "test-model",
-        provider: str = "test",
+        model: str = "deepseek-v4-flash",
+        provider: str = "deepseek",
         providers: dict | None = None,
         api_key: str = "test-key",
     ) -> None:
@@ -52,7 +52,10 @@ class _Session:
 @pytest.mark.asyncio
 async def test_provider_command_shows_current(capsys):
     """Empty args → /provider shows current provider + available profiles."""
-    cfg = _Cfg(provider="kimi", providers={"kimi": SimpleNamespace(model="k3")})
+    cfg = _Cfg(
+        provider="deepseek",
+        providers={"deepseek": SimpleNamespace(model="deepseek-v4-flash")},
+    )
     sess = _Session(cfg)
 
     cmd = ProviderCommand(sess)
@@ -60,7 +63,7 @@ async def test_provider_command_shows_current(capsys):
     await cmd.execute("")
 
     out = capsys.readouterr().out
-    assert "kimi" in out
+    assert "deepseek" in out
     assert "Perfiles" in out
 
 
@@ -69,9 +72,11 @@ async def test_provider_command_switch_mutates_config():
     """/provider <name> switches the active provider, swaps the provider
     object, and pulls model/api_key from the profile when present."""
     profile = SimpleNamespace(
-        model="k3-new", api_key="k-new", base_url="https://x"
+        model="grok-4.20-0309-reasoning",
+        api_key="grok-key",
+        base_url="https://api.x.ai/v1",
     )
-    cfg = _Cfg(provider="old", providers={"new": profile})
+    cfg = _Cfg(provider="deepseek", providers={"grok": profile})
     sess = _Session(cfg)
 
     # Stub out the factory so we don't try to construct a real client.
@@ -80,29 +85,32 @@ async def test_provider_command_switch_mutates_config():
         "lilith_cli.providers.create_provider",
         return_value=fake_provider,
     ) as factory:
-        await ProviderCommand(sess).execute("new")
+        await ProviderCommand(sess).execute("grok")
 
-    assert sess.config.provider == "new"
-    assert sess.config.model == "k3-new"
-    assert sess.config.api_key == "k-new"
-    assert sess.config.base_url == "https://x"
+    assert sess.config.provider == "grok"
+    assert sess.config.model == "grok-4.20-0309-reasoning"
+    assert sess.config.api_key == "grok-key"
+    assert sess.config.base_url == "https://api.x.ai/v1"
     assert sess.provider is fake_provider
     factory.assert_called_once_with(sess.config)
 
 
 @pytest.mark.asyncio
-async def test_provider_command_unknown_profile_keeps_model():
-    """Switching to a provider not in profiles keeps the current model
-    (no profile.model to copy from) but still swaps the active provider."""
-    cfg = _Cfg(model="keep-me", providers={})
+async def test_provider_command_rejects_unknown_provider(capsys):
+    """An unsupported provider is rejected without mutating the session."""
+    cfg = _Cfg(model="deepseek-v4-flash", providers={})
     sess = _Session(cfg)
 
     fake_provider = MagicMock()
-    with patch("lilith_cli.providers.create_provider", return_value=fake_provider):
+    with patch(
+        "lilith_cli.providers.create_provider", return_value=fake_provider
+    ) as factory:
         await ProviderCommand(sess).execute("mystery")
 
-    assert sess.config.provider == "mystery"
-    assert sess.config.model == "keep-me"
+    assert sess.config.provider == "deepseek"
+    assert sess.config.model == "deepseek-v4-flash"
+    factory.assert_not_called()
+    assert "no soportado" in capsys.readouterr().out.lower()
 
 
 # ── RedoCommand ──────────────────────────────────────────────────────

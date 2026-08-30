@@ -44,7 +44,7 @@ def pytest_configure(config: pytest.Config) -> None:
 # ── 2. Env-key skip helper ─────────────────────────────────────────────
 #
 # Each e2e test passes the env var name that gates it (e.g.
-# ``KIMI_API_KEY`` for ``ejecutor-kimi``). The fixture below returns
+# ``DEEPSEEK_API_KEY`` for ``batch-deepseek``). The fixture below returns
 # a skip-marker when the env var is absent, so a missing key never
 # blocks CI or local development runs of the non-e2e suite. When the
 # env var IS set, the call is a no-op and the test runs against the
@@ -53,7 +53,7 @@ def pytest_configure(config: pytest.Config) -> None:
 # Usage::
 #
 #     def test_x(require_env):
-#         require_env("KIMI_API_KEY")
+#         require_env("DEEPSEEK_API_KEY")
 #         ...  # real network call
 
 @pytest.fixture
@@ -62,7 +62,7 @@ def require_env():
 
     Multiple env keys can be required in one call (all must be set)::
 
-        require_env("KIMI_API_KEY", "OPENCODE_API_KEY")
+        require_env("DEEPSEEK_API_KEY", "XAI_API_KEY")
     """
     missing: list[str] = []
 

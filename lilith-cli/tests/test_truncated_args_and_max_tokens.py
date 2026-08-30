@@ -175,8 +175,15 @@ def test_delegate_injects_no_tools_system_line(monkeypatch):
             pass
 
     def _fake_load_config():
-        cfg = YggdrasilConfig(provider="local", model="local-model")
-        cfg.providers = {"local": ProviderProfile(api_key="x", base_url="http://x", model="local-model")}
+        cfg = YggdrasilConfig(provider="deepseek", model="deepseek-v4-flash")
+        cfg.providers = {
+            "deepseek": ProviderProfile(
+                provider="deepseek",
+                api_key="x",
+                base_url="https://api.deepseek.com/v1",
+                model="deepseek-v4-flash",
+            )
+        }
         return cfg
 
     # LLMProviderWrapper is imported lazily inside delegate.execute; patch
@@ -190,8 +197,8 @@ def test_delegate_injects_no_tools_system_line(monkeypatch):
         "lilith_cli.main._load_subagent_presets",
         lambda config_path=None: {
             "fake-preset": {
-                "provider": "local",
-                "model": "local-model",
+                "provider": "deepseek",
+                "model": "deepseek-v4-flash",
                 "temperature": 0.5,
                 "system_prompt": "You are a fake preset.",
             }

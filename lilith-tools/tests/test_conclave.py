@@ -159,10 +159,10 @@ class TestConclaveHappyPath:
             assert call["prompt"] == "Compare the trade-offs"
 
     def test_default_presets_when_unspecified(self, monkeypatch, tmp_path):
-        """No `presets` kwarg → uses investigador-minimax + grok-research."""
+        """No `presets` kwarg → uses DeepSeek + Grok."""
         monkeypatch.chdir(tmp_path)
         stub = _StubDelegate({
-            "investigador-minimax": _ok_result("investigador-minimax", "m1", "A"),
+            "batch-deepseek": _ok_result("batch-deepseek", "deepseek-v4-flash", "A"),
             "grok-research": _ok_result("grok-research", "grok", "B"),
         })
         _install_stub(monkeypatch, stub)
@@ -171,7 +171,7 @@ class TestConclaveHappyPath:
 
         assert result.success is True
         assert result.data["presets_requested"] == [
-            "investigador-minimax", "grok-research"
+            "batch-deepseek", "grok-research"
         ]
 
     def test_structured_true_forwards_flag(self, monkeypatch, tmp_path):

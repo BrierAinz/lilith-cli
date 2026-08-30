@@ -26,10 +26,9 @@ pre-tanda-2 behaviour exactly):
 
 The agentic mode also accepts ``structured=True``, which asks the final
 assistant turn to emit a JSON object matching
-:data:`lilith_tools.task_schema.TASK_SCHEMA`. Validation is local so it
-works on every provider; OpenAI-compat additionally receives a
-``response_format=json_schema`` payload when the preset's provider isn't
-the Anthropic path.
+:data:`lilith_tools.task_schema.TASK_SCHEMA`. Validation is local for both
+supported providers and the request also receives a
+``response_format=json_schema`` payload.
 
 Design decision: the agentic mini-loop is implemented locally in this
 module rather than reusing ``AgentSession`` from ``lilith_cli.agent``.
@@ -455,13 +454,9 @@ class DelegateSubagentTool(BaseTool):
     timeout_seconds = 180
     description = (
         "Delegar una tarea autocontenida a un sub-agente y devolver su respuesta. "
-        "Presets disponibles: ejecutor-kimi (loops largos, scripting, refactors); "
-        "investigador-minimax (documentos largos, research multi-fuente); "
-        "batch-deepseek (volumen, boilerplate, conversiones masivas); "
-        "orquestador-fugu (deep research, síntesis, decisiones de arquitectura); "
-        "opencode-glm52 (trabajo genérico barato); "
-        "grok-research (contexto 1M, research); "
-        "hf-glm52 (GLM-5.2 vía HuggingFace router, ejecutor genérico). "
+        "Presets disponibles: batch-deepseek (volumen, boilerplate y código); "
+        "grok-research (contexto largo, research y segunda opinión); "
+        "orquestador-fugu (orquestación y síntesis con Sakana). "
         "Usala para trabajo que otro modelo puede resolver solo: el sub-agente "
         "NO ve esta conversación, así que el prompt debe incluir todo el contexto. "
         "agentic=True activa un mini-loop con file_read/file_write/file_append/"
@@ -474,9 +469,8 @@ class DelegateSubagentTool(BaseTool):
         "preset": {
             "type": "string",
             "description": (
-                "Nombre del preset de Hlidskjalf: ejecutor-kimi | "
-                "investigador-minimax | batch-deepseek | orquestador-fugu | "
-                "opencode-glm52 | grok-research"
+                "Nombre del preset de Hlidskjalf: batch-deepseek | "
+                "grok-research | orquestador-fugu"
             ),
             "required": True,
         },
@@ -590,7 +584,11 @@ class DelegateSubagentTool(BaseTool):
         workdir_arg = kwargs.get("workdir") or ""
 
         try:
-            from lilith_cli.config import load_config
+            from lilith_cli.config import (
+                load_config,
+                require_supported_model,
+                require_supported_provider,
+            )
             from lilith_cli.main import _load_subagent_presets
             from lilith_cli.providers import LLMProviderWrapper
         except ImportError as exc:  # pragma: no cover — cli not installed
@@ -611,7 +609,12 @@ class DelegateSubagentTool(BaseTool):
 
         preset = presets[preset_name] or {}
         cfg = load_config()
-        provider_name = str(preset.get("provider") or cfg.provider).lower()
+        try:
+            provider_name = require_supported_provider(
+                str(preset.get("provider") or cfg.provider)
+            )
+        except ValueError as exc:
+            return ToolResult(success=False, data=None, error=str(exc))
         if provider_name not in (cfg.providers or {}):
             return ToolResult(
                 success=False,
@@ -624,7 +627,15 @@ class DelegateSubagentTool(BaseTool):
 
         profile = cfg.providers[provider_name]
         cfg.provider = provider_name
-        cfg.model = preset.get("model") or profile.model or cfg.model
+        try:
+            cfg.model = require_supported_model(
+                provider_name,
+                str(preset.get("model") or profile.model or cfg.model),
+            )
+        except ValueError as exc:
+            return ToolResult(success=False, data=None, error=str(exc))
+        cfg.api_key = profile.api_key
+        cfg.base_url = profile.base_url
         if preset.get("max_tokens") is not None:
             cfg.max_tokens = int(preset["max_tokens"])
         elif profile.max_tokens is not None:
@@ -723,10 +734,7 @@ class DelegateSubagentTool(BaseTool):
         """Return the OpenAI-compat ``response_format`` payload for the
         structured task schema, or ``None`` to fall back to prompt-only.
 
-        The wrapper already passes ``response_format`` through when the
-        provider speaks OpenAI's wire format; the Anthropic-compat path
-        builds its own payload and ignores this key, so we keep it
-        universal.
+        Both supported providers use the same compatible wire format.
         """
         return {
             "type": "json_schema",
@@ -786,10 +794,8 @@ class DelegateSubagentTool(BaseTool):
             nonlocal final_content, turns_used, partial
             provider = LLMProviderWrapper(cfg)
             try:
-                # Force response_format when structured and provider is
-                # OpenAI-compat; the wrapper passes it through to the
-                # payload. Anthropic-compat / Sakana-Responses fall back
-                # to the prompt-only instruction already in system_prompt.
+                # Force response_format when structured; the wrapper passes
+                # it through to the compatible provider payload.
                 extra_kwargs: dict[str, Any] = {}
                 if structured:
                     rf = self._provider_response_format()

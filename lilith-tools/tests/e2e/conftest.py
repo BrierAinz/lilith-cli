@@ -142,8 +142,8 @@ def require_provider_keys():
     presets; the union of required env keys is what gates the run.
 
         def test_x(require_provider_keys):
-            require_provider_keys("ejecutor-kimi")
-            ...  # real network call to the kimi provider
+            require_provider_keys("batch-deepseek")
+            ...  # real network call to DeepSeek
     """
     from ._providers import missing_keys_for
 

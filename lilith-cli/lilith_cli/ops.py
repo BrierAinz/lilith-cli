@@ -286,7 +286,7 @@ def claim(
         str,
         Parameter(
             name=["--claimer", "-c"],
-            help="Claimer name (e.g. 'skadi', 'sakana')",
+            help="Claimer name (e.g. 'skadi', 'lilith')",
         ),
     ],
     db: Annotated[

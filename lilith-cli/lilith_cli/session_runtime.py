@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 if TYPE_CHECKING:
     from .config import YggdrasilConfig
     from .providers import LLMProviderWrapper
+    from .session_telemetry import TelemetryRuntime
 
 
 class SessionRuntime(Protocol):
@@ -82,6 +83,16 @@ class SessionRuntime(Protocol):
     @property
     def total_usage(self) -> dict[str, int]:
         """Return aggregate token usage."""
+        ...
+
+    @property
+    def per_model_usage(self) -> dict[str, dict[str, Any]]:
+        """Return token and cost usage grouped by model."""
+        ...
+
+    @property
+    def telemetry(self) -> TelemetryRuntime:
+        """Return the session's usage and activity telemetry."""
         ...
 
 

@@ -427,17 +427,17 @@ def test_delegate_tool_path_records_in_orchestration_state(
     # lilith-tools/tests/test_delegate_subagent.py).
     from lilith_cli.config import ProviderProfile, YggdrasilConfig
 
-    cfg = YggdrasilConfig(provider="kimi", model="kimi-for-coding")
+    cfg = YggdrasilConfig(provider="deepseek", model="deepseek-v4-flash")
     cfg.providers = {
-        "kimi": ProviderProfile(
-            provider="kimi", model="kimi-for-coding",
+        "deepseek": ProviderProfile(
+            provider="deepseek", model="deepseek-v4-flash",
             api_key="k", max_tokens=4096,
         ),
     }
     presets = {
-        "ejecutor-kimi": {
-            "provider": "kimi",
-            "model": "kimi-for-coding",
+        "batch-deepseek": {
+            "provider": "deepseek",
+            "model": "deepseek-v4-flash",
             "temperature": 0.3,
             "max_tokens": 4096,
             "system_prompt": "stub",
@@ -459,6 +459,8 @@ def test_delegate_tool_path_records_in_orchestration_state(
 
     cfg_mod = types.ModuleType("lilith_cli.config")
     cfg_mod.load_config = lambda: cfg  # type: ignore[attr-defined]
+    cfg_mod.require_supported_provider = lambda name: name  # type: ignore[attr-defined]
+    cfg_mod.require_supported_model = lambda provider, model: model  # type: ignore[attr-defined]
     main_stub = types.ModuleType("lilith_cli.main")
     main_stub._load_subagent_presets = lambda config_path=None: presets  # type: ignore[attr-defined]
     providers_mod = types.ModuleType("lilith_cli.providers")
@@ -470,15 +472,15 @@ def test_delegate_tool_path_records_in_orchestration_state(
         monkeypatch.setitem(sys.modules, mod.__name__, mod)
 
     # Run the CLI subcommand on the tool path.
-    main_mod.delegate(target="ejecutor-kimi", text="hi", preset="ejecutor-kimi")
+    main_mod.delegate(target="batch-deepseek", text="hi", preset="batch-deepseek")
 
     # ITEM 3 contract: the delegation is automatically recorded.
     assert state_file.exists(), "orchestration state file must be created"
     state = json.loads(state_file.read_text(encoding="utf-8"))
     tasks = state.get("tasks", [])
     assert tasks, "no tasks recorded in orchestration state"
-    matching = [t for t in tasks if t.get("preset") == "ejecutor-kimi"]
-    assert matching, f"no task for preset ejecutor-kimi, got: {tasks}"
+    matching = [t for t in tasks if t.get("preset") == "batch-deepseek"]
+    assert matching, f"no task for preset batch-deepseek, got: {tasks}"
     completed = [t for t in matching if t["status"] == "completada"]
     assert completed, (
         f"delegation must land as completada, got: "

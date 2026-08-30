@@ -33,7 +33,7 @@ def _render(renderable) -> str:
 
 
 class DummyConfig:
-    def __init__(self, model="test-model", provider="test-provider", api_key=None):
+    def __init__(self, model="deepseek-v4-flash", provider="deepseek", api_key=None):
         self.model = model
         self.provider = provider
         self.api_key = api_key or "sk-test-key"
@@ -78,7 +78,7 @@ async def test_diff_config_shows_all_keys_no_project(tmp_path, monkeypatch):
 
     global_config = tmp_path / "global_config.yaml"
     global_config.write_text(
-        "model: test-model\nprovider: test-provider\napi_key: sk-test\n",
+        "model: deepseek-v4-flash\nprovider: deepseek\napi_key: sk-test\n",
         encoding="utf-8",
     )
 
@@ -102,7 +102,7 @@ async def test_diff_config_shows_all_keys_no_project(tmp_path, monkeypatch):
     assert "Global" in rendered
     assert "Proyecto" in rendered
     assert "Efectiva" in rendered
-    assert "test-model" in rendered
+    assert "deepseek-v4-flash" in rendered
     assert "(no definido)" in rendered
 
 
@@ -113,15 +113,15 @@ async def test_diff_config_only_different_with_override(tmp_path, monkeypatch):
     project_dir = tmp_path / ".lilith"
     project_dir.mkdir()
     project_config = project_dir / "config.yaml"
-    project_config.write_text("model: project-model\n", encoding="utf-8")
+    project_config.write_text("model: deepseek-v4-pro\n", encoding="utf-8")
 
     global_config = tmp_path / "global_config.yaml"
     global_config.write_text(
-        "model: global-model\nprovider: global-provider\napi_key: sk-test\n",
+        "model: deepseek-v4-flash\nprovider: deepseek\napi_key: sk-test\n",
         encoding="utf-8",
     )
 
-    session = DummySession(config=DummyConfig(model="project-model"))
+    session = DummySession(config=DummyConfig(model="deepseek-v4-pro"))
     prints = []
 
     def capture(renderable):
@@ -136,8 +136,5 @@ async def test_diff_config_only_different_with_override(tmp_path, monkeypatch):
     assert prints, "Expected output to be printed"
     rendered = prints[0]
     # The model row is included because the effective value differs from global.
-    assert "project-model" in rendered
-    assert "global-model" in rendered
-    # The provider row appears in the table (global-provider value); what
-    # only-different guarantees is that the EFFECTIVE value differs from global.
-    assert "global-provider" in rendered
+    assert "deepseek-v4-pro" in rendered
+    assert "deepseek-v4-flash" in rendered

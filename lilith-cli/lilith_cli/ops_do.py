@@ -2,7 +2,7 @@
 
 Adds the natural-language end-to-end loop of the pantheon:
 
-- ``lilith do "<pedido>" [--channel minimax|sakana|glm] [--timeout S]
+- ``lilith do "<pedido>" [--channel deepseek|grok|sakana] [--timeout S]
   [--dry-run] [--db]``
     Loads the 14 Vanaheim agent cards, lets
     :class:`lilith_orchestrator.agent_router.AgentRouter` pick the best
@@ -130,7 +130,7 @@ def _format_route_reason(route: AgentRoute) -> str:
 def run_do(
     task: str,
     *,
-    channel: str = "minimax",
+    channel: str = "deepseek",
     timeout: int = DEFAULT_TIMEOUT,
     dry_run: bool = False,
     db: Path | None = None,
@@ -259,7 +259,7 @@ def do(
             name="--channel",
             help="Execution channel (model provider); one of: " + ", ".join(sorted(_CHANNELS)),
         ),
-    ] = "minimax",
+    ] = "deepseek",
     timeout: Annotated[
         int,
         Parameter(

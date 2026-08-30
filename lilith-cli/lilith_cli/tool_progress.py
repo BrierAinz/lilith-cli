@@ -9,9 +9,10 @@ from rich.console import Group
 from rich.live import Live
 from rich.panel import Panel
 from rich.spinner import Spinner
+from rich.table import Table
 from rich.text import Text
 
-from .render import console
+from .render import console, get_theme
 
 
 def _format_duration(elapsed: float) -> str:
@@ -49,52 +50,48 @@ def _build_tool_progress_renderable(
     """
     now = time.perf_counter()
     lines: list[Any] = []
+    theme = get_theme()
 
     # Header: spinner + running count while active, plain summary when done.
     header_text = Text()
     if running:
-        header_text.append(
-            f"Ejecutando {len(running)} herramienta(s) en paralelo", style="bold cyan"
-        )
-        header_text.append(f": {', '.join(running)}", style="italic")
-        lines.append(Group(Spinner("dots", style="cyan"), header_text))
+        header_text.append("EJECUTANDO", style="state.execute")
+        header_text.append(f"  ·  {len(running)} en paralelo", style="muted")
+        header_row = Table.grid(padding=(0, 1))
+        header_row.add_row(Spinner("dots", style=theme.border_style), header_text)
+        lines.append(header_row)
     else:
         done = len(completed) + len(failed)
-        header_text.append(f"{done} herramienta(s) ejecutada(s)", style="bold cyan")
+        header_text.append("COMPLETADO", style="state.verify")
+        header_text.append(f"  ·  {done} herramienta(s)", style="muted")
         lines.append(header_text)
 
-    # Running tools with elapsed time.
-    if running:
-        for name in running:
-            elapsed = now - start_time
-            line = Text()
-            line.append("  ⦿ ", style="cyan")
-            line.append(name, style="tool.name")
-            line.append(f"  ({_format_duration(elapsed)})", style="dim")
-            lines.append(line)
+    entries: list[tuple[str, str, str, str]] = []
+    elapsed = now - start_time
+    entries.extend(("running", name, _format_duration(elapsed), "") for name in running)
+    entries.extend(("done", name, _format_duration(duration), "") for name, duration in completed)
+    entries.extend(("failed", name, "", error) for name, error in failed)
 
-    # Completed tools with checkmark and duration.
-    if completed:
-        for name, duration in completed:
-            line = Text()
-            line.append("  ✓ ", style="green")
-            line.append(name, style="tool.name")
-            line.append(f"  ({_format_duration(duration)})", style="dim")
-            lines.append(line)
-
-    # Failed tools with X and error.
-    if failed:
-        for name, error in failed:
-            line = Text()
-            line.append("  ✗ ", style="red")
-            line.append(name, style="tool.name")
-            line.append(f"  {error}", style="dim red")
-            lines.append(line)
+    for index, (state, name, duration, error) in enumerate(entries):
+        line = Text()
+        line.append("└─ " if index == len(entries) - 1 else "├─ ", style="muted")
+        if state == "running":
+            line.append("◇ ", style="state.execute")
+        elif state == "done":
+            line.append("✓ ", style="status.ok")
+        else:
+            line.append("✗ ", style="status.fail")
+        line.append(name, style="tool.name")
+        if duration:
+            line.append(f"  {duration}", style="duration")
+        if error:
+            line.append(f"  {error}", style="error")
+        lines.append(line)
 
     return Panel(
         Group(*lines),
-        title="[bold]Progreso de herramientas[/]",
-        border_style="cyan",
+        title="[surface.title]LILITH · ACTIVIDAD[/]",
+        border_style=theme.border_style,
         expand=False,
         padding=(0, 1),
     )
@@ -170,8 +167,10 @@ class ToolProgressTracker:
             return
         duration = self.total_duration()
         status = "✓" if not self.failed else "✗"
+        style = "status.ok" if not self.failed else "status.fail"
         console.print(
-            f"[status.ok]{status} {total} herramienta(s) ejecutada(s) en {_format_duration(duration)}[/]"
+            f"[{style}]{status}[/] [muted]{total} herramienta(s) · "
+            f"{_format_duration(duration)}[/]"
         )
 
     def pause_live(self) -> None:
@@ -395,6 +394,7 @@ class DelegationLive:
         from rich.text import Text
 
         snap = self._buffer.snapshot()
+        theme = get_theme()
         lines: list[object] = []
         if snap["finished"]:
             err = snap.get("error")
@@ -414,12 +414,14 @@ class DelegationLive:
                 header = header_text
         else:
             header_text = Text()
-            header_text.append("  delegando → ", style="bold cyan")
+            header_text.append("DELEGANDO  ·  ", style="state.execute")
             header_text.append(str(snap["preset"]), style="tool.name")
             header_text.append(f"  ({snap['model']})", style="dim")
             if snap["agentic"]:
                 header_text.append("  agentic", style="italic dim")
-            header = Group(Spinner("dots", style="cyan"), header_text)
+            header_row = Table.grid(padding=(0, 1))
+            header_row.add_row(Spinner("dots", style=theme.border_style), header_text)
+            header = header_row
         lines.append(header)
 
         # Body: tail of streamed lines (skip if empty + finished).
@@ -450,13 +452,13 @@ class DelegationLive:
             else:
                 mins, secs = divmod(int(elapsed), 60)
                 elapsed_s = f"{mins}m {secs}s"
-            lines.append(Text(f"⏱  {elapsed_s}", style="dim"))
+            lines.append(Text(f"TIEMPO  ·  {elapsed_s}", style="muted"))
 
-        title = f"[bold]Delegación: {snap['preset']}[/]"
+        title = f"[surface.title]LILITH · CONSTELACIÓN · Delegación: {snap['preset']}[/]"
         return Panel(
             Group(*lines),
             title=title,
-            border_style="cyan",
+            border_style=theme.border_style,
             expand=False,
             padding=(0, 1),
         )

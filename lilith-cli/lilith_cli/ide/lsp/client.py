@@ -161,7 +161,7 @@ class LSPClient:
     async def stop(self) -> None:
         """Best-effort shutdown of the language server subprocess."""
         if self._proc is None:
-            self._cancel_tasks()
+            await self._cancel_tasks()
             return
         proc = self._proc
         try:
@@ -184,25 +184,31 @@ class LSPClient:
                 except asyncio.TimeoutError:
                     try:
                         proc.kill()
+                        await asyncio.wait_for(proc.wait(), timeout=2.0)
                     except ProcessLookupError:
                         pass
+                    except asyncio.TimeoutError:
+                        LOG.debug("LSP process did not exit after kill: %s", self.command)
         except ProcessLookupError:
             pass
         finally:
-            self._cancel_tasks()
+            await self._cancel_tasks()
             self._proc = None
             self._initialized = False
             self._fail_pending(LSPError({"code": -1, "message": "client stopped"}))
 
-    def _cancel_tasks(self) -> None:
+    async def _cancel_tasks(self) -> None:
         tasks = [self._reader_task, getattr(self, "_stderr_task", None)]
         self._reader_task = None
         self._stderr_task = None
+        current = asyncio.current_task()
+        pending: list[asyncio.Task[Any]] = []
         for task in tasks:
-            if task is not None and not task.done():
+            if task is not None and task is not current and not task.done():
                 task.cancel()
-        # Don't ``await`` here — ``stop()`` is called from both event loops
-        # and worker tasks; consumers can fire-and-forget.
+                pending.append(task)
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
 
     def _fail_pending(self, exc: BaseException) -> None:
         pending = list(self._pending.items())

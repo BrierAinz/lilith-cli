@@ -1,4 +1,4 @@
-"""Yggdrasil CLI — Unified entry point.
+"""Lilith CLI — Yggdrasil orchestration entry point.
 
 Usage:
   yggdrasil              # Launch interactive REPL
@@ -22,7 +22,14 @@ from typing import TYPE_CHECKING, Annotated, Any
 
 from cyclopts import App, Parameter
 
-from .config import CONFIG_DIR, YggdrasilConfig, load_config, save_config
+from .config import (
+    CONFIG_DIR,
+    YggdrasilConfig,
+    load_config,
+    require_supported_model,
+    require_supported_provider,
+    save_config,
+)
 from .ops import agents as _agents_cmd
 from .ops import bus_app as _bus_app
 from .ops_do import do_app as _do_app
@@ -47,7 +54,7 @@ from . import __version__  # single-source-of-truth
 
 app = App(
     name="yggdrasil",
-    help=f"Yggdrasil CLI v{__version__} — Where Ancient Meets Digital",
+    help=f"Lilith CLI v{__version__} — Obsidian Moon · Where Ancient Meets Digital",
     version=__version__,
 )
 
@@ -121,25 +128,18 @@ def _apply_overrides(
     *,
     model: str | None = None,
     provider: str | None = None,
-    local: bool = False,
     no_tools: bool = False,
 ) -> None:
     """Apply CLI flag overrides to a loaded config."""
-    if model:
-        cfg.model = model
     if provider:
-        cfg.provider = provider
-    if local:
-        cfg.provider = "local"
-        if cfg.base_url is None:
-            cfg.base_url = "http://localhost:1234/v1"
-        # If the user hasn't explicitly picked a model, fall back to
-        # the local default. This used to check for ``gpt-4o-mini``
-        # (the old OpenAI default); now it also recognises the
-        # Sakana Fugu default so ``--local`` works out of the box
-        # whether the active provider is OpenAI or Sakana.
-        if cfg.model in ("gpt-4o-mini", "fugu-ultra"):
-            cfg.model = "local-model"
+        selected = require_supported_provider(provider)
+        cfg.provider = selected
+        profile = cfg.providers[selected]
+        cfg.model = profile.model or cfg.model
+        cfg.api_key = profile.api_key
+        cfg.base_url = profile.base_url
+    if model:
+        cfg.model = require_supported_model(cfg.provider, model)
     if no_tools:
         cfg.tools.filesystem = False
         cfg.tools.coding = False
@@ -158,19 +158,18 @@ def chat(
         str | None,
         Parameter(name=["--provider", "-p"], help="Override provider"),
     ] = None,
-    local: Annotated[bool, Parameter(name="--local", help="Use local LM Studio")] = False,
     no_tools: Annotated[bool, Parameter(name="--no-tools", help="Disable tools")] = False,
     verbose: Annotated[bool, Parameter(name=["--verbose", "-v"], help="Debug output")] = False,
     config_path: Annotated[str | None, Parameter(name="--config", help="Config file path")] = None,
 ) -> None:
-    """Iniciar el REPL interactivo de Yggdrasil Agent."""
+    """Iniciar el REPL interactivo de Lilith."""
     import logging
 
     if verbose:
         logging.basicConfig(level=logging.DEBUG)
 
     cfg = load_config(config_path)
-    _apply_overrides(cfg, model=model, provider=provider, local=local, no_tools=no_tools)
+    _apply_overrides(cfg, model=model, provider=provider, no_tools=no_tools)
 
     from .session_runtime import create_session
     from .repl import run_repl
@@ -187,13 +186,12 @@ def ide(
         str | None,
         Parameter(name=["--provider", "-p"], help="Override provider"),
     ] = None,
-    local: Annotated[bool, Parameter(name="--local", help="Use local LM Studio")] = False,
     no_tools: Annotated[bool, Parameter(name="--no-tools", help="Disable tools")] = False,
     config_path: Annotated[str | None, Parameter(name="--config", help="Config file path")] = None,
 ) -> None:
     """Lanzar el modo IDE TUI de Lilith (file tree + chat + code preview)."""
     cfg = load_config(config_path)
-    _apply_overrides(cfg, model=model, provider=provider, local=local, no_tools=no_tools)
+    _apply_overrides(cfg, model=model, provider=provider, no_tools=no_tools)
 
     from .session_runtime import create_session
     from .ide import run_ide
@@ -211,7 +209,6 @@ def prompt(
         str | None,
         Parameter(name=["--provider", "-p"], help="Override provider"),
     ] = None,
-    local: Annotated[bool, Parameter(name="--local", help="Use local LM Studio")] = False,
     no_tools: Annotated[bool, Parameter(name="--no-tools", help="Disable tools")] = False,
     config_path: Annotated[str | None, Parameter(name="--config", help="Config file path")] = None,
     yes: Annotated[
@@ -261,7 +258,7 @@ def prompt(
         raise SystemExit(2)
 
     cfg = load_config(config_path)
-    _apply_overrides(cfg, model=model, provider=provider, local=local, no_tools=no_tools)
+    _apply_overrides(cfg, model=model, provider=provider, no_tools=no_tools)
     if yes:
         cfg.confirm_write = False
     if max_iterations is not None:
@@ -385,7 +382,7 @@ def _load_subagent_presets(config_path: Path | str | None = None) -> dict[str, A
 def delegate(
     target: Annotated[
         str,
-        Parameter(help="Provider profile name (sakana, kimi, deepseek, mimo, m2, ...) OR Hlidskjalf preset name when --preset is used"),
+        Parameter(help="Provider profile name (deepseek, grok or sakana) OR Hlidskjalf preset name when --preset is used"),
     ],
     text: Annotated[str, Parameter(help="Prompt to send")],
     model: Annotated[str | None, Parameter(name=["--model", "-m"])] = None,
@@ -399,9 +396,9 @@ def delegate(
     """Shortcut: send a one-shot prompt to a specific provider profile.
 
     Example:
-        lilith delegate sakana "summarise the Asgard realm"
-        lilith delegate kimi "refactor this loop" --model kimi-k2
-        lilith delegate ejecutor-kimi "write tests" --preset ejecutor-kimi --agentic --max-turns 5
+        lilith delegate deepseek "summarise the Asgard realm"
+        lilith delegate grok "research this issue"
+        lilith delegate batch-deepseek "write tests" --preset batch-deepseek --agentic --max-turns 5
 
     Compatibility: without any of the new flags (--preset/--agentic/--structured/
     --max-tokens/--max-turns) the command keeps the original one-shot behaviour
@@ -428,8 +425,10 @@ def delegate(
 
         provider_profile = cfg.providers[target_lower]
         cfg.provider = target_lower
+        cfg.api_key = provider_profile.api_key
+        cfg.base_url = provider_profile.base_url
         if model:
-            cfg.model = model
+            cfg.model = require_supported_model(target_lower, model)
         elif provider_profile.model:
             cfg.model = provider_profile.model
 
@@ -1244,7 +1243,7 @@ def timeline(
 def subagent(
     preset: Annotated[
         str,
-        Parameter(help="Hlidskjalf preset name (ejecutor-kimi, investigador-minimax, batch-deepseek, orquestador-fugu)"),
+        Parameter(help="Hlidskjalf preset name (batch-deepseek, grok-research or orquestador-fugu)"),
     ],
     text: Annotated[str, Parameter(help="Prompt to send via the preset")],
     config_path: Annotated[str | None, Parameter(name="--config")] = None,
@@ -1280,7 +1279,12 @@ def subagent(
 
     provider_profile = cfg.providers[provider_name]
     cfg.provider = provider_name
-    cfg.model = p.get("model") or provider_profile.model
+    cfg.model = require_supported_model(
+        provider_name,
+        p.get("model") or provider_profile.model,
+    )
+    cfg.api_key = provider_profile.api_key
+    cfg.base_url = provider_profile.base_url
     if p.get("temperature") is not None:
         cfg.temperature = float(p["temperature"])
     if p.get("system_prompt"):
@@ -1301,7 +1305,6 @@ def default_command(
     args: Annotated[tuple[str, ...] | None, Parameter(show=False)] = (),
     model: Annotated[str | None, Parameter(name=["--model", "-m"])] = None,
     provider: Annotated[str | None, Parameter(name=["--provider", "-p"])] = None,
-    local: Annotated[bool, Parameter(name="--local")] = False,
     no_tools: Annotated[bool, Parameter(name="--no-tools")] = False,
     verbose: Annotated[bool, Parameter(name=["--verbose", "-v"])] = False,
     config_path: Annotated[str | None, Parameter(name="--config")] = None,
@@ -1311,14 +1314,14 @@ def default_command(
     from .render import console
 
     if version:
-        console.print(f"Yggdrasil CLI v{__version__}")
+        console.print(f"Lilith CLI v{__version__}")
         return
 
     # If positional args look like a prompt, go one-shot.
     if args:
         prompt_text = " ".join(args)
         cfg = load_config(config_path)
-        _apply_overrides(cfg, model=model, provider=provider, local=local, no_tools=no_tools)
+        _apply_overrides(cfg, model=model, provider=provider, no_tools=no_tools)
 
         from .session_runtime import create_session
         from .repl import run_oneshot
@@ -1331,7 +1334,6 @@ def default_command(
     chat(
         model=model,
         provider=provider,
-        local=local,
         no_tools=no_tools,
         verbose=verbose,
         config_path=config_path,

@@ -120,7 +120,9 @@ def test_default_config_yaml_parses_cleanly(tmp_path, monkeypatch):
     cfg = load_config(yaml_path)
     assert cfg.mcp_servers is None
     assert cfg.effective_mcp_servers == {}
-    assert cfg.providers["sakana"].use_responses is True
+    assert set(cfg.providers) == {"deepseek", "grok", "sakana"}
+    assert cfg.provider == "deepseek"
+    assert cfg.model == "deepseek-v4-flash"
 
 
 # ── Field-level behaviour ─────────────────────────────────────────────

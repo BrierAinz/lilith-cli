@@ -46,7 +46,7 @@ async def test_review_agent_delega_diff_staged_sin_tocar_historial(
     assert calls["git"]["op"] == "diff"
     assert calls["git"]["args"] == "--cached"
     delegated = calls["delegate"]
-    assert delegated["preset"] == "investigador-minimax"
+    assert delegated["preset"] == "grok-research"
     assert "eval(user_input)" in delegated["prompt"]
     assert "revisar seguridad" in delegated["prompt"]
     assert fake_session._review_agent_result["status"] == "done"

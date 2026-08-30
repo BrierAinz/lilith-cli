@@ -28,6 +28,7 @@ from .providers import (
     create_provider,
     lilith_tools_to_openai,
 )
+from .session_telemetry import SessionTelemetry
 from .tool_hook_dispatcher import ToolHookDispatcher
 
 
@@ -165,13 +166,7 @@ class AgentSession:
         self.history: list[dict[str, Any]] = []
         self.system_prompt = config.system_prompt
         self._tools_enabled = True
-        self._total_usage: dict[str, int] = {
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_tokens": 0,
-        }
-        # Per-model usage: {model_name: {prompt_tokens, completion_tokens, total_tokens, cost}}
-        self._per_model_usage: dict[str, dict[str, Any]] = {}
+        self._session_telemetry = SessionTelemetry()
         self._last_user_message: str = ""  # For /redo support.
 
         # Streaming cancellation token. The REPL (or IDE view) creates an
@@ -216,11 +211,6 @@ class AgentSession:
         self._hook_failures: int = 0  # Count of hook exceptions (telemetry)
         self._hook_dispatcher = ToolHookDispatcher()
         self._session_start: datetime = datetime.now(UTC)
-
-        # Simple execution telemetry for /metrics.
-        self._tool_call_history: list[dict[str, Any]] = []
-        self._command_history: list[dict[str, Any]] = []
-        self._file_edit_history: list[dict[str, Any]] = []
 
         # Pinned messages (in-memory only, per session).
         self._pinned_messages: list[dict[str, Any]] = []
@@ -303,6 +293,79 @@ class AgentSession:
         self._hook_registry = dispatcher.registry
         self._session_id = dispatcher.session_id
         self._hook_failures = dispatcher.failures
+
+    def _get_session_telemetry(self) -> SessionTelemetry:
+        """Return telemetry, restoring manually-built legacy sessions lazily."""
+        telemetry = self.__dict__.get("_session_telemetry")
+        if telemetry is None:
+            telemetry = SessionTelemetry()
+            self.__dict__["_session_telemetry"] = telemetry
+        return telemetry
+
+    @property
+    def telemetry(self) -> SessionTelemetry:
+        """Return this session's usage and activity telemetry."""
+        return self._get_session_telemetry()
+
+    # Backwards-compatible mutable fields for embedders and tests that still
+    # construct AgentSession through __new__. New code should use ``telemetry``.
+    @property
+    def _total_usage(self) -> dict[str, int]:
+        return self.telemetry._mutable_total_usage()
+
+    @_total_usage.setter
+    def _total_usage(self, usage: dict[str, Any]) -> None:
+        self.telemetry.replace_total_usage(usage)
+
+    @property
+    def _per_model_usage(self) -> dict[str, dict[str, Any]]:
+        return self.telemetry._mutable_per_model_usage()
+
+    @_per_model_usage.setter
+    def _per_model_usage(self, usage: dict[str, dict[str, Any]]) -> None:
+        self.telemetry.replace_per_model_usage(usage)
+
+    @property
+    def _tool_call_history(self) -> list[dict[str, Any]]:
+        if not self.telemetry.status()["tools"]:
+            raise AttributeError("_tool_call_history")
+        return self.telemetry._mutable_tool_calls()
+
+    @_tool_call_history.setter
+    def _tool_call_history(self, entries: list[dict[str, Any]]) -> None:
+        self.telemetry.replace_tool_calls(entries)
+
+    @_tool_call_history.deleter
+    def _tool_call_history(self) -> None:
+        self.telemetry.disable_history("tools")
+
+    @property
+    def _command_history(self) -> list[dict[str, Any]]:
+        if not self.telemetry.status()["commands"]:
+            raise AttributeError("_command_history")
+        return self.telemetry._mutable_commands()
+
+    @_command_history.setter
+    def _command_history(self, entries: list[dict[str, Any]]) -> None:
+        self.telemetry.replace_commands(entries)
+
+    @_command_history.deleter
+    def _command_history(self) -> None:
+        self.telemetry.disable_history("commands")
+
+    @property
+    def _file_edit_history(self) -> list[dict[str, Any]]:
+        if not self.telemetry.status()["files"]:
+            raise AttributeError("_file_edit_history")
+        return self.telemetry._mutable_file_edits()
+
+    @_file_edit_history.setter
+    def _file_edit_history(self, entries: list[dict[str, Any]]) -> None:
+        self.telemetry.replace_file_edits(entries)
+
+    @_file_edit_history.deleter
+    def _file_edit_history(self) -> None:
+        self.telemetry.disable_history("files")
 
     def _fire_pre_tool_hook(
         self,
@@ -595,7 +658,7 @@ class AgentSession:
             self._last_failed_tool_signature = None
             self._identical_tool_failures = 0
 
-        self._tool_call_history.append(
+        self.telemetry.record_tool_call(
             {
                 "name": tool_name,
                 "arguments": tool_args,
@@ -609,7 +672,7 @@ class AgentSession:
         if tool_name in ("file_write", "file_edit") and not result.content.startswith("Error:"):
             path_arg = tool_args.get("path") if isinstance(tool_args, dict) else None
             if path_arg:
-                self._file_edit_history.append(
+                self.telemetry.record_file_edit(
                     {
                         "path": str(path_arg),
                         "tool": tool_name,
@@ -868,7 +931,9 @@ class AgentSession:
     def clear_history(self) -> None:
         """Reset conversation history (excluding system prompt)."""
         self.history.clear()
-        self._total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        self.telemetry.replace_total_usage(
+            {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        )
 
     def compact_history(self, summary: str, keep_recent: int = 2) -> None:
         """Replace conversation history with a summary + recent messages.
@@ -1320,7 +1385,7 @@ class AgentSession:
 
             response_format = {"type": "json_object"} if getattr(self, "_json_mode", False) else None
             async for chunk in self.provider.stream(messages, tools=tools, response_format=response_format):
-                # Reasoning chunks (reasoning_content deltas from Kimi,
+                # Reasoning chunks (reasoning_content deltas from DeepSeek,
                 # GLM-5.1, DeepSeek, …) are a separate event type: forward
                 # them as-is so the UI renders a thinking panel instead of
                 # gluing the reasoning onto the final message.
@@ -1360,7 +1425,11 @@ class AgentSession:
             # No tool calls — we're done.
             if not accumulated_tool_calls:
                 self.history.append(Message.assistant(accumulated_text))
-                yield {"type": "done", "content": accumulated_text, "usage": self._total_usage}
+                yield {
+                    "type": "done",
+                    "content": accumulated_text,
+                    "usage": self.total_usage,
+                }
                 return
 
             # Resolve tool calls — with auto-repair for concatenated names.
@@ -1501,7 +1570,7 @@ class AgentSession:
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("Stream closing summary failed: %s", exc)
 
-        yield {"type": "done", "content": accumulated_text, "usage": self._total_usage}
+        yield {"type": "done", "content": accumulated_text, "usage": self.total_usage}
 
     # ── Callback hook for REPL ──────────────────────────────────────
 
@@ -1551,11 +1620,11 @@ class AgentSession:
 
     @property
     def total_usage(self) -> dict[str, int]:
-        return dict(self._total_usage)
+        return self.telemetry.total_usage
 
     @property
     def per_model_usage(self) -> dict[str, dict[str, Any]]:
-        return {model: dict(stats) for model, stats in self._per_model_usage.items()}
+        return self.telemetry.per_model_usage
 
     @property
     def tool_call_counts(self) -> dict[str, int]:
@@ -1580,32 +1649,10 @@ class AgentSession:
         return counts
 
     def _ensure_per_model_entry(self, model: str) -> None:
-        if model not in self._per_model_usage:
-            self._per_model_usage[model] = {
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "total_tokens": 0,
-                "cost": 0.0,
-            }
+        self.telemetry.ensure_model(model)
 
     def _track_usage(self, usage: dict[str, Any], model: str) -> None:
-        from .providers import estimate_cost
-
-        prompt_tokens = usage.get("prompt_tokens", 0)
-        completion_tokens = usage.get("completion_tokens", 0)
-        total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
-
-        self._total_usage["prompt_tokens"] += prompt_tokens
-        self._total_usage["completion_tokens"] += completion_tokens
-        self._total_usage["total_tokens"] += total_tokens
-
-        self._ensure_per_model_entry(model)
-        self._per_model_usage[model]["prompt_tokens"] += prompt_tokens
-        self._per_model_usage[model]["completion_tokens"] += completion_tokens
-        self._per_model_usage[model]["total_tokens"] += total_tokens
-        self._per_model_usage[model]["cost"] += estimate_cost(
-            model, prompt_tokens, completion_tokens
-        )
+        self.telemetry.track_usage(usage, model)
 
     @property
     def last_user_message(self) -> str:

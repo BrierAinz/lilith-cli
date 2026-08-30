@@ -318,7 +318,7 @@ def run_work_once(
     *,
     claimer: str,
     role: str = DEFAULT_ROLE,
-    channel: str = "minimax",
+    channel: str = "deepseek",
     timeout: int = DEFAULT_TIMEOUT,
     db: Path | None = None,
     repo_root: Path | None = None,
@@ -338,12 +338,8 @@ def run_work_once(
     The ``route_lookup`` kwarg lets tests inject a deterministic router;
     the CLI handler builds one from the live registry every call.
 
-    Note: the *channel* default is ``minimax`` (a sub-agent profile),
-    not ``sakana`` — the orchestrator (Lilith) is already running on
-    Sakana Fugu Ultra in the main session; the queue worker just
-    forwards tasks to spawned sub-agents, so it picks one of the
-    sub-agent channels by default. Pass ``channel="sakana"`` to push
-    a task onto the orchestrator's own model.
+    The default channel is ``deepseek``. Pass ``channel="grok"`` when a
+    task benefits from the alternate research model.
     """
     if console is None:
         from rich.console import Console as _Console
@@ -444,7 +440,7 @@ def run_work_watch(
     *,
     claimer: str,
     role: str = DEFAULT_ROLE,
-    channel: str = "minimax",
+    channel: str = "deepseek",
     timeout: int = DEFAULT_TIMEOUT,
     interval: int = DEFAULT_INTERVAL,
     db: Path | None = None,
@@ -574,7 +570,7 @@ def work(
         str,
         Parameter(
             name=["--as", "-a"],
-            help="Claimer name (e.g. 'skadi', 'sakana')",
+            help="Claimer name (e.g. 'skadi', 'lilith')",
         ),
     ],
     role: Annotated[
@@ -601,7 +597,7 @@ def work(
             name="--channel",
             help="Execution channel; one of: " + ", ".join(sorted(_CHANNELS)),
         ),
-    ] = "minimax",
+    ] = "deepseek",
     timeout: Annotated[
         int,
         Parameter(name="--timeout", help="Wall-clock cap for each spawn, in seconds"),

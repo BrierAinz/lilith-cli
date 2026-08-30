@@ -79,18 +79,9 @@ __all__ = [
 
 
 _CHANNELS: dict[str, str | list[str]] = {
-    # Lilith's main session itself runs on Sakana Fugu Ultra (see the
-    # default config in ``lilith_cli/config.py``). Spawned sub-agents
-    # are routed through the opencode CLI, which exposes multiple
-    # models under different channels. The default below matches
-    # the per-provider profile declared in the default config:
-    #   * minimax      → MiniMax-M3 (Anthropic-compatible)
-    # ``sakana`` is still available so a sub-agent can opt into the
-    # same model the orchestrator is running, when a task needs it.
-    # (``opencode-go`` was retired 2026-07-18: the opencode CLI's
-    # auth.json key expired with the plan and its catalog drifted;
-    # the env-var ``opencode-go`` HTTP profile in config.py remains.)
-    "minimax": "minimax/MiniMax-M3",
+    # Verified against the local ``opencode models`` catalog on 2026-08-08.
+    "deepseek": "deepseek/deepseek-v4-flash",
+    "grok": "xai/grok-4.20-0309-non-reasoning",
     "sakana": "sakana/fugu-ultra",
 }
 
@@ -142,51 +133,9 @@ def spawns_log_dir() -> Path:
     return _resolve_yggdrasil_root() / ".ygg" / "spawns"
 
 
-# ── FUGU_API_KEY resolver (Windows) ──────────────────────────────────────
-#
-# The sakana channel needs ``FUGU_API_KEY`` in the subprocess env. We
-# read HKCU\Environment as a fallback when the variable is missing from
-# the parent env, so users only have to set it in the Windows registry
-# (one place) instead of editing every shell launcher.
-# ─────────────────────────────────────────────────────────────────────────
-
-
-def _read_fugu_key_from_windows_registry() -> str | None:
-    """Best-effort read of ``FUGU_API_KEY`` from ``HKCU\\Environment``.
-
-    Returns ``None`` on any failure (no winreg, key absent, value missing,
-    non-Windows host). Never raises.
-    """
-    if sys.platform != "win32":
-        return None
-    try:
-        import winreg  # stdlib, lazy-imported (test hosts may not be Windows)
-
-        with winreg.OpenKey(  # type: ignore[attr-defined]
-            winreg.HKEY_CURRENT_USER,  # type: ignore[attr-defined]
-            r"Environment",
-        ) as hkey:
-            value, _regtype = winreg.QueryValueEx(hkey, "FUGU_API_KEY")  # type: ignore[attr-defined]
-    except (OSError, FileNotFoundError, ImportError):
-        return None
-    if isinstance(value, str) and value:
-        return value
-    return None
-
-
 def _build_subprocess_env(channel: str) -> dict[str, str]:
-    """Return the env passed to the opencode subprocess.
-
-    The sakana channel additionally needs ``FUGU_API_KEY``; we copy the
-    parent env, then inject the key from the Windows registry if it's
-    not already present.
-    """
-    env = os.environ.copy()
-    if channel == "sakana" and not env.get("FUGU_API_KEY"):
-        fugu = _read_fugu_key_from_windows_registry()
-        if fugu:
-            env["FUGU_API_KEY"] = fugu
-    return env
+    """Return the inherited env passed to the OpenCode subprocess."""
+    return os.environ.copy()
 
 
 def _resolve_opencode_bin() -> str | None:
@@ -251,7 +200,7 @@ def _build_spawn_prompt(card_system_prompt: str, task: str) -> str:
     role = (
         "─── ROLE ───\n"
         "You are a SUB-AGENT spawned by Lilith, the Yggdrasil "
-        "orchestrator (which itself runs on Sakana Fugu Ultra). "
+        "orchestrator. "
         "Execute the task and report back — do not try to orchestrate "
         "other sub-agents yourself."
     )
@@ -296,7 +245,7 @@ def run_spawn(
     agent: str,
     task: str,
     *,
-    channel: str = "minimax",
+    channel: str = "deepseek",
     timeout: int = 300,
     db: Path | None = None,
     repo_root: Path | None = None,
@@ -628,11 +577,10 @@ def spawn(
             help=(
                 "Execution channel (model provider); one of: "
                 + ", ".join(sorted(_CHANNELS))
-                + ". Default 'minimax' is a sub-agent profile; the "
-                "orchestrator (Lilith) itself runs on 'sakana'."
+                + ". Default: deepseek."
             ),
         ),
-    ] = "minimax",
+    ] = "deepseek",
     timeout: Annotated[
         int,
         Parameter(

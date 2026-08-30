@@ -18,7 +18,7 @@ Launch the Norse-themed terminal IDE:
 ```bash
 lilith ide
 lilith ide --root ./src
-lilith ide --provider kimi --model kimi-for-coding
+lilith ide --provider deepseek --model deepseek-v4-flash
 ```
 
 On startup, a short Yggdrasil splash screen is shown; press any key or wait for it to auto-dismiss.

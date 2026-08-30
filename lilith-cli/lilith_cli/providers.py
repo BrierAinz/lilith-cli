@@ -1,14 +1,8 @@
-"""Unified LLM provider wrapper for Yggdrasil CLI v6.0.
+"""DeepSeek, xAI and Sakana provider wrapper for Lilith CLI.
 
-Uses httpx directly for OpenAI-compatible endpoints (fast, lightweight),
-with optional litellm fallback for non-OpenAI providers (Anthropic, etc.).
-Streaming, tool-calling, and exponential-backoff retry included.
-
-Sakana Fugu supports both its Responses API at ``/v1/responses`` and an
-OpenAI-compatible ``/v1/chat/completions`` endpoint. Newly generated
-configuration uses Responses; setting
-``providers.sakana.use_responses: false`` explicitly keeps Chat
-Completions available for existing profiles.
+All supported providers expose OpenAI-compatible Chat Completions, so one
+small HTTP path covers streaming, tool calling and retry without compatibility
+branches for retired backends.
 """
 
 from __future__ import annotations
@@ -37,47 +31,25 @@ logger = logging.getLogger(__name__)
 
 _MAX_RETRIES = 3
 _BASE_DELAY = 1.0  # seconds
-_REQUEST_TIMEOUT = 180.0  # seconds (Fugu Ultra reasoning can take >60s)
+_REQUEST_TIMEOUT = 180.0  # seconds (reasoning calls can take >60s)
 
 
 # ── Pricing (v4.3.1) ────────────────────────────────────────────────
 # Cost per 1M tokens (input, output) in USD. Used to estimate per-call
 # and total cost in the REPL bottom toolbar. Providers not listed here
 # fall back to 0.0 (cost hidden).
-# Sources: published provider pricing pages, last refreshed 2026-07-09.
+# Sources: official DeepSeek, xAI and Sakana pricing pages, refreshed 2026-08-08.
 _MODEL_PRICING: dict[str, tuple[float, float]] = {
-    # Sakana
-    "fugu-ultra":            (3.0, 9.0),
-    "fugu-ultra-20260615":   (3.0, 9.0),
-    # Anthropic (in case litellm is used)
-    "claude-sonnet-4":        (3.0, 15.0),
-    "claude-opus-4":          (15.0, 75.0),
-    "claude-opus-5":          (10.0, 50.0),
-    "claude-haiku-4":         (0.8, 4.0),
-    # OpenAI (in case litellm is used)
-    "gpt-4o":                 (2.5, 10.0),
-    "gpt-4o-mini":            (0.15, 0.6),
-    "o3":                     (15.0, 60.0),
-    # DeepSeek
-    "deepseek-chat":          (0.27, 1.1),
-    "deepseek-v4-flash":      (0.07, 0.27),
-    "deepseek-reasoner":      (0.55, 2.19),
-    # Qwen / Alibaba
-    "qwen-max-latest":        (2.4, 9.6),
-    "qwen-plus-latest":       (0.4, 1.2),
-    "qwen3.7-max":            (2.4, 9.6),
-    # Kimi
-    "kimi-for-coding":        (1.0, 3.0),
-    "moonshot-v1-128k":       (2.0, 2.0),
-    # BytePlus
-    "seed-1-6-250915":        (0.84, 1.68),
-    "glm-4-7-251222":         (0.7, 0.7),
-    # xAI
-    "grok-4.20-0309-non-reasoning":  (3.0, 9.0),
-    "grok-4":                 (3.0, 9.0),
-    "grok-3":                 (3.0, 9.0),
-    # Local
-    "local-model":            (0.0, 0.0),
+    "deepseek-v4-flash": (0.14, 0.28),
+    "deepseek-v4-pro": (0.435, 0.87),
+    "grok-4.20-0309-non-reasoning": (1.25, 2.5),
+    "grok-4.20-0309-reasoning": (1.25, 2.5),
+    "grok-4.20-multi-agent-0309": (1.25, 2.5),
+    "grok-4.3": (1.25, 2.5),
+    "grok-4.5": (2.0, 6.0),
+    "fugu-ultra": (5.0, 30.0),
+    "fugu-ultra-v1.0": (5.0, 30.0),
+    "fugu-ultra-v1.1": (5.0, 30.0),
 }
 
 
@@ -85,38 +57,17 @@ _MODEL_PRICING: dict[str, tuple[float, float]] = {
 # Approximate context-window sizes in tokens. Used for the /context
 # progress bar. Unknown models fall back to 128K (common default).
 _MODEL_CONTEXTS: dict[str, int] = {
-    # Sakana
-    "fugu-ultra": 262_144,
-    "fugu-ultra-20260615": 262_144,
-    # Anthropic (in case litellm is used)
-    "claude-sonnet-4": 200_000,
-    "claude-opus-4": 200_000,
-    "claude-haiku-4": 200_000,
-    # OpenAI (in case litellm is used)
-    "gpt-4o": 128_000,
-    "gpt-4o-mini": 128_000,
-    "o3": 200_000,
-    # DeepSeek
-    "deepseek-chat": 64_000,
-    "deepseek-v4-flash": 64_000,
-    "deepseek-reasoner": 64_000,
-    # Qwen / Alibaba
-    "qwen-max-latest": 128_000,
-    "qwen-plus-latest": 128_000,
-    "qwen3.7-max": 128_000,
-    # Kimi
-    "k3": 1_048_576,
-    "kimi-for-coding": 256_000,
-    "moonshot-v1-128k": 128_000,
-    # BytePlus
-    "seed-1-6-250915": 128_000,
-    "glm-4-7-251222": 128_000,
-    # xAI
-    "grok-4.20-0309-non-reasoning": 131_072,
-    "grok-4": 131_072,
-    "grok-3": 131_072,
-    # Local
-    "local-model": 128_000,
+    "deepseek-v4-flash": 1_000_000,
+    "deepseek-v4-pro": 1_000_000,
+    "grok-4.20-0309-non-reasoning": 1_000_000,
+    "grok-4.20-0309-reasoning": 1_000_000,
+    "grok-4.20-multi-agent-0309": 1_000_000,
+    "grok-4.3": 1_000_000,
+    "grok-4.5": 500_000,
+    "fugu": 1_000_000,
+    "fugu-ultra": 1_000_000,
+    "fugu-ultra-v1.0": 1_000_000,
+    "fugu-ultra-v1.1": 1_000_000,
 }
 
 _DEFAULT_CONTEXT_WINDOW = 128_000
@@ -125,8 +76,7 @@ _DEFAULT_CONTEXT_WINDOW = 128_000
 def estimate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
     """Estimate USD cost for a single LLM call.
 
-    Falls back to 0.0 for unknown models (so unknown providers don't
-    crash the cost display). Returns 0.0 for the local model.
+    Falls back to 0.0 for unknown models so display code remains defensive.
     """
     rate = _MODEL_PRICING.get(model)
     if rate is None:
@@ -135,43 +85,10 @@ def estimate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> flo
     return (prompt_tokens * input_rate + completion_tokens * output_rate) / 1_000_000
 
 
-# ── Context windows (v4.3.1) ─────────────────────────────────────────
-# Approximate maximum context window per model, in tokens. Used by the
-# /context command to show a progress bar of how much of the model's
-# context is in use. Defaults to 32k when a model is unknown.
-_MODEL_CONTEXTS: dict[str, int] = {
-    "fugu-ultra": 128_000,
-    "fugu-ultra-20260615": 128_000,
-    "claude-sonnet-4": 200_000,
-    "claude-opus-4": 200_000,
-    "claude-opus-5": 1_000_000,
-    "claude-haiku-4": 200_000,
-    "gpt-4o": 128_000,
-    "gpt-4o-mini": 128_000,
-    "o3": 200_000,
-    "deepseek-chat": 64_000,
-    "deepseek-v4-flash": 64_000,
-    "deepseek-reasoner": 64_000,
-    "qwen-max-latest": 32_000,
-    "qwen-plus-latest": 128_000,
-    "qwen3.7-max": 32_000,
-    "k3": 1_048_576,
-    "kimi-for-coding": 128_000,
-    "moonshot-v1-128k": 128_000,
-    "seed-1-6-250915": 128_000,
-    "glm-4-7-251222": 128_000,
-    "grok-4.20-0309-non-reasoning": 128_000,
-    "grok-4": 128_000,
-    "grok-3": 128_000,
-    "local-model": 32_000,
-}
-_DEFAULT_CONTEXT_WINDOW = 32_000
-
-
 def estimate_context_window(model: str | None) -> int:
     """Return the approximate max context window (in tokens) for *model*.
 
-    Falls back to a safe default of 32k for unknown models so the
+    Falls back to a safe default of 128k for unknown models so the
     progress bar in /context doesn't crash.
     """
     if not model:
@@ -229,8 +146,8 @@ class ToolResult:
 class LLMProviderWrapper:
     """High-level provider with streaming, tool-calling, and retry.
 
-    Uses httpx directly for OpenAI-compatible endpoints (fast, no deps).
-    Falls back to litellm for Anthropic/Ollama/etc. if available.
+    Uses httpx directly against Lilith's supported OpenAI-compatible
+    DeepSeek, xAI and Sakana endpoints.
     """
 
     def __init__(self, config: YggdrasilConfig) -> None:
@@ -285,18 +202,10 @@ class LLMProviderWrapper:
         if self._client is None or self._client.is_closed:
             headers: dict[str, str] = {"Content-Type": "application/json"}
             api_key = self._resolve_api_key()
-            base_url = self._resolve_base_url() or "https://api.openai.com/v1"
-
-            # ── Anthropic-compat profiles (m2/minimax, kimi-future-*) ──
-            # Detected by `/anthropic` suffix in the base_url. We rewrite
-            # auth from Bearer → X-Api-Key + anthropic-version. Endpoint
-            # dispatch happens in _do_complete via _is_anthropic().
-            if "/anthropic" in base_url.lower() and api_key:
-                headers["X-Api-Key"] = api_key
-                headers["anthropic-version"] = "2023-06-01"
-                # Drop Bearer to avoid leaking the key through both schemes.
-                headers.pop("Authorization", None)
-            elif api_key:
+            base_url = self._resolve_base_url()
+            if not base_url:
+                raise ValueError("El proveedor activo no tiene base_url configurada")
+            if api_key:
                 headers["Authorization"] = f"Bearer {api_key}"
 
             self._client = httpx.AsyncClient(
@@ -305,26 +214,6 @@ class LLMProviderWrapper:
                 timeout=httpx.Timeout(_REQUEST_TIMEOUT),
             )
         return self._client
-
-    def _is_anthropic(self) -> bool:
-        """True when the active base URL targets the Anthropic Messages API."""
-        base = self._resolve_base_url() or ""
-        return "/anthropic" in base.lower()
-
-    def _is_sakana_responses(self) -> bool:
-        """True when the active provider uses Sakana's Responses API
-        (/v1/responses with input=str instead of messages=[...]).
-
-        Sakana exposes BOTH an OpenAI-compatible Chat Completions
-        endpoint at ``/v1/chat/completions`` AND a Responses API at
-        ``/v1/responses``. The bundled config template enables Responses
-        for new installations. Existing profiles can keep Chat Completions
-        by setting ``providers.sakana.use_responses: false`` in the YAML.
-        """
-        if "sakana.ai" not in (self._resolve_base_url() or "").lower():
-            return False
-        profile = self.config.providers.get(self.config.provider.lower())
-        return bool(profile and profile.use_responses)
 
     # ── Public helpers ──────────────────────────────────────────────
 
@@ -343,11 +232,11 @@ class LLMProviderWrapper:
         return self.config.api_key
 
     def _resolve_model(self) -> str:
-        """Return the model name considering per-provider profile overrides."""
+        """Return the active model; CLI overrides live at the top level."""
+        if self.config.model:
+            return self.config.model
         profile = self.config.providers.get(self.config.provider.lower())
-        if profile and profile.model:
-            return profile.model
-        return self.config.model
+        return profile.model if profile and profile.model else ""
 
     def _resolve_max_tokens(self, kwargs: dict[str, Any] | None = None) -> int | None:
         """Resolve output-token limit: explicit call > provider > global."""
@@ -357,6 +246,13 @@ class LLMProviderWrapper:
         if profile and profile.max_tokens is not None:
             return profile.max_tokens
         return self.config.max_tokens
+
+    def _validate_route(self, model: str) -> None:
+        """Reject retired providers and unknown models before any HTTP call."""
+        from .config import require_supported_model, require_supported_provider
+
+        provider = require_supported_provider(self.config.provider)
+        require_supported_model(provider, model)
 
 
     async def complete(
@@ -377,6 +273,7 @@ class LLMProviderWrapper:
         """
         bypass_circuit = bool(kwargs.pop("bypass_circuit", False))
         model = model or self._resolve_model()
+        self._validate_route(model)
 
         async def _attempt() -> dict[str, Any]:
             return await self._do_complete(model, messages, tools=tools, **kwargs)
@@ -596,43 +493,9 @@ class LLMProviderWrapper:
         """
         bypass_circuit = bool(kwargs.pop("bypass_circuit", False))
         model = model or self._resolve_model()
+        self._validate_route(model)
 
-        # ── Anthropic-compat / Sakana-Responses profiles don't speak the
-        # OpenAI SSE protocol this method implements; fall back to the
-        # non-streaming path and emit the result as a single chunk.
-        # The fallback is wrapped in _run_with_retry so a transient 5xx
-        # from Sakana/Anthropic also gets the same backoff that the
-        # OpenAI SSE path below enjoys; non-transient errors bubble up.
-        if self._is_anthropic() or self._is_sakana_responses():
-
-            async def _fallback_attempt() -> dict[str, Any]:
-                return await self._do_complete(model, messages, tools=tools, **kwargs)
-
-            result = await self._run_with_retry(
-                _fallback_attempt,
-                op_label="stream() (Anthropic/Sakana fallback)",
-                bypass_circuit=bypass_circuit,
-            )
-            reasoning = result.get("reasoning_content")
-            if reasoning:
-                yield {
-                    "type": "reasoning",
-                    "content": reasoning,
-                    "finish_reason": None,
-                    "tool_calls": None,
-                }
-            tcs = [
-                tc if isinstance(tc, dict) else {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
-                for tc in (result.get("tool_calls") or [])
-            ]
-            yield {
-                "content": result.get("content", ""),
-                "finish_reason": result.get("finish_reason", "stop"),
-                "tool_calls": tcs or None,
-            }
-            return
-
-        # — OpenAI SSE path. The HTTP+parsing work lives in the
+        # OpenAI-compatible SSE path. The HTTP+parsing work lives in the
         # private generator _stream_openai_sse() so stream() can wrap
         # it with retry. We retry only BEFORE the first chunk is
         # yielded: once the caller has consumed anything we cannot
@@ -641,12 +504,6 @@ class LLMProviderWrapper:
 
         self._ensure_provider_available(bypass_circuit=bypass_circuit)
         client = await self._get_client()
-
-        # ── Kimi quirk: temperature=1 is the only value this model accepts ──
-        # Same guard as _do_complete; kimi-for-coding 400s on anything else.
-        if "kimi.com" in (self._resolve_base_url() or "").lower():
-            kwargs = dict(kwargs)
-            kwargs["temperature"] = 1.0
 
         payload: dict[str, Any] = {
             "model": model,
@@ -896,134 +753,8 @@ class LLMProviderWrapper:
         tools: list[dict[str, Any]] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """Non-streaming completion; routes to Anthropic Messages API if needed."""
+        """Send one OpenAI-compatible Chat Completions request."""
         client = await self._get_client()
-
-        # Anthropic-compat profiles: minimum max_tokens is 16.
-        max_tokens = max(self._resolve_max_tokens(kwargs) or 1024, 16)
-
-        if self._is_anthropic():
-            # Anthropic Messages API: max_tokens is REQUIRED.
-            # Convert OpenAI-style messages and tool history to Anthropic format.
-            anthropic_messages: list[dict[str, Any]] = []
-            for message in messages:
-                role = message.get("role", "user")
-                if role == "system":
-                    continue
-                if role == "assistant" and message.get("tool_calls"):
-                    blocks: list[dict[str, Any]] = []
-                    if message.get("content"):
-                        blocks.append({"type": "text", "text": message["content"]})
-                    for tool_call in message.get("tool_calls", []):
-                        function = tool_call.get("function", {})
-                        raw_arguments = function.get("arguments", "{}")
-                        if isinstance(raw_arguments, str):
-                            try:
-                                arguments = json.loads(raw_arguments)
-                            except json.JSONDecodeError:
-                                arguments = {"raw": raw_arguments}
-                        else:
-                            arguments = raw_arguments or {}
-                        blocks.append(
-                            {
-                                "type": "tool_use",
-                                "id": tool_call.get("id", ""),
-                                "name": function.get("name", ""),
-                                "input": arguments,
-                            }
-                        )
-                    anthropic_messages.append({"role": "assistant", "content": blocks})
-                elif role == "tool":
-                    anthropic_messages.append(
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "tool_result",
-                                    "tool_use_id": message.get("tool_call_id", ""),
-                                    "content": message.get("content", ""),
-                                }
-                            ],
-                        }
-                    )
-                else:
-                    anthropic_messages.append(
-                        {"role": role, "content": message.get("content", "")}
-                    )
-
-            payload = {
-                "model": model,
-                "max_tokens": max_tokens,
-                "messages": anthropic_messages,
-                "temperature": kwargs.get("temperature", self.config.temperature),
-            }
-            if tools:
-                anthropic_tools: list[dict[str, Any]] = []
-                for tool in tools:
-                    function = tool.get("function", tool)
-                    anthropic_tools.append(
-                        {
-                            "name": function.get("name", ""),
-                            "description": function.get("description", ""),
-                            "input_schema": function.get(
-                                "parameters", function.get("input_schema", {"type": "object"})
-                            ),
-                        }
-                    )
-                payload["tools"] = anthropic_tools
-            # Optional system prepended as top-level system field.
-            sys_msg = next((m for m in messages if m.get("role") == "system"), None)
-            if sys_msg and sys_msg.get("content"):
-                payload["system"] = sys_msg["content"]
-
-            response = await client.post("/v1/messages", json=payload)
-            response.raise_for_status()
-            return self._normalise_anthropic_response(response.json())
-
-        if self._is_sakana_responses():
-            # Concatenate messages into a single string with role prefixes.
-            parts: list[str] = []
-            for m in messages:
-                role = m.get("role", "user")
-                content = m.get("content", "")
-                if role == "system":
-                    parts.append(f"System: {content}")
-                elif role == "assistant":
-                    parts.append(f"Assistant: {content}")
-                else:
-                    parts.append(f"User: {content}")
-
-            # ── base_url may already include /v1 (chat completions) or not.
-            # Sakana's Responses API lives at /v1/responses; we strip any
-            # trailing /v1 from the configured base_url and append the path
-            # explicitly so we never end up with /v1/v1/responses.
-            base = self._resolve_base_url() or ""
-            base_clean = base.rstrip("/")
-            if base_clean.endswith("/v1"):
-                base_clean = base_clean[:-3]
-            responses_path = f"{base_clean}/v1/responses"
-
-            # ── Floor 256 / cap 4096: fugu-ultra burns ~50-120 reasoning
-            # tokens before producing any visible text, so a tight cap
-            # silently returns status=incomplete with content="". Lift the
-            # floor to keep one-shot prompts viable; cap at 4096 to avoid
-            # runaway cost when the global max_tokens is configured high.
-            sakana_max = max(min(max_tokens, 4096), 256)
-            sakana_payload: dict[str, Any] = {
-                "model": model,
-                "input": "\n".join(parts),
-                "max_output_tokens": sakana_max,
-            }
-            response = await client.post(responses_path, json=sakana_payload)
-            response.raise_for_status()
-            return self._normalise_sakana_response(response.json())
-
-        # ── Kimi quirk: temperature=1 is the only value this model accepts ──
-        # Doc 2026-07 says model `kimi-for-coding` rejects any other temperature.
-        base = self._resolve_base_url() or ""
-        if "kimi.com" in base.lower():
-            kwargs = dict(kwargs)
-            kwargs["temperature"] = 1.0
 
         payload = {
             "model": model,
@@ -1044,183 +775,6 @@ class LLMProviderWrapper:
 
         data = response.json()
         return self._normalise_response(data)
-
-    @staticmethod
-    def _normalise_anthropic_response(data: dict[str, Any]) -> dict[str, Any]:
-        """Convert an Anthropic Messages API response into our standard dict.
-
-        Anthropic returns:
-          {"content": [{"type": "text", "text": "..."} | ...],
-           "stop_reason": "end_turn" | "max_tokens" | ...,
-           "model": "...",
-           "usage": {"input_tokens": N, "output_tokens": M}}
-        """
-        content_blocks = data.get("content", [])
-        text_parts = [b.get("text", "") for b in content_blocks if b.get("type") == "text"]
-        content = "".join(text_parts)
-        # Some Anthropic variants surface reasoning under "thinking".
-        reasoning = "".join(
-            b.get("thinking", "") for b in content_blocks if b.get("type") == "thinking"
-        )
-
-        usage = data.get("usage", {})
-        prompt_tokens = usage.get("input_tokens", 0)
-        completion_tokens = usage.get("output_tokens", 0)
-
-        stop_reason = data.get("stop_reason", "end_turn")
-        finish_map = {
-            "end_turn": "stop",
-            "stop_sequence": "stop",
-            "max_tokens": "length",
-            "tool_use": "tool_calls",
-        }
-        finish = finish_map.get(stop_reason, "stop")
-
-        # Tool use blocks surface as tool_calls so the REPL still works.
-        tool_calls: list[ToolCall] = []
-        for b in content_blocks:
-            if b.get("type") == "tool_use":
-                tool_calls.append(
-                    ToolCall(
-                        id=b.get("id", ""),
-                        name=b.get("name", ""),
-                        arguments=b.get("input", {}),
-                    )
-                )
-
-        return {
-            "content": content,
-            "reasoning_content": reasoning,
-            "tool_calls": tool_calls,
-            "usage": {
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": prompt_tokens + completion_tokens,
-            },
-            "finish_reason": finish,
-            "model": data.get("model", ""),
-        }
-
-    @staticmethod
-    def _normalise_sakana_response(data: dict[str, Any]) -> dict[str, Any]:
-        """Convert a Sakana Responses API payload into the standard dict.
-
-        Verified against live calls to ``https://api.sakana.ai/v1/responses``
-        (model ``fugu-ultra``, 2026-07-16). The wire format observed is:
-
-          {
-            "id": "resp-...",
-            "object": "response",
-            "status": "completed" | "incomplete",
-            "incomplete_details": {"reason": "max_output_tokens" | ...},
-            "output": [
-              {"type": "reasoning",
-               "id": "rs_...",
-               "summary": [{"type": "summary_text", "text": "..."}]},
-              {"type": "message",
-               "content": [{"type": "output_text", "text": "..."}]},
-            ],
-            "usage": {"input_tokens": N,
-                      "output_tokens": M,
-                      "total_tokens": T,
-                      "output_tokens_details": {"reasoning_tokens": R}}
-          }
-
-        The assistant text lives at
-        ``output[*].content[*].text`` where ``type == "output_text"``
-        (Sakana mirrors the OpenAI Responses API shape; ``text`` is also
-        accepted for forward-compat). Reasoning summaries live at
-        ``output[*].summary[*].text`` where ``type == "summary_text"``
-        — note this is ``summary``, NOT ``content`` (a common pitfall:
-        Sakana's reasoning blocks carry a list of summary chunks, not
-        OpenAI-style content chunks).
-
-        We also tolerate the legacy Chat Completions shape (``choices``)
-        in case Sakana falls back, and we surface an explicit ``error``
-        key when ``status == "incomplete"`` so callers don't mistake an
-        empty ``content`` for a successful zero-token reply.
-        """
-        # Chat Completions-style responses also flow through here when Sakana
-        # decides to return them; detect via presence of "choices".
-        if "choices" in data:
-            return LLMProviderWrapper._normalise_response(data)
-
-        out: list[Any] = data.get("output", []) or data.get("outputs", [])
-        text_parts: list[str] = []
-        reasoning_parts: list[str] = []
-        tool_calls: list[ToolCall] = []
-        for block in out:
-            kind = block.get("type", "")
-            if kind == "message":
-                # Sakana Responses API: block.content[*].type is "output_text".
-                # OpenAI standard: same field would be "text". Accept both.
-                for c in block.get("content", []) or []:
-                    ctype = c.get("type", "")
-                    if ctype in ("output_text", "text"):
-                        text_parts.append(c.get("text", ""))
-                    elif ctype == "reasoning":
-                        reasoning_parts.append(c.get("text", ""))
-            elif kind == "reasoning":
-                # Reasoning summaries live at ``summary[*].text`` — NOT
-                # ``content`` (Sakana diverges from the OpenAI Responses
-                # shape here). Accept ``content`` too for safety.
-                summary_items = block.get("summary") or block.get("content") or []
-                for c in summary_items:
-                    ctype = c.get("type", "")
-                    if ctype in ("summary_text", "reasoning_text", "text"):
-                        reasoning_parts.append(c.get("text", ""))
-            elif kind == "tool_use" or kind == "function_call":
-                tool_calls.append(
-                    ToolCall(
-                        id=block.get("id", ""),
-                        name=block.get("name", ""),
-                        arguments=block.get("input") or block.get("arguments") or {},
-                    )
-                )
-
-        # ── Map Sakana's status to a finish_reason the rest of Lilith ──
-        # already understands, plus surface a structured error when the
-        # response was cut short (otherwise callers see content="" and
-        # have no idea why).
-        raw_status = data.get("status", "completed")
-        incomplete_reason = (
-            (data.get("incomplete_details") or {}).get("reason")
-            if raw_status == "incomplete"
-            else None
-        )
-        if raw_status == "incomplete":
-            finish_reason = "length"
-        else:
-            finish_reason = "stop"
-
-        usage = data.get("usage", {}) or {}
-        prompt_tokens = usage.get("input_tokens", 0)
-        completion_tokens = usage.get("output_tokens", 0)
-        total_tokens = usage.get(
-            "total_tokens", prompt_tokens + completion_tokens
-        )
-
-        result: dict[str, Any] = {
-            "content": "\n".join(p for p in text_parts if p),
-            "reasoning_content": "\n".join(p for p in reasoning_parts if p),
-            "tool_calls": tool_calls,
-            "usage": {
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": total_tokens,
-            },
-            "finish_reason": finish_reason,
-            "model": data.get("model", ""),
-        }
-        # Surface the truncation cause so callers (REPL, doctor, etc.)
-        # can show "Sakana: respuesta truncada por max_output_tokens"
-        # instead of "respondió en N ms pero sin contenido".
-        if raw_status == "incomplete":
-            result["error"] = (
-                f"Sakana Responses API returned status=incomplete "
-                f"(reason={incomplete_reason or 'unknown'})"
-            )
-        return result
 
     @staticmethod
     def _normalise_response(data: dict[str, Any]) -> dict[str, Any]:

@@ -58,17 +58,16 @@ def _make_cfg() -> Any:
     profile = SimpleNamespace(
         api_key="sk-test",
         base_url="https://fake.example/v1",
-        model="fake-model",
+        model="deepseek-v4-flash",
         temperature=None,
         max_tokens=None,
-        use_responses=None,
     )
     return SimpleNamespace(
-        provider="fake",
-        model="fake-model",
+        provider="deepseek",
+        model="deepseek-v4-flash",
         api_key="sk-test",
         base_url="https://fake.example/v1",
-        providers={"fake": profile},
+        providers={"deepseek": profile},
         temperature=0.7,
         max_tokens=4096,
     )
@@ -86,14 +85,16 @@ def _install_fake_lilith_cli(monkeypatch, fake_provider: _FakeProvider) -> None:
     cfg = _make_cfg()
     presets = {
         "fake-preset": {
-            "provider": "fake",
-            "model": "fake-model",
+            "provider": "deepseek",
+            "model": "deepseek-v4-flash",
             "system_prompt": "stub system prompt",
         },
     }
 
     cfg_mod = types.ModuleType("lilith_cli.config")
     cfg_mod.load_config = lambda: cfg  # type: ignore[attr-defined]
+    cfg_mod.require_supported_provider = lambda name: name  # type: ignore[attr-defined]
+    cfg_mod.require_supported_model = lambda provider, model: model  # type: ignore[attr-defined]
     main_mod = types.ModuleType("lilith_cli.main")
     main_mod._load_subagent_presets = lambda config_path=None: presets  # type: ignore[attr-defined]
     providers_mod = types.ModuleType("lilith_cli.providers")
@@ -155,7 +156,7 @@ class TestOneShotUnchanged:
 
         assert result.success is True
         assert result.data["preset"] == "fake-preset"
-        assert result.data["provider"] == "fake"
+        assert result.data["provider"] == "deepseek"
         assert result.data["content"] == "hello from sub-agent"
         assert result.data["usage"]["total_tokens"] == 15
         # Exactly one LLM call.

@@ -72,8 +72,8 @@ def _config(**overrides):
     everything else is a no-op SimpleNamespace stub.
     """
     base = dict(
-        provider="test",
-        model="test-model",
+        provider="deepseek",
+        model="deepseek-v4-flash",
         api_key="sk-test",
         base_url="https://mock.example/v1",
         max_tokens=64,

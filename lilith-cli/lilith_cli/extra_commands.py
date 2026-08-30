@@ -47,8 +47,9 @@ from lilith_tools.watcher import (
     WatchStopTool,
 )
 
-from .config import CONFIG_DIR
+from .config import CONFIG_DIR, require_supported_model, require_supported_provider
 from .render import console, get_theme, render_error, set_theme
+from .session_telemetry import get_session_telemetry
 from rich.syntax import Syntax
 from rich.tree import Tree as RichTree
 
@@ -1410,7 +1411,7 @@ async def _run_review_agent_task(
 
         result = await asyncio.to_thread(
             DelegateSubagentTool().execute,
-            preset="investigador-minimax",
+            preset="grok-research",
             prompt=prompt,
             max_tokens=3000,
         )
@@ -1515,7 +1516,7 @@ async def _run_review_agent_command(session: SessionRuntime, tokens: list[str]) 
         name="lilith-review-agent",
     )
     console.print(
-        "[success]✓ Revisión iniciada en segundo plano con investigador-minimax.[/] "
+        "[success]✓ Revisión iniciada en segundo plano con grok-research.[/] "
         "[dim]Consultá `/review --agent result`.[/dim]"
     )
 
@@ -2606,7 +2607,7 @@ async def run_capture_command(session: SessionRuntime, args: str) -> None:
     if include_tools:
         lines.append("## 🔧 Herramientas llamadas")
         lines.append("")
-        tool_history = getattr(session, "_tool_call_history", None) or []
+        tool_history = get_session_telemetry(session).tool_calls
         if tool_history:
             for entry in tool_history:
                 name_tool = str(entry.get("name", "herramienta"))
@@ -2871,11 +2872,9 @@ async def run_history_command(session: SessionRuntime, args: str) -> None:
 
     history = session.history or []
 
-    # ── --tool filter: pull matching tool calls from session._tool_call_history ──
+    # ── --tool filter: pull matching calls from session telemetry ──
     if tool_filter:
-        tool_history: list[dict[str, Any]] = (
-            getattr(session, "_tool_call_history", []) or []
-        )
+        tool_history = get_session_telemetry(session).tool_calls
         matching = [h for h in tool_history if h.get("name") == tool_filter]
         if not matching:
             if json_mode:
@@ -3034,7 +3033,7 @@ async def run_last_tool_command(session: SessionRuntime, args: str) -> None:
         /last-tool file_read
     """
     text = args.strip()
-    history: list[dict[str, Any]] = getattr(session, "_tool_call_history", []) or []
+    history = get_session_telemetry(session).tool_calls
 
     if not history:
         console.print("[dim]No hay llamadas a herramientas en esta sesión.[/]")
@@ -3178,8 +3177,8 @@ async def run_config_command(session: SessionRuntime, args: str) -> None:  # noq
 
     Examples:
         /config
-        /config model gpt-4o
-        /config provider openai
+        /config model deepseek-v4-pro
+        /config provider deepseek
     """
     text = args.strip()
 
@@ -3198,6 +3197,31 @@ async def run_config_command(session: SessionRuntime, args: str) -> None:  # noq
     if not hasattr(session.config, key):
         render_error(f"Clave de configuración desconocida: {key}")
         return
+    if key == "provider":
+        try:
+            provider_name = require_supported_provider(value)
+        except ValueError as exc:
+            render_error(str(exc))
+            return
+        profile = session.config.providers.get(provider_name)
+        if profile is None:
+            render_error(f"Proveedor sin perfil configurado: {provider_name}")
+            return
+        session.config.provider = provider_name
+        session.config.model = profile.model or session.config.model
+        session.config.api_key = profile.api_key
+        session.config.base_url = profile.base_url
+        from .providers import create_provider
+
+        session.provider = create_provider(session.config)
+        console.print(f"[success]✓ provider = {provider_name}[/]")
+        return
+    if key == "model":
+        try:
+            value = require_supported_model(session.config.provider, value)
+        except ValueError as exc:
+            render_error(str(exc))
+            return
     setattr(session.config, key, value)
     console.print(f"[success]✓ {key} = {value}[/]")
 
@@ -3715,6 +3739,21 @@ async def run_profile_command(session: SessionRuntime, args: str) -> None:
             render_error(f"Perfil no encontrado: {rest}")
             return
         profile = profiles[rest]
+        try:
+            profile_provider = require_supported_provider(
+                profile.get("provider", session.config.provider)
+            )
+            profile_model = require_supported_model(
+                profile_provider,
+                profile.get("model", session.config.model),
+            )
+        except ValueError as exc:
+            render_error(str(exc))
+            return
+        provider_profile = session.config.providers.get(profile_provider)
+        if provider_profile is None:
+            render_error(f"Proveedor sin perfil configurado: {profile_provider}")
+            return
         profile_theme = profile.get("theme")
         if profile_theme:
             try:
@@ -3724,10 +3763,13 @@ async def run_profile_command(session: SessionRuntime, args: str) -> None:
                     f"El perfil {rest} referencia un tema desconocido: {profile_theme}"
                 )
                 return
-        if hasattr(session.config, "provider"):
-            session.config.provider = profile.get("provider", session.config.provider)
-        if hasattr(session.config, "model"):
-            session.config.model = profile.get("model", session.config.model)
+        session.config.provider = profile_provider
+        session.config.model = profile_model
+        session.config.api_key = provider_profile.api_key
+        session.config.base_url = provider_profile.base_url
+        from .providers import create_provider
+
+        session.provider = create_provider(session.config)
         console.print(f"[success]✓ Perfil cargado: {rest}[/]")
         return
 
@@ -4320,45 +4362,24 @@ _register_pin_tool()
 
 # Provider hint derived from model-name prefixes or known families.
 _MODEL_PROVIDER_HINTS: dict[str, str] = {
-    "fugu": "Sakana",
-    "claude": "Anthropic",
-    "gpt": "OpenAI",
-    "o3": "OpenAI",
     "deepseek": "DeepSeek",
-    "qwen": "Alibaba / Qwen",
-    "kimi": "Moonshot",
-    "moonshot": "Moonshot",
-    "seed": "BytePlus",
-    "glm": "BytePlus",
     "grok": "xAI",
-    "local-model": "Local",
+    "fugu": "Sakana AI",
 }
 
 # Capabilities are broad tags useful for REPL display.
 _MODEL_CAPABILITIES: dict[str, list[str]] = {
-    "fugu-ultra": ["chat", "tool-calling", "long-context", "streaming"],
-    "fugu-ultra-20260615": ["chat", "tool-calling", "long-context", "streaming"],
-    "claude-sonnet-4": ["chat", "tool-calling", "vision", "long-context", "streaming"],
-    "claude-opus-4": ["chat", "tool-calling", "vision", "long-context", "streaming", "reasoning"],
-    "claude-opus-5": ["chat", "tool-calling", "vision", "long-context", "streaming", "reasoning"],
-    "claude-haiku-4": ["chat", "tool-calling", "vision", "streaming"],
-    "gpt-4o": ["chat", "tool-calling", "vision", "streaming"],
-    "gpt-4o-mini": ["chat", "tool-calling", "vision", "streaming"],
-    "o3": ["chat", "reasoning", "tool-calling", "streaming"],
-    "deepseek-chat": ["chat", "tool-calling", "streaming"],
-    "deepseek-v4-flash": ["chat", "tool-calling", "streaming"],
-    "deepseek-reasoner": ["chat", "reasoning", "streaming"],
-    "qwen-max-latest": ["chat", "tool-calling", "streaming"],
-    "qwen-plus-latest": ["chat", "tool-calling", "streaming"],
-    "qwen3.7-max": ["chat", "tool-calling", "streaming"],
-    "kimi-for-coding": ["chat", "tool-calling", "long-context", "streaming"],
-    "moonshot-v1-128k": ["chat", "long-context", "streaming"],
-    "seed-1-6-250915": ["chat", "tool-calling", "streaming"],
-    "glm-4-7-251222": ["chat", "tool-calling", "streaming"],
+    "deepseek-v4-flash": ["chat", "reasoning", "tool-calling", "long-context", "streaming"],
+    "deepseek-v4-pro": ["chat", "reasoning", "tool-calling", "long-context", "streaming"],
     "grok-4.20-0309-non-reasoning": ["chat", "tool-calling", "streaming"],
-    "grok-4": ["chat", "tool-calling", "long-context", "streaming"],
-    "grok-3": ["chat", "tool-calling", "long-context", "streaming"],
-    "local-model": ["chat", "local"],
+    "grok-4.20-0309-reasoning": ["chat", "reasoning", "tool-calling", "long-context", "streaming"],
+    "grok-4.20-multi-agent-0309": ["chat", "reasoning", "tool-calling", "long-context", "streaming"],
+    "grok-4.3": ["chat", "reasoning", "tool-calling", "long-context", "streaming"],
+    "grok-4.5": ["chat", "reasoning", "tool-calling", "vision", "long-context", "streaming"],
+    "fugu": ["chat", "reasoning", "tool-calling", "long-context", "streaming"],
+    "fugu-ultra": ["chat", "reasoning", "tool-calling", "long-context", "streaming"],
+    "fugu-ultra-v1.0": ["chat", "reasoning", "tool-calling", "long-context", "streaming"],
+    "fugu-ultra-v1.1": ["chat", "reasoning", "tool-calling", "long-context", "streaming"],
 }
 
 
@@ -4714,14 +4735,15 @@ _FORKS_DIR = Path.home() / ".yggdrasil" / "forks"
 
 def _serialize_session(session: SessionRuntime) -> dict[str, Any]:
     """Return a JSON-serializable snapshot of the session state."""
+    telemetry = get_session_telemetry(session).snapshot()
     return {
         "version": 1,
         "timestamp": datetime.now(UTC).isoformat(),
         "config": session.config.model_dump(),
         "history": list(session.history),
         "system_prompt": session.system_prompt,
-        "total_usage": dict(session._total_usage),
-        "per_model_usage": dict(session._per_model_usage),
+        "total_usage": telemetry["total_usage"],
+        "per_model_usage": telemetry["per_model_usage"],
         "last_user_message": session._last_user_message,
         "agent_mode": session.agent_mode,
         "agent_allow_writes": session._agent_allow_writes,
@@ -4731,9 +4753,9 @@ def _serialize_session(session: SessionRuntime) -> dict[str, Any]:
         "stream_enabled": session._stream_enabled,
         "disabled_tools": sorted(session._disabled_tools),
         "pinned_messages": list(session._pinned_messages),
-        "tool_call_history": list(session._tool_call_history),
-        "command_history": list(session._command_history),
-        "file_edit_history": list(session._file_edit_history),
+        "tool_call_history": telemetry["tool_call_history"],
+        "command_history": telemetry["command_history"],
+        "file_edit_history": telemetry["file_edit_history"],
     }
 
 
@@ -4745,8 +4767,7 @@ def _deserialize_session(session: SessionRuntime, data: dict[str, Any]) -> None:
     session.config = YggdrasilConfig(**cfg_data)
     session.system_prompt = data.get("system_prompt", session.config.system_prompt)
     session.history = list(data.get("history", []))
-    session._total_usage = dict(data.get("total_usage", session._total_usage))
-    session._per_model_usage = dict(data.get("per_model_usage", session._per_model_usage))
+    get_session_telemetry(session).restore(data)
     session._last_user_message = data.get("last_user_message", "")
     session.agent_mode = data.get("agent_mode", "default")
     session._agent_allow_writes = data.get("agent_allow_writes", True)
@@ -4756,9 +4777,6 @@ def _deserialize_session(session: SessionRuntime, data: dict[str, Any]) -> None:
     session._stream_enabled = data.get("stream_enabled", True)
     session._disabled_tools = set(data.get("disabled_tools", []))
     session._pinned_messages = list(data.get("pinned_messages", []))
-    session._tool_call_history = list(data.get("tool_call_history", []))
-    session._command_history = list(data.get("command_history", []))
-    session._file_edit_history = list(data.get("file_edit_history", []))
 
 
 def _fork_path(name: str) -> Path:
@@ -5084,8 +5102,8 @@ async def run_map_command(session: SessionRuntime, args: str) -> None:  # noqa: 
 async def run_recent_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """List files edited or written during the current session.
 
-    Reads ``session._file_edit_history`` (populated by agent.py when
-    file_write / file_edit tools succeed) and renders the most recent
+    Reads session file-edit telemetry (populated by agent.py when file_write
+    or file_edit tools succeed) and renders the most recent
     entries first. Each entry shows the file path, the tool used, a
     short timestamp, and the file's current size on disk.
 
@@ -5094,17 +5112,18 @@ async def run_recent_command(session: SessionRuntime, args: str) -> None:  # noq
         /recent 25             — show last 25
         /recent clear          — wipe the in-session history
     """
-    history = getattr(session, "_file_edit_history", None)
-    if history is None:
+    telemetry = get_session_telemetry(session)
+    if not telemetry.status()["files"]:
         console.print(
             "[warning]Telemetría de ediciones no activa en esta sesión.[/]"
         )
         return
+    history = telemetry.file_edits
 
     text = args.strip().lower()
 
     if text == "clear":
-        history.clear()
+        telemetry.replace_file_edits([])
         console.print("[success]✓ Historial de archivos recientes vaciado.[/]")
         return
 
@@ -5191,7 +5210,7 @@ async def run_clear_screen_command(session: SessionRuntime, args: str) -> None: 
     """Limpia la pantalla del terminal sin tocar el historial.
 
     Equivalente a escribir ``cls`` (Windows) o ``clear`` (Unix) en el shell,
-    pero dentro del REPL. No toca ``session.history`` ni ``session._file_edit_history``.
+    pero dentro del REPL. No toca ``session.history`` ni su telemetría de archivos.
 
     Examples:
         /cls
@@ -5422,20 +5441,20 @@ _DEFAULT_PROFILES: dict[str, dict[str, Any]] = {
     "fast": {
         "provider": "deepseek",
         "model": "deepseek-v4-flash",
-        "theme": "norse",
+        "theme": "obsidian",
         "description": "Rápido y económico",
     },
     "reasoning": {
-        "provider": "anthropic",
-        "model": "claude-opus-4",
-        "theme": "norse",
-        "description": "Razonamiento profundo (costoso)",
+        "provider": "grok",
+        "model": "grok-4.20-0309-reasoning",
+        "theme": "violet-void",
+        "description": "Segunda opinión e investigación con Grok",
     },
-    "local": {
-        "provider": "local",
-        "model": "local-model",
-        "theme": "norse",
-        "description": "Modelo local, sin costo de API",
+    "orchestration": {
+        "provider": "sakana",
+        "model": "fugu-ultra",
+        "theme": "obsidian",
+        "description": "Orquestación y síntesis con Sakana Fugu Ultra",
     },
 }
 
@@ -6474,7 +6493,7 @@ def _run_deep_checks(session: SessionRuntime) -> list[dict]:
     Adds:
     - Disk free space in working directory
     - Active provider latency probe (no LLM call, just round-trip setup)
-    - Network connectivity (DNS lookup of api.openai.com)
+    - Network connectivity (DNS lookup of the active provider)
     - Number of tool calls recorded in current session
     - Language-server availability for every language supported by Lilith IDE
     """
@@ -6482,6 +6501,7 @@ def _run_deep_checks(session: SessionRuntime) -> list[dict]:
     import socket
     import subprocess
     import time
+    from urllib.parse import urlparse
 
     results: list[dict] = []
 
@@ -6540,19 +6560,24 @@ def _run_deep_checks(session: SessionRuntime) -> list[dict]:
 
     # Network probe
     try:
+        profile = session.config.providers.get(session.config.provider.lower())
+        base_url = (profile.base_url if profile else None) or session.config.base_url or ""
+        hostname = urlparse(base_url).hostname
+        if not hostname:
+            raise ValueError("el proveedor activo no tiene hostname")
         start = time.time()
-        socket.gethostbyname("api.openai.com")
+        socket.gethostbyname(hostname)
         latency_ms = int((time.time() - start) * 1000)
         results.append({
             "check": "Network DNS",
             "status": "ok",
-            "message": f"DNS resolved api.openai.com en {latency_ms}ms",
+            "message": f"DNS resolved {hostname} en {latency_ms}ms",
         })
     except socket.gaierror as exc:
         results.append({
             "check": "Network DNS",
             "status": "error",
-            "message": f"No se pudo resolver api.openai.com: {exc}",
+            "message": f"No se pudo resolver el proveedor activo: {exc}",
         })
     except Exception as exc:
         results.append({
@@ -6589,7 +6614,7 @@ def _run_deep_checks(session: SessionRuntime) -> list[dict]:
 
     # Session tool call count
     try:
-        tool_history = getattr(session, "_tool_call_history", None) or []
+        tool_history = get_session_telemetry(session).tool_calls
         count = len(tool_history)
         if count == 0:
             status = "warn"
@@ -6950,7 +6975,7 @@ async def run_conclave_command(session: SessionRuntime, args: str) -> None:  # n
 
     Examples:
         /conclave ¿Qué motor usa Lilith?
-        /conclave "¿Qué motor usa Lilith?" --presets investigador-minimax,grok-research
+        /conclave "¿Qué motor usa Lilith?" --presets batch-deepseek,grok-research
         /conclave "resume X" --presets a,b --structured --max-tokens 1024 --timeout 30
 
     Behaviour:
@@ -7212,7 +7237,7 @@ def _parse_goal_budget(value: str) -> int:
 
 def _goal_snapshot(session: SessionRuntime, goal: dict[str, Any]) -> dict[str, Any]:
     """Add current token accounting to a goal without mutating it."""
-    total = int((getattr(session, "_total_usage", {}) or {}).get("total_tokens", 0))
+    total = int(get_session_telemetry(session).total_usage.get("total_tokens", 0))
     used = max(0, total - int(goal.get("started_tokens", 0)))
     budget = goal.get("budget_tokens")
     return {
@@ -7308,7 +7333,7 @@ async def run_goal_command(session: SessionRuntime, args: str) -> None:
     if not objective:
         render_error("Uso: /goal <objetivo> [--budget 8k]")
         return
-    total = int((getattr(session, "_total_usage", {}) or {}).get("total_tokens", 0))
+    total = int(get_session_telemetry(session).total_usage.get("total_tokens", 0))
     goal = {
         "objective": objective,
         "status": "active",
@@ -7361,6 +7386,7 @@ async def run_help_command(session: SessionRuntime, args: str) -> None:  # noqa:
             ("model", "Mostrar/cambiar modelo"),
             ("provider", "Mostrar/cambiar proveedor"),
             ("theme", "Cambiar tema visual [name | current | preview <name> | list]"),
+            ("focus", "Ocultar/restaurar telemetría visual [on|off|toggle|status]"),
             ("tools", "Habilitar/deshabilitar herramientas"),
             ("profile", "Perfiles de configuración [list|save|show|load|delete]"),
             ("where", "Mostrar qué archivos de configuración se cargaron"),
@@ -8233,17 +8259,18 @@ async def run_compare_command(session: SessionRuntime, args: str) -> None:  # no
 
 def _compare_recent_paths(session: SessionRuntime, count: int = 2) -> list[str]:
     """Return up to ``count`` distinct paths from the session's
-    _file_edit_history, most-recent-first.
+    file-edit telemetry, most-recent-first.
 
-    Reads ``session._file_edit_history`` (populated by agent.py when
-    file_write / file_edit tools succeed). Mirrors the dedup logic
+    Reads session telemetry (populated by agent.py when file_write / file_edit
+    tools succeed). Mirrors the dedup logic
     used by /recent so the same path counted multiple times only
     contributes one entry. Falls back to empty list when telemetry
     is not active.
     """
-    history = getattr(session, "_file_edit_history", None)
-    if history is None:
+    telemetry = get_session_telemetry(session)
+    if not telemetry.status()["files"]:
         return []
+    history = telemetry.file_edits
     seen: dict[str, None] = {}
     for entry in reversed(history):
         path = entry.get("path", "")
@@ -8317,7 +8344,7 @@ async def run_log_command(session: SessionRuntime, args: str) -> None:
 
     Args:
         session: La sesión activa del agente (provee ``history``,
-            ``_tool_call_history``, ``config``, ``_session_start``).
+            telemetry, ``config`` and ``_session_start``).
         args: Texto crudo con los argumentos del usuario.
 
     Examples:
@@ -8381,9 +8408,7 @@ async def run_log_command(session: SessionRuntime, args: str) -> None:
 
     # ── Recolectar datos de la sesión ──────────────────────────────────
     history = getattr(session, "history", None) or []
-    tool_history: list[dict[str, Any]] = (
-        getattr(session, "_tool_call_history", None) or []
-    )
+    tool_history = get_session_telemetry(session).tool_calls
 
     # Inicio de sesión: intenta _session_start, _started_at, mtime del log,
     # y finalmente ahora.
@@ -10011,7 +10036,7 @@ def _context_snapshot(session: SessionRuntime) -> dict:
     model = getattr(session.config, "model", "") or ""
     max_tokens = estimate_context_window(model) or 0
 
-    usage = getattr(session, "_total_usage", {}) or {}
+    usage = get_session_telemetry(session).total_usage
     used = int(usage.get("total_tokens", 0) or usage.get("prompt_tokens", 0) or 0)
 
     # Per-bucket estimates. We split based on the same heuristic

@@ -29,7 +29,6 @@ for _mod in (
     "watcher",
     "snippets",
     "delegate",
-    "hermes_delegate",
     "conclave",
     "memory",
     "orchestration_state",

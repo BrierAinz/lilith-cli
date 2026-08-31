@@ -472,18 +472,6 @@ def load_config(config_path: Path | str | None = None) -> YggdrasilConfig:
         except Exception:
             pass
 
-    for env_path in (
-        Path.home() / ".hermes" / ".env",
-        Path(os.environ.get("APPDATA", "")) / "Local" / "hermes" / ".env",
-    ):
-        if env_path.exists():
-            try:
-                from dotenv import load_dotenv as _ld
-
-                _ld(env_path, override=False)
-            except Exception:
-                pass
-
     raw_text = path.read_text(encoding="utf-8")
     raw_yaml: dict[str, Any] = yaml.safe_load(raw_text) or {}
 

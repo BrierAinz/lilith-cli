@@ -29,4 +29,3 @@ bypass-selection = true
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib"
 asyncio_mode = "auto"
-addopts = "--import-mode=importlib"

@@ -164,6 +164,9 @@ class YggdrasilConfig(BaseModel):
     # runaway loops; the last iteration receives a soft-warning system
     # message asking the model to wrap up.
     max_iterations: int = 10
+    # Terminal kill switch set by ``--no-tools``. Category flags remain for
+    # selective configuration, but this value denies the entire tool surface.
+    tools_enabled: bool = True
     # Agent operating mode (default, plan-first, review-only, auto-edit).
     agent_mode: str = "default"
 

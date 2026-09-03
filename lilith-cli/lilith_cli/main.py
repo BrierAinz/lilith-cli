@@ -141,6 +141,7 @@ def _apply_overrides(
         if cfg.model in ("gpt-4o-mini", "fugu-ultra"):
             cfg.model = "local-model"
     if no_tools:
+        cfg.tools_enabled = False
         cfg.tools.filesystem = False
         cfg.tools.coding = False
         cfg.tools.web_search = False

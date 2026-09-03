@@ -163,7 +163,7 @@ class AgentSession:
         self.provider = provider or create_provider(config)
         self.history: list[dict[str, Any]] = []
         self.system_prompt = config.system_prompt
-        self._tools_enabled = True
+        self._tools_enabled = bool(getattr(config, "tools_enabled", True))
         self._total_usage: dict[str, int] = {
             "prompt_tokens": 0,
             "completion_tokens": 0,
@@ -198,6 +198,12 @@ class AgentSession:
         self.agent_mode: str = "default"
         self._agent_allow_writes: bool = True
         self._agent_plan_first: bool = False
+        from .agent_modes import apply_agent_mode, get_agent_mode
+
+        configured_mode = get_agent_mode(config.agent_mode)
+        if configured_mode is None:
+            raise ValueError(f"Unknown agent_mode: {config.agent_mode!r}")
+        apply_agent_mode(self, configured_mode)
 
         # Auto-execute settings: pre-approved tool patterns.
         self._auto_execute: bool = False
@@ -434,6 +440,9 @@ class AgentSession:
         """Return a list of tool description dicts (name, description,
         parameters) for currently enabled tools.
         """
+        if not self._tools_enabled:
+            self._tools_cache = []
+            return self._tools_cache
         if self._tools_cache is not None:
             return self._tools_cache
 
@@ -455,6 +464,11 @@ class AgentSession:
         }
 
         for name, description in all_tools.items():
+            from .agent_modes import get_agent_mode, mode_allows_tool
+
+            mode = get_agent_mode(self.agent_mode)
+            if mode is None or not mode_allows_tool(mode, name):
+                continue
             # Check if this tool's category is enabled.
             enabled = True
             for category, names in category_map.items():
@@ -553,6 +567,13 @@ class AgentSession:
 
         tool_name = tool_call.name
         tool_args = tool_call.arguments
+
+        if not self._tools_enabled:
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                name=tool_name,
+                content="Error: las herramientas estÃ¡n deshabilitadas por --no-tools.",
+            )
         signature = json.dumps(
             {"name": tool_name, "arguments": tool_args},
             sort_keys=True, ensure_ascii=False, default=str,
@@ -678,6 +699,20 @@ class AgentSession:
                 tool_call_id=tool_call.id,
                 name=tool_name,
                 content=f"Error: herramienta desconocida '{tool_name}'{suggestion_text}",
+            )
+
+        from .agent_modes import get_agent_mode, mode_allows_tool
+
+        active_mode = getattr(self, "agent_mode", "default")
+        mode = get_agent_mode(active_mode)
+        if mode is None or not mode_allows_tool(mode, tool_name):
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                name=tool_name,
+                content=(
+                    f"Error: el modo {active_mode} deniega la capacidad mutante "
+                    f"de '{tool_name}'."
+                ),
             )
 
         # ── retry settings ────────────────────────────────────────────────

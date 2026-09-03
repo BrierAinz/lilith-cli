@@ -12,6 +12,47 @@ from dataclasses import dataclass
 from typing import Any
 
 
+READ_ONLY_TOOL_NAMES = frozenset(
+    {
+        "bg_log",
+        "bg_status",
+        "directory_list",
+        "env_get",
+        "env_list",
+        "file_read",
+        "forja_characters",
+        "forja_controlnets",
+        "forja_design_batch_status",
+        "grep_files",
+        "memory_recall",
+        "snippet_get",
+        "snippet_list",
+        "sys_info",
+        "system_info",
+        "system_time",
+        "todo_list",
+        "watch_events",
+        "watch_status",
+        "web_search",
+    }
+)
+
+
+def tool_capability(tool_name: str) -> str:
+    """Classify a tool for the review-only hotfix.
+
+    The allowlist is intentionally fail-closed: newly registered, dynamic MCP,
+    process, Git, filesystem-write, delegation, and external-persistence tools
+    are mutating until a richer mandatory ToolSpec replaces this bridge.
+    """
+    return "read" if tool_name in READ_ONLY_TOOL_NAMES else "mutate"
+
+
+def mode_allows_tool(mode: "AgentMode", tool_name: str) -> bool:
+    """Return whether *mode* grants the tool's declared capability."""
+    return mode.allow_writes or tool_capability(tool_name) == "read"
+
+
 @dataclass(frozen=True)
 class AgentMode:
     """Description of a single agent operating mode.
@@ -124,6 +165,8 @@ def apply_agent_mode(session: Any, mode: AgentMode) -> None:
     session._agent_allow_writes = mode.allow_writes  # noqa: SLF001
     session._agent_plan_first = mode.plan_first  # noqa: SLF001
     session.agent_mode = mode.name
+    if hasattr(session, "_tools_cache"):
+        session._tools_cache = None  # noqa: SLF001
 
 
 def get_current_agent_mode(session: Any) -> str:

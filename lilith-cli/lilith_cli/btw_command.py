@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any
 from .render import console, render_error
 
 if TYPE_CHECKING:
-    from .agent import AgentSession
+    from .session_runtime import SessionRuntime
 
 
 _BTW_SYSTEM = (
@@ -39,13 +39,13 @@ _BTW_SYSTEM = (
 )
 
 
-async def run_btw_command(session: AgentSession, args: str) -> None:
+async def run_btw_command(session: SessionRuntime, args: str) -> None:
     """Send a transient question to the provider without touching history.
 
     Parameters
     ----------
     session:
-        The current ``AgentSession``. Only ``session.provider`` and
+        The current ``SessionRuntime``. Only ``session.provider`` and
         ``session.system_prompt`` are read; ``session.history`` is not
         mutated.
     args:

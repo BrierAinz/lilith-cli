@@ -461,4 +461,4 @@ class TestPackageExports:
     def test_version_is_1_13_0(self):
         import lilith_orchestrator as L
 
-        assert L.__version__ == "1.13.0"
+        assert L.__version__ == "1.14.0"

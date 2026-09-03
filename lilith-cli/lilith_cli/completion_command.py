@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING
 from .render import console, render_error
 
 if TYPE_CHECKING:
-    from .agent import AgentSession
+    from .session_runtime import SessionRuntime
 
 
 _BIN_NAME = "lilith"
@@ -222,7 +222,7 @@ def _install(shell: str, commands: list[str]) -> Path:
     return target
 
 
-async def run_completion_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_completion_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Entry point wired from ``repl.py``."""
 
     tokens = args.split()

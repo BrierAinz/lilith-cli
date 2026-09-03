@@ -30,7 +30,7 @@ from lilith_tools.undo import UndoManager
 from .render import console, render_error
 
 if TYPE_CHECKING:
-    from .agent import AgentSession
+    from .session_runtime import SessionRuntime
 
 
 # Maximum number of context lines in the printed diff. Keeps REPL output
@@ -162,7 +162,7 @@ def _clear_all(manager) -> None:
     )
 
 
-async def run_undo_peek_command(session: "AgentSession", args: str) -> None:  # noqa: ARG001
+async def run_undo_peek_command(session: "SessionRuntime", args: str) -> None:  # noqa: ARG001
     """Entry point dispatched by :mod:`lilith_cli.repl` for ``/undo-peek``.
 
     ``session`` is accepted for signature compatibility with the other

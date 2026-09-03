@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 from .render import console, render_error
 
 if TYPE_CHECKING:
-    from .agent import AgentSession
+    from .session_runtime import SessionRuntime
 
 
 _PIPELINE_DIR: Path = Path.home() / ".yggdrasil" / "pipelines"
@@ -126,7 +126,7 @@ def _parse_steps(steps_text: str) -> list[dict[str, Any]]:
 
 
 async def _run_pipeline_steps(
-    session: "AgentSession",
+    session: "SessionRuntime",
     name: str,
     steps: list[dict[str, Any]],
 ) -> None:
@@ -159,7 +159,7 @@ async def _run_pipeline_steps(
             console.print(result.content)
 
 
-async def run_pipeline_command(session: "AgentSession", args: str) -> None:
+async def run_pipeline_command(session: "SessionRuntime", args: str) -> None:
     """Execute /pipeline list|run <name>|show <name>|save <name> <steps>|delete <name>."""
     text = args.strip()
 

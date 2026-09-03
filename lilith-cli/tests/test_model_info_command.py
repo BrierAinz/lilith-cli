@@ -47,7 +47,7 @@ async def test_model_info_list_renders_all_models(fake_session, capsys):
     # A few well-known models from _MODEL_CONTEXTS.
     assert "gpt-4o" in combined
     assert "claude-sonnet-4" in combined
-    assert "deepseek-chat" in combined
+    assert "seed-1-6-250915" in combined
 
 
 @pytest.mark.asyncio

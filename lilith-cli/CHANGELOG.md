@@ -15,6 +15,36 @@ All notable changes to `lilith-cli` will be documented in this file.
   invocation keeps the interactive Rich rendering unchanged, reusing
   the same `AgentSession` event stream (no duplicated agent logic).
 
+### Changed
+- CLI commands, REPL, IDE and headless consumers now depend on the structural
+  `SessionRuntime` contract and create sessions through a lazy factory.
+  `AgentSession` remains the compatible default implementation and existing
+  monkeypatch and embedding seams continue to work.
+- Pre/post tool-hook context construction, gating, result rewriting and
+  fail-open accounting now live in an isolated `ToolHookDispatcher` instead
+  of the conversation loop. `AgentSession.attach_hooks()` and its legacy
+  telemetry fields remain compatible.
+
+## [4.6.0] - 2026-08-03
+
+### Added
+- Provider health registry with persistent circuit breakers and fast/network
+  doctor modes.
+- `route-benchmark` for reproducible, evidence-aware routing evaluation.
+- `timeline` for task, lease, checkpoint and verification audit events.
+- Lilith v8 operating contract covering budgets, idempotency, resumability,
+  semantic provenance and evidence-backed completion.
+
+### Changed
+- Production orchestration state now uses transactional SQLite/WAL and imports
+  the legacy JSON snapshot without deleting it.
+- `/learn` reads either SQLite or the compatibility JSON backend.
+- Provider profiles can be explicitly disabled or marked optional.
+
+### Fixed
+- Post-execution token budgets now include the current executor usage.
+- Budget failures release worker leases instead of leaving tasks claimed.
+
 ## [4.4.0] - 2026-07-12
 
 ### Added

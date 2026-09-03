@@ -1,8 +1,9 @@
 """Terminal interface for Lilith ecosystem."""
 
-__version__ = "4.5.0"
+__version__ = "4.6.0"
 
 from lilith_cli.trace import AgentTrace
+from lilith_cli.session_runtime import SessionRuntime, create_session
 
 
 _FEATURE_DOCS: dict[str, str] = {
@@ -32,4 +33,4 @@ _FEATURE_DOCS: dict[str, str] = {
     ),
 }
 
-__all__ = ["AgentTrace", "_FEATURE_DOCS"]
+__all__ = ["AgentTrace", "SessionRuntime", "_FEATURE_DOCS", "create_session"]

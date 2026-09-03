@@ -28,6 +28,7 @@ from .providers import (
     create_provider,
     lilith_tools_to_openai,
 )
+from .tool_hook_dispatcher import ToolHookDispatcher
 
 
 logger = logging.getLogger(__name__)
@@ -219,6 +220,7 @@ class AgentSession:
         self._hook_registry: Any = None
         self._session_id: str = ""
         self._hook_failures: int = 0  # Count of hook exceptions (telemetry)
+        self._hook_dispatcher = ToolHookDispatcher()
         self._session_start: datetime = datetime.now(UTC)
 
         # Simple execution telemetry for /metrics.
@@ -270,12 +272,43 @@ class AgentSession:
         session_id:
             Optional session id stamped onto every fired hook context.
         """
-        self._hook_registry = registry
-        self._session_id = session_id
+        dispatcher = self._get_hook_dispatcher()
+        dispatcher.attach(registry, session_id=session_id)
+        self._sync_hook_state(dispatcher)
         logger.info(
             "HookRegistry attached to AgentSession (session_id=%s)",
             session_id or "<none>",
         )
+
+    def _get_hook_dispatcher(self) -> ToolHookDispatcher:
+        """Return the dispatcher, restoring legacy manually-built sessions.
+
+        Some embedders and tests construct ``AgentSession`` through ``__new__``
+        and populate its historical private fields directly. Mirroring those
+        fields here preserves that compatibility seam.
+        """
+        registry = getattr(self, "_hook_registry", None)
+        session_id = getattr(self, "_session_id", "")
+        failures = getattr(self, "_hook_failures", 0)
+        dispatcher = getattr(self, "_hook_dispatcher", None)
+        if dispatcher is None:
+            dispatcher = ToolHookDispatcher(
+                registry,
+                session_id=session_id,
+                failures=failures,
+            )
+            self._hook_dispatcher = dispatcher
+        else:
+            dispatcher.registry = registry
+            dispatcher.session_id = session_id
+            dispatcher.failures = max(dispatcher.failures, failures)
+        return dispatcher
+
+    def _sync_hook_state(self, dispatcher: ToolHookDispatcher) -> None:
+        """Mirror dispatcher state for backwards-compatible telemetry access."""
+        self._hook_registry = dispatcher.registry
+        self._session_id = dispatcher.session_id
+        self._hook_failures = dispatcher.failures
 
     def _fire_pre_tool_hook(
         self,
@@ -287,30 +320,14 @@ class AgentSession:
         ``allowed=False`` means a hook gated the execution. Hooks may also
         rewrite ``params`` by mutating the HookContext data dict.
         """
-        if self._hook_registry is None:
-            return True, params
-        try:
-            from lilith_core.hooks import HookContext, HookType
-
-            ctx = HookContext(
-                hook_type=HookType.PRE_TOOL_CALL,
-                agent_name=getattr(self.config, "model", "lilith-cli"),
-                session_id=self._session_id or "",
-                data={"tool_name": tool_name, "params": dict(params)},
-            )
-            result = self._hook_registry.fire(ctx)
-        except Exception as exc:  # pragma: no cover — defensive
-            self._hook_failures += 1
-            logger.warning("pre_tool_call hook failed (non-fatal): %s", exc)
-            return True, params
-
-        if result is None:
-            return False, params
-        # Hooks may rewrite params in-place via the data dict
-        effective = result.data.get("params", params)
-        if not isinstance(effective, dict):
-            effective = params
-        return True, effective
+        dispatcher = self._get_hook_dispatcher()
+        outcome = dispatcher.fire_pre(
+            tool_name,
+            params,
+            agent_name=getattr(self.config, "model", "lilith-cli"),
+        )
+        self._sync_hook_state(dispatcher)
+        return outcome
 
     def _fire_post_tool_hook(
         self,
@@ -324,35 +341,15 @@ class AgentSession:
         translate that into a synthetic error ``ToolResult`` so the
         conversation loop still receives structured feedback.
         """
-        if self._hook_registry is None:
-            return result
-        try:
-            from lilith_core.hooks import HookContext, HookType
-
-            ctx = HookContext(
-                hook_type=HookType.POST_TOOL_CALL,
-                agent_name=getattr(self.config, "model", "lilith-cli"),
-                session_id=self._session_id or "",
-                data={"tool_name": tool_name, "params": dict(params), "result": result},
-            )
-            hook_result = self._hook_registry.fire(ctx)
-        except Exception as exc:  # pragma: no cover — defensive
-            self._hook_failures += 1
-            logger.warning("post_tool_call hook failed (non-fatal): %s", exc)
-            return result
-
-        if hook_result is None:
-            # Suppress: convert to a structured ToolResult error
-            try:
-                from .providers import ToolResult as _TR
-                return _TR(
-                    tool_call_id="",
-                    name=tool_name,
-                    content=f"Error: result for '{tool_name}' suppressed by post_tool_call hook",
-                )
-            except Exception:
-                return result
-        return hook_result.data.get("result", result)
+        dispatcher = self._get_hook_dispatcher()
+        outcome = dispatcher.fire_post(
+            tool_name,
+            params,
+            result,
+            agent_name=getattr(self.config, "model", "lilith-cli"),
+        )
+        self._sync_hook_state(dispatcher)
+        return outcome
 
     def session_duration(self) -> float:
         """Return elapsed session duration in seconds."""
@@ -1359,7 +1356,7 @@ class AgentSession:
             response_format = {"type": "json_object"} if getattr(self, "_json_mode", False) else None
             async for chunk in self.provider.stream(messages, tools=tools, response_format=response_format):
                 # Reasoning chunks (reasoning_content deltas from Kimi,
-                # GLM-5.1, DeepSeek, …) are a separate event type: forward
+                # GLM-family models, etc.) are a separate event type: forward
                 # them as-is so the UI renders a thinking panel instead of
                 # gluing the reasoning onto the final message.
                 if chunk.get("type") == "reasoning":

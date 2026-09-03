@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import random
+import time
 from typing import TYPE_CHECKING, Any
 
 
@@ -57,14 +58,6 @@ _MODEL_PRICING: dict[str, tuple[float, float]] = {
     "gpt-4o":                 (2.5, 10.0),
     "gpt-4o-mini":            (0.15, 0.6),
     "o3":                     (15.0, 60.0),
-    # DeepSeek
-    "deepseek-chat":          (0.27, 1.1),
-    "deepseek-v4-flash":      (0.07, 0.27),
-    "deepseek-reasoner":      (0.55, 2.19),
-    # Qwen / Alibaba
-    "qwen-max-latest":        (2.4, 9.6),
-    "qwen-plus-latest":       (0.4, 1.2),
-    "qwen3.7-max":            (2.4, 9.6),
     # Kimi
     "kimi-for-coding":        (1.0, 3.0),
     "moonshot-v1-128k":       (2.0, 2.0),
@@ -95,14 +88,6 @@ _MODEL_CONTEXTS: dict[str, int] = {
     "gpt-4o": 128_000,
     "gpt-4o-mini": 128_000,
     "o3": 200_000,
-    # DeepSeek
-    "deepseek-chat": 64_000,
-    "deepseek-v4-flash": 64_000,
-    "deepseek-reasoner": 64_000,
-    # Qwen / Alibaba
-    "qwen-max-latest": 128_000,
-    "qwen-plus-latest": 128_000,
-    "qwen3.7-max": 128_000,
     # Kimi
     "k3": 1_048_576,
     "kimi-for-coding": 256_000,
@@ -148,12 +133,6 @@ _MODEL_CONTEXTS: dict[str, int] = {
     "gpt-4o": 128_000,
     "gpt-4o-mini": 128_000,
     "o3": 200_000,
-    "deepseek-chat": 64_000,
-    "deepseek-v4-flash": 64_000,
-    "deepseek-reasoner": 64_000,
-    "qwen-max-latest": 32_000,
-    "qwen-plus-latest": 128_000,
-    "qwen3.7-max": 32_000,
     "k3": 1_048_576,
     "kimi-for-coding": 128_000,
     "moonshot-v1-128k": 128_000,
@@ -235,6 +214,48 @@ class LLMProviderWrapper:
     def __init__(self, config: YggdrasilConfig) -> None:
         self.config = config
         self._client: httpx.AsyncClient | None = None
+        from .provider_health import ProviderHealthRegistry
+
+        self._health = ProviderHealthRegistry()
+
+    def _profile(self) -> Any:
+        return self.config.providers.get(self.config.provider.lower())
+
+    def _ensure_provider_available(self, *, bypass_circuit: bool = False) -> None:
+        """Reject disabled or temporarily-open provider profiles early."""
+        from .provider_health import ProviderCircuitOpenError
+
+        profile = self._profile()
+        name = self.config.provider.lower()
+        # Ad-hoc configs used by callers/tests may not define a profile.
+        # Circuit policy belongs to an explicit profile, never to a guessed one.
+        if profile is None:
+            return
+        if profile is not None and not getattr(profile, "enabled", True):
+            raise ProviderCircuitOpenError(f"provider '{name}' esta deshabilitado")
+        if not bypass_circuit and not self._health.allow(name):
+            state = self._health.get(name)
+            wait = max(0, int(float(state.get("opened_until", 0)) - time.time()))
+            raise ProviderCircuitOpenError(
+                f"circuito de provider '{name}' abierto; reintento en {wait}s"
+            )
+
+    def _record_provider_failure(self, exc: BaseException) -> None:
+        profile = self._profile()
+        if profile is None:
+            return
+        status = (
+            exc.response.status_code
+            if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None
+            else None
+        )
+        self._health.record_failure(
+            self.config.provider,
+            exc,
+            threshold=int(getattr(profile, "circuit_breaker_failures", 2)),
+            cooldown_seconds=float(getattr(profile, "circuit_breaker_cooldown", 60.0)),
+            permanent=status in {401, 403},
+        )
 
     # ── HTTP client ─────────────────────────────────────────────────
 
@@ -332,18 +353,22 @@ class LLMProviderWrapper:
         when present. Non-transient failures (4xx other than 429) are
         surfaced immediately without burning retries.
         """
+        bypass_circuit = bool(kwargs.pop("bypass_circuit", False))
         model = model or self._resolve_model()
 
         async def _attempt() -> dict[str, Any]:
             return await self._do_complete(model, messages, tools=tools, **kwargs)
 
-        return await self._run_with_retry(_attempt, op_label="LLM call")
+        return await self._run_with_retry(
+            _attempt, op_label="LLM call", bypass_circuit=bypass_circuit
+        )
 
     async def _run_with_retry(
         self,
         attempt_fn,
         *,
         op_label: str = "LLM call",
+        bypass_circuit: bool = False,
     ) -> Any:
         """Run ``attempt_fn()`` with retry/backoff on transient HTTP failures.
 
@@ -361,6 +386,7 @@ class LLMProviderWrapper:
         operator scanning logs sees a consistent shape regardless of the
         caller.
         """
+        self._ensure_provider_available(bypass_circuit=bypass_circuit)
         last_exc: Exception | None = None
         last_response: httpx.Response | None = None
 
@@ -372,7 +398,14 @@ class LLMProviderWrapper:
 
         for attempt in range(1, retry_max + 2):  # 1 initial + retry_max retries
             try:
-                return await attempt_fn()
+                started = time.perf_counter()
+                result = await attempt_fn()
+                if self._profile() is not None:
+                    self._health.record_success(
+                        self.config.provider,
+                        int((time.perf_counter() - started) * 1000),
+                    )
+                return result
             except httpx.HTTPStatusError as exc:
                 last_exc = exc
                 last_response = exc.response
@@ -385,6 +418,7 @@ class LLMProviderWrapper:
                         attempt,
                         status,
                     )
+                    self._record_provider_failure(exc)
                     raise
                 if attempt > retry_max:
                     logger.warning(
@@ -449,14 +483,17 @@ class LLMProviderWrapper:
                     type(exc).__name__,
                     exc,
                 )
+                self._record_provider_failure(exc)
                 raise
 
         status_part = (
             f" (HTTP {last_response.status_code})" if last_response is not None else ""
         )
-        raise RuntimeError(
+        failure = RuntimeError(
             f"{op_label} failed after {retry_max} retries{status_part}: {last_exc}"
         )
+        self._record_provider_failure(last_exc or failure)
+        raise failure
 
     @staticmethod
     def _is_retryable_status(status_code: int) -> bool:
@@ -535,6 +572,7 @@ class LLMProviderWrapper:
         Yields dicts with keys:
           content (str), finish_reason (str|None), tool_calls (list|None)
         """
+        bypass_circuit = bool(kwargs.pop("bypass_circuit", False))
         model = model or self._resolve_model()
 
         # ── Anthropic-compat / Sakana-Responses profiles don't speak the
@@ -549,7 +587,9 @@ class LLMProviderWrapper:
                 return await self._do_complete(model, messages, tools=tools, **kwargs)
 
             result = await self._run_with_retry(
-                _fallback_attempt, op_label="stream() (Anthropic/Sakana fallback)"
+                _fallback_attempt,
+                op_label="stream() (Anthropic/Sakana fallback)",
+                bypass_circuit=bypass_circuit,
             )
             reasoning = result.get("reasoning_content")
             if reasoning:
@@ -577,6 +617,7 @@ class LLMProviderWrapper:
         # resume a half-streamed response safely, so transient
         # failures past that point propagate with a clear message.
 
+        self._ensure_provider_available(bypass_circuit=bypass_circuit)
         client = await self._get_client()
 
         # ── Kimi quirk: temperature=1 is the only value this model accepts ──
@@ -605,6 +646,7 @@ class LLMProviderWrapper:
         # counter resets at zero for every new stream() invocation.
         attempt = 0
         first_chunk_emitted = False
+        stream_started = time.perf_counter()
         retry_max = max(0, int(getattr(self.config, "retry_max", _MAX_RETRIES)))
         base_url = self._resolve_base_url() or ""
 
@@ -613,6 +655,11 @@ class LLMProviderWrapper:
                 async for chunk in self._stream_openai_sse(client, payload):
                     first_chunk_emitted = True
                     yield chunk
+                if self._profile() is not None:
+                    self._health.record_success(
+                        self.config.provider,
+                        int((time.perf_counter() - stream_started) * 1000),
+                    )
                 return  # generator exhausted normally
             except httpx.HTTPStatusError as exc:
                 status = exc.response.status_code
@@ -621,15 +668,18 @@ class LLMProviderWrapper:
                     # the failure with provider+status context so the
                     # REPL can show a useful message instead of a raw
                     # traceback from response.raise_for_status().
+                    self._record_provider_failure(exc)
                     raise RuntimeError(
                         f"stream() from {base_url} aborted mid-stream "
                         f"with HTTP {status}: {exc}"
                     ) from exc
                 # Pre-first-chunk: only retry transient statuses.
                 if not self._is_retryable_status(status):
+                    self._record_provider_failure(exc)
                     raise
                 attempt += 1
                 if attempt > retry_max:
+                    self._record_provider_failure(exc)
                     raise RuntimeError(
                         f"stream() from {base_url} failed after "
                         f"{retry_max} retries (HTTP {status}): {exc}"
@@ -660,12 +710,14 @@ class LLMProviderWrapper:
                 httpx.NetworkError,
             ) as exc:
                 if first_chunk_emitted:
+                    self._record_provider_failure(exc)
                     raise RuntimeError(
                         f"stream() from {base_url} aborted mid-stream "
                         f"with {type(exc).__name__}: {exc}"
                     ) from exc
                 attempt += 1
                 if attempt > retry_max:
+                    self._record_provider_failure(exc)
                     raise RuntimeError(
                         f"stream() from {base_url} failed after "
                         f"{retry_max} retries ({type(exc).__name__}): {exc}"

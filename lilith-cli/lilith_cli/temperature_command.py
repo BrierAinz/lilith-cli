@@ -18,7 +18,7 @@ from .config import save_config
 from .render import console, render_error
 
 if TYPE_CHECKING:
-    from .agent import AgentSession
+    from .session_runtime import SessionRuntime
 
 
 # Rango aceptado por las APIs tipo OpenAI/Anthropic. Por encima de ~1.2 la
@@ -30,7 +30,7 @@ _DEFAULT = 0.7
 _ALTA = 1.2
 
 
-def _es_kimi(session: "AgentSession") -> bool:
+def _es_kimi(session: "SessionRuntime") -> bool:
     """¿El proveedor activo ignora la temperatura?
 
     ``kimi-for-coding`` devuelve 400 con cualquier valor que no sea 1.0, así
@@ -49,7 +49,7 @@ def _es_kimi(session: "AgentSession") -> bool:
     return "kimi.com" in str(base).lower()
 
 
-def _mostrar(session: "AgentSession") -> None:
+def _mostrar(session: "SessionRuntime") -> None:
     actual = getattr(session.config, "temperature", _DEFAULT)
     console.print(f"[info]᛭ Temperatura:[/info] [model]{actual}[/]")
     console.print(
@@ -63,7 +63,7 @@ def _mostrar(session: "AgentSession") -> None:
         )
 
 
-async def run_temperature_command(session: "AgentSession", args: str) -> None:
+async def run_temperature_command(session: "SessionRuntime", args: str) -> None:
     """Muestra o ajusta la temperatura de sampling (/temperature [valor])."""
     text = args.strip()
 

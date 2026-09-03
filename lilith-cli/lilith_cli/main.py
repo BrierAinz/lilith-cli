@@ -173,10 +173,10 @@ def chat(
     cfg = load_config(config_path)
     _apply_overrides(cfg, model=model, provider=provider, local=local, no_tools=no_tools)
 
-    from .agent import AgentSession
+    from .session_runtime import create_session
     from .repl import run_repl
 
-    session = AgentSession(cfg)
+    session = create_session(cfg)
     asyncio.run(run_repl(session))
 
 
@@ -196,10 +196,10 @@ def ide(
     cfg = load_config(config_path)
     _apply_overrides(cfg, model=model, provider=provider, local=local, no_tools=no_tools)
 
-    from .agent import AgentSession
+    from .session_runtime import create_session
     from .ide import run_ide
 
-    session = AgentSession(cfg)
+    session = create_session(cfg)
     project_root = Path(root).resolve() if root else Path.cwd()
     run_ide(session, root=project_root)
 
@@ -272,12 +272,12 @@ def prompt(
             raise SystemExit(2)
         cfg.max_iterations = max_iterations
 
-    from .agent import AgentSession
+    from .session_runtime import create_session
 
-    session = AgentSession(cfg)
+    session = create_session(cfg)
 
     # ── Machine mode (quiet / json) ─────────────────────────────────
-    # Reuses the same AgentSession + process_message_stream loop as the
+    # Reuses the same SessionRuntime + process_message_stream loop as the
     # Rich UI, but renders nothing: clean stdout for sub-agent consumers.
     if quiet or output_format == "json":
         from .machine_output import run_oneshot_machine
@@ -386,7 +386,7 @@ def _load_subagent_presets(config_path: Path | str | None = None) -> dict[str, A
 def delegate(
     target: Annotated[
         str,
-        Parameter(help="Provider profile name (sakana, kimi, deepseek, mimo, m2, ...) OR Hlidskjalf preset name when --preset is used"),
+        Parameter(help="Provider profile name (sakana, kimi, minimax, ...) OR Hlidskjalf preset name when --preset is used"),
     ],
     text: Annotated[str, Parameter(help="Prompt to send")],
     model: Annotated[str | None, Parameter(name=["--model", "-m"])] = None,
@@ -406,7 +406,7 @@ def delegate(
 
     Compatibility: without any of the new flags (--preset/--agentic/--structured/
     --max-tokens/--max-turns) the command keeps the original one-shot behaviour
-    (AgentSession + run_oneshot). When ANY of those flags is supplied, the call
+    (SessionRuntime + run_oneshot). When ANY of those flags is supplied, the call
     routes through ``lilith_tools.delegate.DelegateSubagentTool`` so the delegation
     gets the full agentic/structured/multi-turn surface and is automatically
     recorded in the orchestration state (delegated -> completada/fallida).
@@ -434,10 +434,10 @@ def delegate(
         elif provider_profile.model:
             cfg.model = provider_profile.model
 
-        from .agent import AgentSession
+        from .session_runtime import create_session
         from .repl import run_oneshot
 
-        session = AgentSession(cfg)
+        session = create_session(cfg)
         asyncio.run(run_oneshot(session, text))
         return
 
@@ -552,7 +552,7 @@ _DOCTOR_PING_MAX_TOKENS = 256
 # Hard wall-clock cap on the whole ping. Even though the provider may
 # have its own per-call timeout, the doctor never blocks longer than
 # this so a single bad provider cannot stall the CLI.
-_DOCTOR_PING_TIMEOUT_SECONDS = 15.0
+_DOCTOR_PING_TIMEOUT_SECONDS = 5.0
 
 
 def _check_config_parses() -> dict[str, str]:
@@ -592,6 +592,13 @@ def _check_provider_keys(cfg: Any) -> list[dict[str, str]]:
             "message": "no hay providers declarados en config.yaml",
         }]
     for name, profile in providers.items():
+        if not getattr(profile, "enabled", True):
+            rows.append({
+                "check": f"api_key:{name}",
+                "status": "ok",
+                "message": f"provider '{name}' deshabilitado",
+            })
+            continue
         # ``profile`` may be a Pydantic model or a SimpleNamespace in
         # tests; ``getattr`` keeps us agnostic.
         raw = getattr(profile, "api_key", None)
@@ -629,7 +636,7 @@ def _check_provider_keys(cfg: Any) -> list[dict[str, str]]:
 
 
 async def _ping_one_provider(
-    name: str, profile: Any, *, parent_cfg: Any
+    name: str, profile: Any, *, parent_cfg: Any, force: bool = False
 ) -> dict[str, Any]:
     """Run a single tiny ``complete()`` against one provider profile.
 
@@ -665,6 +672,9 @@ async def _ping_one_provider(
         )
         if getattr(profile, "max_tokens", None) is not None:
             local_cfg.max_tokens = profile.max_tokens
+        # A diagnostic ping must never spend the production retry budget.
+        # Circuit state is bypassed only for an explicit ``--network`` probe.
+        local_cfg.retry_max = 0
         wrapper = LLMProviderWrapper(local_cfg)
     except Exception as exc:
         row["message"] = f"init: {type(exc).__name__}: {exc}"
@@ -675,6 +685,7 @@ async def _ping_one_provider(
             [{"role": "user", "content": "PONG"}],
             tools=None,
             max_tokens=_DOCTOR_PING_MAX_TOKENS,
+            bypass_circuit=force,
         )
     except Exception as exc:
         row["message"] = f"{type(exc).__name__}: {exc}"
@@ -738,7 +749,9 @@ def _is_loopback_base_url(base_url: str | None) -> bool:
     return host.strip().lower() in _LOOPBACK_HOSTNAMES
 
 
-async def _run_provider_pings(cfg: Any) -> list[dict[str, str]]:
+async def _run_provider_pings(
+    cfg: Any, *, force: bool = False
+) -> list[dict[str, str]]:
     """Ping every provider profile in parallel with a hard ceiling."""
     providers = (cfg.providers or {}) if cfg else {}
     if not providers:
@@ -749,14 +762,28 @@ async def _run_provider_pings(cfg: Any) -> list[dict[str, str]]:
         }]
 
     async def _guarded(name: str) -> dict[str, Any]:
+        profile = providers[name]
+        if not getattr(profile, "enabled", True):
+            return {
+                "check": f"ping:{name}",
+                "status": "ok",
+                "message": "omitido (enabled=false)",
+                "latency_ms": 0,
+            }
+        timeout = float(
+            getattr(profile, "doctor_timeout", _DOCTOR_PING_TIMEOUT_SECONDS)
+        )
         try:
-            return await asyncio.wait_for(
-                _ping_one_provider(name, providers[name], parent_cfg=cfg),
-                timeout=_DOCTOR_PING_TIMEOUT_SECONDS,
+            row = await asyncio.wait_for(
+                _ping_one_provider(name, profile, parent_cfg=cfg, force=force),
+                timeout=timeout,
             )
+            if row.get("status") == "error" and getattr(profile, "optional", False):
+                row["status"] = "warn"
+                row["message"] = f"opcional: {row.get('message', '')}"
+            return row
         except TimeoutError:
             # A stopped local model server is a warning; remote timeouts are errors.
-            profile = providers[name]
             base_url = getattr(profile, "base_url", None)
             if _is_loopback_base_url(base_url):
                 return {
@@ -764,16 +791,18 @@ async def _run_provider_pings(cfg: Any) -> list[dict[str, str]]:
                     "status": "warn",
                     "message": (
                         f"servicio local no disponible "
-                        f"(timeout {_DOCTOR_PING_TIMEOUT_SECONDS:.0f}s "
+                        f"(timeout {timeout:.0f}s "
                         f"en {base_url})"
                     ),
-                    "latency_ms": int(_DOCTOR_PING_TIMEOUT_SECONDS * 1000),
+                    "latency_ms": int(timeout * 1000),
                 }
             return {
                 "check": f"ping:{name}",
-                "status": "error",
-                "message": f"timeout {_DOCTOR_PING_TIMEOUT_SECONDS:.0f}s",
-                "latency_ms": int(_DOCTOR_PING_TIMEOUT_SECONDS * 1000),
+                "status": "warn" if getattr(profile, "optional", False) else "error",
+                "message": (
+                    "opcional: " if getattr(profile, "optional", False) else ""
+                ) + f"timeout {timeout:.0f}s",
+                "latency_ms": int(timeout * 1000),
             }
         except Exception as exc:
             return {
@@ -792,6 +821,26 @@ async def _run_provider_pings(cfg: Any) -> list[dict[str, str]]:
             "message": r["message"],
         })
     return out
+
+
+def _check_provider_health_cache(cfg: Any) -> list[dict[str, str]]:
+    """Expose cached circuit state without making network requests."""
+    from .provider_health import ProviderHealthRegistry
+
+    registry = ProviderHealthRegistry()
+    rows: list[dict[str, str]] = []
+    for name, profile in (cfg.providers or {}).items():
+        if not getattr(profile, "enabled", True):
+            continue
+        state = registry.get(name)
+        circuit = str(state.get("state", "closed"))
+        failures = int(state.get("consecutive_failures", 0))
+        status = "warn" if circuit == "open" else "ok"
+        message = f"circuit={circuit}; fallos_consecutivos={failures}"
+        if state.get("last_latency_ms") is not None:
+            message += f"; ultima_latencia={state['last_latency_ms']}ms"
+        rows.append({"check": f"health:{name}", "status": status, "message": message})
+    return rows
 
 
 def _check_mcp_servers(cfg: Any) -> list[dict[str, str]]:
@@ -915,6 +964,37 @@ def _check_memory_db(cfg: Any) -> dict[str, str]:
     }
 
 
+def _check_orchestration_state() -> dict[str, str]:
+    """Validate the active durable state and report its backend/revision."""
+    try:
+        from lilith_tools.orchestration_state import OrchestrationStateStore
+
+        store = OrchestrationStateStore()
+        state = store.get()
+    except Exception as exc:
+        return {
+            "check": "orchestration.state",
+            "status": "error",
+            "message": f"no accesible: {exc}",
+        }
+    backend = str(state.get("backend") or "json")
+    tasks = len(state.get("tasks") or [])
+    if backend != "sqlite":
+        return {
+            "check": "orchestration.state",
+            "status": "warn",
+            "message": f"backend legado {backend}; {tasks} tareas",
+        }
+    return {
+        "check": "orchestration.state",
+        "status": "ok",
+        "message": (
+            f"sqlite WAL; revision {state.get('revision', 0)}; "
+            f"{tasks} tareas; {state.get('event_count', 0)} eventos"
+        ),
+    }
+
+
 def _check_package_versions() -> list[dict[str, str]]:
     """Report the installed version of every lilith-* package."""
     import importlib.metadata as md
@@ -947,7 +1027,9 @@ def _check_package_versions() -> list[dict[str, str]]:
     return rows
 
 
-def run_doctor_checks() -> list[dict[str, str]]:
+def run_doctor_checks(
+    *, network: bool = True, force_network: bool = False, start_mcp: bool = True
+) -> list[dict[str, str]]:
     """Run every diagnostic check and return the flat row list.
 
     Public entry point for tests; the ``doctor`` command below is a
@@ -981,24 +1063,44 @@ def run_doctor_checks() -> list[dict[str, str]]:
     # Pings are async; the sync ``run_doctor_checks`` runs them in a
     # fresh event loop. Tests that need finer control can call
     # ``_run_provider_pings`` directly.
-    try:
-        ping_rows = asyncio.run(_run_provider_pings(cfg))
-    except Exception as exc:
-        ping_rows = [{
-            "check": "ping",
-            "status": "error",
-            "message": f"asyncio fallo: {exc}",
-        }]
-    rows.extend(ping_rows)
+    if network:
+        try:
+            ping_rows = asyncio.run(
+                _run_provider_pings(cfg, force=force_network)
+            )
+        except Exception as exc:
+            ping_rows = [{
+                "check": "ping",
+                "status": "error",
+                "message": f"asyncio fallo: {exc}",
+            }]
+        rows.extend(ping_rows)
+    else:
+        rows.extend(_check_provider_health_cache(cfg))
 
-    rows.extend(_check_mcp_servers(cfg))
+    if start_mcp:
+        rows.extend(_check_mcp_servers(cfg))
     rows.append(_check_memory_db(cfg))
+    rows.append(_check_orchestration_state())
     rows.extend(_check_package_versions())
     return rows
 
 
 @app.command
-def doctor() -> None:
+def doctor(
+    fast: Annotated[
+        bool,
+        Parameter(name="--fast", help="Solo checks locales y salud cacheada"),
+    ] = False,
+    network: Annotated[
+        bool,
+        Parameter(name="--network", help="Fuerza probes de red aunque el circuito este abierto"),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        Parameter(name="--json", help="Salida JSON estable para automatizacion"),
+    ] = False,
+) -> None:
     """Chequeo de salud: config, providers, MCP, memory, paquetes.
 
     Imprime una tabla con una fila por chequeo (estado: ok/warn/error)
@@ -1008,9 +1110,18 @@ def doctor() -> None:
     """
     from rich.table import Table
 
-    from .render import console
+    from .render import console, print_json
 
-    rows = run_doctor_checks()
+    rows = run_doctor_checks(
+        network=not fast,
+        force_network=network,
+        start_mcp=not fast,
+    )
+    if json_output:
+        print_json(rows)
+        if any(r.get("status") == "error" for r in rows):
+            raise SystemExit(1)
+        return
     table = Table(show_header=True, header_style="bold cyan")
     table.add_column("Check", style="bold")
     table.add_column("Status")
@@ -1033,11 +1144,108 @@ def doctor() -> None:
         raise SystemExit(1)
 
 
+@app.command(name="route-benchmark")
+def route_benchmark(
+    cases_path: Annotated[
+        str | None,
+        Parameter(name="--cases", help="Archivo JSON con casos de routing"),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        Parameter(name="--json", help="Salida JSON estable"),
+    ] = False,
+) -> None:
+    """Evalua el router con casos reproducibles y evidencia historica."""
+    from lilith_orchestrator.routing_benchmark import (
+        DEFAULT_ROUTING_CASES,
+        load_cases,
+        run_routing_benchmark,
+    )
+    from lilith_orchestrator.task_router import TaskRouter
+    from lilith_tools.orchestration_state import OrchestrationStateStore
+
+    from .render import console, print_json
+
+    cases = load_cases(cases_path) if cases_path else list(DEFAULT_ROUTING_CASES)
+    result = run_routing_benchmark(
+        TaskRouter(store=OrchestrationStateStore()), cases
+    )
+    if json_output:
+        print_json(result)
+        return
+    from rich.table import Table
+
+    table = Table(title="Routing benchmark", show_header=True)
+    table.add_column("Caso")
+    table.add_column("Esperado")
+    table.add_column("Elegido")
+    table.add_column("Estado")
+    for case in result["cases"]:
+        table.add_row(
+            case["name"],
+            case["expected_preset"],
+            case["actual_preset"],
+            "ok" if case["passed"] else "fallo",
+        )
+    console.print(table)
+    console.print(
+        f"[bold]Accuracy:[/] {result['passed']}/{result['total']} "
+        f"({result['accuracy']:.1%})"
+    )
+
+
+@app.command
+def timeline(
+    task_id: Annotated[
+        str | None,
+        Parameter(name="--task", help="Filtra por ID de tarea"),
+    ] = None,
+    limit: Annotated[
+        int,
+        Parameter(name="--limit", help="Numero maximo de eventos"),
+    ] = 50,
+    json_output: Annotated[
+        bool,
+        Parameter(name="--json", help="Salida JSON estable"),
+    ] = False,
+) -> None:
+    """Muestra la linea temporal auditable de la orquestacion."""
+    import json as _json
+
+    from lilith_tools.orchestration_state import OrchestrationStateStore
+
+    from .render import console, print_json
+
+    events = OrchestrationStateStore().events(
+        limit=max(1, int(limit)), task_id=task_id
+    )
+    if json_output:
+        print_json(events)
+        return
+    from rich.table import Table
+
+    table = Table(title="Orchestration timeline", show_header=True)
+    table.add_column("Seq", justify="right")
+    table.add_column("Timestamp")
+    table.add_column("Event")
+    table.add_column("Task")
+    table.add_column("Correlation")
+    table.add_column("Payload")
+    for event in events:
+        payload = _json.dumps(event.get("payload") or {}, ensure_ascii=False)
+        table.add_row(
+            str(event.get("seq", "")), str(event.get("created_at", "")),
+            str(event.get("event_type", "")), str(event.get("task_id") or ""),
+            str(event.get("correlation_id") or ""), payload[:160],
+        )
+    console.print(table)
+
+
 @app.command
 def subagent(
     preset: Annotated[
         str,
-        Parameter(help="Hlidskjalf preset name (ejecutor-kimi, investigador-minimax, batch-deepseek, orquestador-fugu)"),
+        Parameter(help="Hlidskjalf preset name (ejecutor-kimi, investigador-minimax, orquestador-fugu)"),
     ],
     text: Annotated[str, Parameter(help="Prompt to send via the preset")],
     config_path: Annotated[str | None, Parameter(name="--config")] = None,
@@ -1079,10 +1287,10 @@ def subagent(
     if p.get("system_prompt"):
         cfg.system_prompt = p["system_prompt"]
 
-    from .agent import AgentSession
+    from .session_runtime import create_session
     from .repl import run_oneshot
 
-    session = AgentSession(cfg)
+    session = create_session(cfg)
     asyncio.run(run_oneshot(session, text))
 
 
@@ -1113,10 +1321,10 @@ def default_command(
         cfg = load_config(config_path)
         _apply_overrides(cfg, model=model, provider=provider, local=local, no_tools=no_tools)
 
-        from .agent import AgentSession
+        from .session_runtime import create_session
         from .repl import run_oneshot
 
-        session = AgentSession(cfg)
+        session = create_session(cfg)
         asyncio.run(run_oneshot(session, prompt_text))
         return
 

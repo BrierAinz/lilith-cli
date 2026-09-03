@@ -60,7 +60,7 @@ def _save_feedback(entries: list[dict[str, Any]]) -> None:
 
 
 if TYPE_CHECKING:
-    from .agent import AgentSession
+    from .session_runtime import SessionRuntime
 
 
 # ── Bookmark storage helper ─────────────────────────────────────────
@@ -101,7 +101,7 @@ class BaseCommand:
     description: str = ""
     aliases: list[str] = []
 
-    def __init__(self, session: AgentSession) -> None:
+    def __init__(self, session: SessionRuntime) -> None:
         self.session = session
 
     async def execute(self, args: str) -> None:
@@ -4039,8 +4039,8 @@ class SubagentsCommand(BaseCommand):
     _TEST_TIMEOUT_SECONDS = 20.0
     # Probe size: small enough to be cheap on every provider, large
     # enough to leave room for reasoning_content before the visible
-    # content. Models with chain-of-thought reasoning (Kimi, DeepSeek,
-    # GLM-5.1) burn the budget on reasoning_content; with max_tokens=8
+    # content. Models with chain-of-thought reasoning may burn the
+    # budget on reasoning_content; with max_tokens=8
     # the visible ``content`` came back empty even though the call
     # succeeded, producing a false "respuesta vacía".
     _TEST_MAX_TOKENS = 64
@@ -4211,7 +4211,7 @@ class SubagentsCommand(BaseCommand):
             elapsed = (time.perf_counter() - t0) * 1000
             row["latency_ms"] = int(elapsed)
             content = response.get("content") or ""
-            # Kimi / DeepSeek / GLM-5.1 may burn the whole budget on
+            # Some reasoning models may burn the whole budget on
             # ``reasoning_content`` (chain-of-thought) and leave the
             # visible ``content`` empty. Treat that as "ok" but tag it
             # so the table can show "vacio (solo reasoning)" instead of
@@ -4357,7 +4357,7 @@ class SubagentsCommand(BaseCommand):
 class CommandRegistry:
     """Discovers, registers, and routes slash commands."""
 
-    def __init__(self, session: AgentSession) -> None:
+    def __init__(self, session: SessionRuntime) -> None:
         self.session = session
         self._commands: dict[str, BaseCommand] = {}
         self._aliases: dict[str, str] = {}

@@ -1,7 +1,7 @@
 """Source for /learn slash command block. Appended to extra_commands.py by _learn_section.py.
 
 The :class:`LearnSkillSuggester` here is the pure logic that turns the
-delegation post-mortems stored in ``~/.yggdrasil/orchestration_state.json``
+delegation post-mortems stored in the active orchestration state
 into candidate ``DelegationSkill`` templates. It is separated from the
 REPL/renderer glue in ``extra_commands.py`` so the unit tests can drive it
 directly with a synthetic state JSON.
@@ -12,7 +12,7 @@ Public API
 * :class:`LearnSkillSuggester` — pure logic; takes a list of post_mortems
   (+ optional tasks for prompt-context lookup) and yields suggested skills.
 * :func:`suggest_from_state_path` — convenience wrapper that reads the
-  state JSON from a given path and returns suggestions.
+  SQLite or legacy JSON state from a given path and returns suggestions.
 * :func:`save_suggestion` — turns a suggestion into a real
   :class:`lilith_skills.delegation_skills.DelegationSkill` and persists it
   via :class:`DelegationSkillRegistry`.
@@ -56,7 +56,7 @@ class SkillSuggestion:
 
 
 def suggest_from_state_path(state_path: Path) -> list[SkillSuggestion]:
-    """Read the state JSON at ``state_path`` and return suggestions.
+    """Read orchestration state at ``state_path`` and return suggestions.
 
     Returns an empty list (NOT raises) if the file is missing or invalid —
     the caller decides whether to surface a user-facing message.
@@ -64,9 +64,14 @@ def suggest_from_state_path(state_path: Path) -> list[SkillSuggestion]:
     if not state_path.exists():
         return []
     try:
-        import json
+        if state_path.suffix.lower() == ".json":
+            import json
 
-        data = json.loads(state_path.read_text(encoding="utf-8"))
+            data = json.loads(state_path.read_text(encoding="utf-8"))
+        else:
+            from lilith_tools.orchestration_state import OrchestrationStateStore
+
+            data = OrchestrationStateStore(state_path).get()
     except (OSError, ValueError):
         return []
     if not isinstance(data, dict):

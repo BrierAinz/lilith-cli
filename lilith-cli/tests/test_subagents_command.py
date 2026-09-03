@@ -302,7 +302,7 @@ def _profile(
 
 def test_subagents_test_accepts_reasoning_only(fake_session, monkeypatch, capsys):
     """A response with empty ``content`` but non-empty
-    ``reasoning_content`` (Kimi / DeepSeek / GLM-5.1 pattern) must
+    ``reasoning_content`` from a reasoning model must
     count as ok and surface the "solo reasoning" tag in the table."""
     from lilith_cli.commands import SubagentsCommand
 

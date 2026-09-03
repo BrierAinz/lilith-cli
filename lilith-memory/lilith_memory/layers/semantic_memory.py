@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import sqlite3
 import time
@@ -57,7 +58,12 @@ class SemanticMemory:
                     confidence REAL NOT NULL DEFAULT 0.7,
                     metadata TEXT,
                     timestamp REAL NOT NULL,
-                    access_count INTEGER NOT NULL DEFAULT 0
+                    access_count INTEGER NOT NULL DEFAULT 0,
+                    namespace TEXT NOT NULL DEFAULT 'global',
+                    expires_at REAL,
+                    content_hash TEXT,
+                    supersedes_id TEXT,
+                    updated_at REAL
                 )
                 """,
             )
@@ -72,6 +78,53 @@ class SemanticMemory:
                 "CREATE INDEX IF NOT EXISTS idx_semantic_confidence "
                 "ON semantic_memories(confidence DESC)",
             )
+            # Additive migration for databases created before v8.
+            columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(semantic_memories)")
+            }
+            migrations = {
+                "namespace": "TEXT NOT NULL DEFAULT 'global'",
+                "expires_at": "REAL",
+                "content_hash": "TEXT",
+                "supersedes_id": "TEXT",
+                "updated_at": "REAL",
+            }
+            for name, declaration in migrations.items():
+                if name not in columns:
+                    conn.execute(
+                        f"ALTER TABLE semantic_memories ADD COLUMN {name} {declaration}"
+                    )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS semantic_evidence (
+                    id TEXT PRIMARY KEY,
+                    memory_id TEXT NOT NULL,
+                    relation TEXT NOT NULL,
+                    source TEXT,
+                    note TEXT,
+                    weight REAL NOT NULL,
+                    timestamp REAL NOT NULL,
+                    FOREIGN KEY(memory_id) REFERENCES semantic_memories(id) ON DELETE CASCADE
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_semantic_namespace_hash "
+                "ON semantic_memories(namespace, fact_type, content_hash)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_semantic_expiry "
+                "ON semantic_memories(expires_at)"
+            )
+            # Backfill deterministic hashes without removing historical rows.
+            for item_id, content in conn.execute(
+                "SELECT id, content FROM semantic_memories WHERE content_hash IS NULL"
+            ).fetchall():
+                conn.execute(
+                    "UPDATE semantic_memories SET content_hash=?, updated_at=COALESCE(updated_at, timestamp) "
+                    "WHERE id=?",
+                    (self._content_hash(content), item_id),
+                )
             conn.commit()
 
     # ------------------------------------------------------------------
@@ -89,6 +142,11 @@ class SemanticMemory:
                 pass
         return d
 
+    @staticmethod
+    def _content_hash(content: str) -> str:
+        normalized = " ".join(str(content).strip().casefold().split())
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -100,6 +158,11 @@ class SemanticMemory:
         source: str | None = None,
         confidence: float = 0.7,
         metadata: dict[str, Any] | None = None,
+        namespace: str = "global",
+        ttl_seconds: float | None = None,
+        provenance: dict[str, Any] | None = None,
+        supersedes_id: str | None = None,
+        deduplicate: bool = True,
     ) -> str:
         """Add a new semantic memory entry.
 
@@ -124,19 +187,77 @@ class SemanticMemory:
                 f"Must be one of: {', '.join(sorted(VALID_FACT_TYPES))}",
             )
 
+        content = str(content).strip()
+        if not content:
+            raise ValueError("content must not be empty")
+        namespace = str(namespace or "global").strip() or "global"
+        confidence = max(0.0, min(1.0, float(confidence)))
         item_id = str(uuid.uuid4())
         now = time.time()
+        expires_at = now + float(ttl_seconds) if ttl_seconds is not None else None
+        digest = self._content_hash(content)
+        merged_metadata = dict(metadata or {})
+        if provenance:
+            merged_metadata.setdefault("provenance", []).append(dict(provenance))
 
-        def _insert() -> None:
+        def _insert() -> str:
             with sqlite3.connect(self._db_path) as conn:
+                conn.row_factory = sqlite3.Row
                 conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA foreign_keys=ON")
+                conn.execute("BEGIN IMMEDIATE")
+                if deduplicate:
+                    existing = conn.execute(
+                        "SELECT * FROM semantic_memories WHERE namespace=? "
+                        "AND fact_type=? AND content_hash=? "
+                        "AND (expires_at IS NULL OR expires_at > ?) "
+                        "ORDER BY confidence DESC, timestamp DESC LIMIT 1",
+                        (namespace, fact_type, digest, now),
+                    ).fetchone()
+                    if existing is not None:
+                        old_metadata: dict[str, Any] = {}
+                        if existing["metadata"]:
+                            try:
+                                old_metadata = json.loads(existing["metadata"])
+                            except (json.JSONDecodeError, TypeError):
+                                old_metadata = {}
+                        for key, value in merged_metadata.items():
+                            if key == "provenance":
+                                old_metadata.setdefault("provenance", []).extend(value)
+                            else:
+                                old_metadata[key] = value
+                        conn.execute(
+                            "UPDATE semantic_memories SET confidence=?, metadata=?, "
+                            "source=COALESCE(?, source), expires_at=COALESCE(?, expires_at), "
+                            "updated_at=? WHERE id=?",
+                            (
+                                max(float(existing["confidence"]), confidence),
+                                json.dumps(old_metadata) if old_metadata else None,
+                                source,
+                                expires_at,
+                                now,
+                                existing["id"],
+                            ),
+                        )
+                        conn.execute(
+                            "INSERT INTO semantic_evidence "
+                            "(id, memory_id, relation, source, note, weight, timestamp) "
+                            "VALUES (?, ?, 'corroborates', ?, ?, ?, ?)",
+                            (
+                                str(uuid.uuid4()), existing["id"], source,
+                                "exact-content deduplication", 0.05, now,
+                            ),
+                        )
+                        conn.commit()
+                        return str(existing["id"])
                 conn.execute(
                     """
                     INSERT INTO semantic_memories
                         (id, content, fact_type, source,
                          confidence, metadata, timestamp,
-                         access_count)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+                         access_count, namespace, expires_at,
+                         content_hash, supersedes_id, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
                     """,
                     (
                         item_id,
@@ -144,16 +265,44 @@ class SemanticMemory:
                         fact_type,
                         source,
                         confidence,
-                        json.dumps(metadata) if metadata else None,
+                        json.dumps(merged_metadata) if merged_metadata else None,
+                        now,
+                        namespace,
+                        expires_at,
+                        digest,
+                        supersedes_id,
                         now,
                     ),
                 )
+                if supersedes_id:
+                    conn.execute(
+                        "UPDATE semantic_memories SET confidence=MAX(0, confidence - 0.25), "
+                        "updated_at=? WHERE id=?",
+                        (now, supersedes_id),
+                    )
+                    conn.execute(
+                        "INSERT INTO semantic_evidence "
+                        "(id, memory_id, relation, source, note, weight, timestamp) "
+                        "VALUES (?, ?, 'contradicts', ?, ?, ?, ?)",
+                        (
+                            str(uuid.uuid4()), supersedes_id, source,
+                            f"superseded by {item_id}", -0.25, now,
+                        ),
+                    )
                 conn.commit()
+                return item_id
 
-        await asyncio.to_thread(_insert)
-        return item_id
+        return await asyncio.to_thread(_insert)
 
-    async def search(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
+    async def search(
+        self,
+        query: str,
+        limit: int = 5,
+        *,
+        namespace: str | None = None,
+        min_confidence: float = 0.0,
+        include_expired: bool = False,
+    ) -> list[dict[str, Any]]:
         """Search semantic memories by substring, ordered by confidence.
 
         Args:
@@ -170,24 +319,35 @@ class SemanticMemory:
             with sqlite3.connect(self._db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 conn.execute("PRAGMA journal_mode=WAL")
+                filters = ["content LIKE ? ESCAPE '\\'", "confidence >= ?"]
+                params: list[Any] = [f"%{escaped}%", max(0.0, min(1.0, min_confidence))]
+                if namespace is not None:
+                    filters.append("namespace = ?")
+                    params.append(namespace)
+                if not include_expired:
+                    filters.append("(expires_at IS NULL OR expires_at > ?)")
+                    params.append(time.time())
+                where = " AND ".join(filters)
                 # Increment access_count for matched items
                 conn.execute(
                     "UPDATE semantic_memories SET access_count = access_count + 1 "
-                    "WHERE content LIKE ? ESCAPE '\\'",
-                    (f"%{escaped}%",),
+                    f"WHERE {where}",
+                    tuple(params),
                 )
                 conn.commit()
                 rows = conn.execute(
-                    "SELECT * FROM semantic_memories "
-                    "WHERE content LIKE ? ESCAPE '\\' "
+                    f"SELECT * FROM semantic_memories WHERE {where} "
                     "ORDER BY confidence DESC, timestamp DESC LIMIT ?",
-                    (f"%{escaped}%", limit),
+                    (*params, limit),
                 ).fetchall()
                 return [self._row_to_dict(row) for row in rows]
 
         return await asyncio.to_thread(_search)
 
-    async def get_facts(self, fact_type: str) -> list[dict[str, Any]]:
+    async def get_facts(
+        self, fact_type: str, *, namespace: str | None = None,
+        include_expired: bool = False,
+    ) -> list[dict[str, Any]]:
         """Retrieve all semantic memories of a given *fact_type*.
 
         Args:
@@ -210,10 +370,19 @@ class SemanticMemory:
             with sqlite3.connect(self._db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 conn.execute("PRAGMA journal_mode=WAL")
+                filters = ["fact_type = ?"]
+                params: list[Any] = [fact_type]
+                if namespace is not None:
+                    filters.append("namespace = ?")
+                    params.append(namespace)
+                if not include_expired:
+                    filters.append("(expires_at IS NULL OR expires_at > ?)")
+                    params.append(time.time())
                 rows = conn.execute(
-                    "SELECT * FROM semantic_memories WHERE fact_type = ? "
-                    "ORDER BY confidence DESC, timestamp DESC",
-                    (fact_type,),
+                    "SELECT * FROM semantic_memories WHERE "
+                    + " AND ".join(filters)
+                    + " ORDER BY confidence DESC, timestamp DESC",
+                    tuple(params),
                 ).fetchall()
                 return [self._row_to_dict(row) for row in rows]
 
@@ -245,13 +414,99 @@ class SemanticMemory:
                     return False
                 new_conf = max(0.0, min(1.0, row[0] + delta))
                 conn.execute(
-                    "UPDATE semantic_memories SET confidence = ? WHERE id = ?",
-                    (new_conf, item_id),
+                    "UPDATE semantic_memories SET confidence = ?, updated_at = ? WHERE id = ?",
+                    (new_conf, time.time(), item_id),
                 )
                 conn.commit()
                 return True
 
         return await asyncio.to_thread(_update)
+
+    async def record_evidence(
+        self,
+        item_id: str,
+        *,
+        supports: bool,
+        source: str | None = None,
+        note: str = "",
+        weight: float = 0.1,
+    ) -> bool:
+        """Attach auditable evidence and adjust confidence atomically."""
+        magnitude = max(0.0, min(1.0, abs(float(weight))))
+        delta = magnitude if supports else -magnitude
+
+        def _record() -> bool:
+            with sqlite3.connect(self._db_path) as conn:
+                conn.execute("PRAGMA foreign_keys=ON")
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT confidence FROM semantic_memories WHERE id=?", (item_id,)
+                ).fetchone()
+                if row is None:
+                    return False
+                confidence = max(0.0, min(1.0, float(row[0]) + delta))
+                now = time.time()
+                conn.execute(
+                    "UPDATE semantic_memories SET confidence=?, updated_at=? WHERE id=?",
+                    (confidence, now, item_id),
+                )
+                conn.execute(
+                    "INSERT INTO semantic_evidence "
+                    "(id, memory_id, relation, source, note, weight, timestamp) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        str(uuid.uuid4()), item_id,
+                        "corroborates" if supports else "contradicts",
+                        source, note, delta, now,
+                    ),
+                )
+                conn.commit()
+                return True
+
+        return await asyncio.to_thread(_record)
+
+    async def evidence(self, item_id: str) -> list[dict[str, Any]]:
+        def _read() -> list[dict[str, Any]]:
+            with sqlite3.connect(self._db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    "SELECT * FROM semantic_evidence WHERE memory_id=? "
+                    "ORDER BY timestamp DESC", (item_id,)
+                ).fetchall()
+                return [dict(row) for row in rows]
+
+        return await asyncio.to_thread(_read)
+
+    async def contradict(
+        self,
+        item_id: str,
+        replacement: str,
+        *,
+        source: str | None = None,
+        confidence: float = 0.7,
+        namespace: str = "global",
+    ) -> str:
+        return await self.add(
+            replacement,
+            fact_type="fact",
+            source=source,
+            confidence=confidence,
+            namespace=namespace,
+            supersedes_id=item_id,
+        )
+
+    async def prune_expired(self) -> int:
+        def _prune() -> int:
+            with sqlite3.connect(self._db_path) as conn:
+                conn.execute("PRAGMA foreign_keys=ON")
+                cursor = conn.execute(
+                    "DELETE FROM semantic_memories WHERE expires_at IS NOT NULL AND expires_at <= ?",
+                    (time.time(),),
+                )
+                conn.commit()
+                return cursor.rowcount
+
+        return await asyncio.to_thread(_prune)
 
     async def get_preferences(self) -> list[dict[str, Any]]:
         """Return all preference-type facts.
@@ -290,6 +545,7 @@ class SemanticMemory:
         def _delete() -> bool:
             with sqlite3.connect(self._db_path) as conn:
                 conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA foreign_keys=ON")
                 cursor = conn.execute(
                     "DELETE FROM semantic_memories WHERE id = ?",
                     (item_id,),
@@ -310,6 +566,7 @@ class SemanticMemory:
         def _clear() -> int:
             with sqlite3.connect(self._db_path) as conn:
                 conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA foreign_keys=ON")
                 cursor = conn.execute("DELETE FROM semantic_memories")
                 conn.commit()
                 return cursor.rowcount

@@ -248,10 +248,7 @@ class TestProviderPings:
         assert captured["kwargs"].get("max_tokens") == cli_main._DOCTOR_PING_MAX_TOKENS
 
     def test_ping_runs_in_parallel(self, monkeypatch):
-        """Two providers should not be serialised; the wall-clock is
-        roughly the slowest one, not their sum.
-        """
-        import time as _time
+        """Two providers overlap instead of relying on wall-clock timing."""
 
         from lilith_cli import main as cli_main
         from lilith_cli import providers as cli_providers
@@ -261,13 +258,25 @@ class TestProviderPings:
             "fast": _make_provider_profile(model="fast-model"),
         })
 
+        active = 0
+        max_active = 0
+
+        async def _complete_after(delay, content):
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            try:
+                await asyncio.sleep(delay)
+                return {"content": content, "tool_calls": [], "usage": {}, "finish_reason": "stop", "reasoning_content": ""}
+            finally:
+                active -= 1
+
         class _Slow:
             def __init__(self, cfg):
                 self.cfg = cfg
 
             async def complete(self, messages, *, tools=None, **kwargs):
-                await asyncio.sleep(0.5)
-                return {"content": "slow", "tool_calls": [], "usage": {}, "finish_reason": "stop", "reasoning_content": ""}
+                return await _complete_after(0.5, "slow")
 
             async def close(self):
                 return None
@@ -277,8 +286,7 @@ class TestProviderPings:
                 self.cfg = cfg
 
             async def complete(self, messages, *, tools=None, **kwargs):
-                await asyncio.sleep(0.1)
-                return {"content": "fast", "tool_calls": [], "usage": {}, "finish_reason": "stop", "reasoning_content": ""}
+                return await _complete_after(0.1, "fast")
 
             async def close(self):
                 return None
@@ -287,13 +295,8 @@ class TestProviderPings:
             return _Slow(cfg) if cfg.provider == "slow" else _Fast(cfg)
 
         monkeypatch.setattr(cli_providers, "LLMProviderWrapper", _factory)
-        t0 = _time.perf_counter()
         rows = asyncio.run(cli_main._run_provider_pings(cfg))
-        elapsed = _time.perf_counter() - t0
-        # Serial would be 0.6s; parallel is roughly 0.5s. Give a generous
-        # slack to avoid CI flakes while still catching accidental
-        # serialisation (which would push elapsed past 0.55s).
-        assert elapsed < 0.55, f"pings were not parallel: {elapsed:.3f}s"
+        assert max_active == 2
         assert {r["status"] for r in rows} == {"ok"}
 
 
@@ -410,6 +413,19 @@ class TestMemoryDb:
         assert row["status"] in ("ok", "error")
 
 
+class TestOrchestrationState:
+    def test_transactional_state_is_reported(self, tmp_path, monkeypatch):
+        from lilith_cli import main as cli_main
+
+        monkeypatch.setenv(
+            "YGGDRASIL_ORCHESTRATION_STATE",
+            str(tmp_path / "orchestration_state.sqlite3"),
+        )
+        row = cli_main._check_orchestration_state()
+        assert row["status"] == "ok"
+        assert "sqlite WAL" in row["message"]
+
+
 # ── (f) Package versions ──────────────────────────────────────────────
 
 
@@ -515,6 +531,7 @@ class TestDoctorCommand:
         # ``_commands`` mapping; ``dir(app)`` only returns App-level
         # attributes, so we look it up explicitly.
         assert "doctor" in app._commands
+        assert "timeline" in app._commands
 
     def test_doctor_command_exits_0_when_all_ok(self, monkeypatch, tmp_path):
         from lilith_cli import config as cli_config

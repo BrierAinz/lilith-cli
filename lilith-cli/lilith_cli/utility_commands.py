@@ -32,10 +32,10 @@ from typing import TYPE_CHECKING, Any
 from .render import console, render_error
 
 if TYPE_CHECKING:
-    from .agent import AgentSession
+    from .session_runtime import SessionRuntime
 
 
-def _resolve_message_by_index(session: AgentSession, index: int) -> dict[str, Any] | None:
+def _resolve_message_by_index(session: SessionRuntime, index: int) -> dict[str, Any] | None:
     """Resolve a 1-based index against the session history (most recent = 1)."""
     history = getattr(session, "history", None) or []
     if not history:
@@ -45,7 +45,7 @@ def _resolve_message_by_index(session: AgentSession, index: int) -> dict[str, An
     return history[-index]
 
 
-def _resolve_last_assistant_message(session: AgentSession) -> dict[str, Any] | None:
+def _resolve_last_assistant_message(session: SessionRuntime) -> dict[str, Any] | None:
     """Return the most recent assistant message in the history, if any."""
     history = getattr(session, "history", None) or []
     for msg in reversed(history):
@@ -54,7 +54,7 @@ def _resolve_last_assistant_message(session: AgentSession) -> dict[str, Any] | N
     return None
 
 
-async def run_now_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_now_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Show current timestamps (/now [--utc|--local|--unix|--iso|--rfc|--json]).
 
     Examples:
@@ -131,7 +131,7 @@ def _now_rfc_value(now_utc) -> str:
         return now_utc.strftime("%a, %d %b %Y %H:%M:%S +0000")
 
 
-async def run_hash_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_hash_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Compute hashes of text or file (/hash <algo> <text|file>)."""
     import hashlib
 
@@ -173,7 +173,7 @@ async def run_hash_command(session: AgentSession, args: str) -> None:  # noqa: A
     console.print()
 
 
-async def run_lines_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_lines_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Count lines/words/chars of a file (/lines <path>)."""
     text = args.strip()
     if not text:
@@ -202,7 +202,7 @@ async def run_lines_command(session: AgentSession, args: str) -> None:  # noqa: 
     console.print()
 
 
-async def run_base64_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_base64_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Base64 encode or decode text (/base64 <encode|decode> <text>)."""
     import base64
 
@@ -240,7 +240,7 @@ async def run_base64_command(session: AgentSession, args: str) -> None:  # noqa:
     console.print()
 
 
-async def run_uuid_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_uuid_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Generate UUIDs (/uuid [N] [--v1|--v4|--v7])."""
     import uuid
 
@@ -279,7 +279,7 @@ async def run_uuid_command(session: AgentSession, args: str) -> None:  # noqa: A
     console.print()
 
 
-async def run_reverse_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_reverse_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Reverse a string or list lines (/reverse [--lines] <text>)."""
     text = args.strip()
     if not text:
@@ -415,7 +415,7 @@ def calc_eval(expr: str) -> float:
     return _calc_eval_node(tree)
 
 
-async def run_calc_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_calc_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Ejecuta /calc para evaluar expresiones aritméticas de forma segura.
 
     Examples:
@@ -443,7 +443,7 @@ async def run_calc_command(session: AgentSession, args: str) -> None:  # noqa: A
     console.print(f"[tool.name]{expr}[/] = [bold cyan]{rendered}[/]")
 
 
-async def run_epoch_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_epoch_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Convierte entre timestamps Unix y fechas legibles (/epoch [ts | YYYY-MM-DD[ HH:MM:SS]] | now).
 
     Examples:
@@ -513,7 +513,7 @@ def _render_random_usage() -> None:
     console.print("  /random dice [NdM]  [dim]# N: 1..100; M: 2..1000000[/dim]")
 
 
-async def run_random_command(session: AgentSession, args: str) -> None:  # noqa: ARG001
+async def run_random_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Comando /random: genera valores aleatorios criptográficamente seguros."""
     import secrets
     import uuid
@@ -631,7 +631,7 @@ def _extract_text_from_message(message: dict[str, Any]) -> str:
 
 
 def _resolve_quote_target(
-    session: AgentSession,
+    session: SessionRuntime,
     target: str,
 ) -> tuple[dict[str, Any] | None, int | None]:
     """Resuelve el mensaje objetivo y su índice relativo (1 = el último)."""
@@ -664,7 +664,7 @@ def _resolve_quote_target(
     return message, None
 
 
-async def run_quote_command(session: AgentSession, args: str) -> None:
+async def run_quote_command(session: SessionRuntime, args: str) -> None:
     """Cita un mensaje del historial como texto plano y copiable."""
     usage_args = args.strip()
     if usage_args.lower() in {"help", "--help", "-h", "?"}:

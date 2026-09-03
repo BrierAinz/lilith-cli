@@ -10,10 +10,10 @@ from typing import TYPE_CHECKING, Any
 
 
 if TYPE_CHECKING:
-    from .agent import AgentSession
+    from .session_runtime import SessionRuntime
 
 
-def run_diagnostics(session: AgentSession) -> list[dict[str, str]]:
+def run_diagnostics(session: SessionRuntime) -> list[dict[str, str]]:
     """Run all Lilith installation checks and return a list of results.
 
     Each result has keys ``check``, ``status`` ("ok" | "warn" | "error") and
@@ -77,7 +77,7 @@ def _check_api_key(config: Any) -> dict[str, str]:
     }
 
 
-def _check_tool_registry(session: AgentSession) -> dict[str, str]:
+def _check_tool_registry(session: SessionRuntime) -> dict[str, str]:
     """Check whether the tool registry is loaded and non-empty."""
     try:
         all_tools = session._all_tool_names()

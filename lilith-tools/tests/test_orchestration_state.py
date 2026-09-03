@@ -49,13 +49,21 @@ def test_tool_actions_get_set_add_update_clear(tmp_path: Path) -> None:
     path = str(tmp_path / "state.json")
     assert tool.execute(action="set_plan", name="Roadmap", state_path=path).success
     added = tool.execute(
-        action="add_task", title="Implement", description="Feature A", state_path=path
+        action="add_task", title="Implement", description="Feature A", state_path=path,
+        success_criteria=["tests pass"], budget={"max_tokens": 100},
+        correlation_id="corr-test", trace_id="trace-test",
     )
     task_id = added.data["task"]["id"]
     assert tool.execute(
-        action="update_task", task_id=task_id, status="bloqueada", state_path=path
+        action="update_task", task_id=task_id, status="bloqueada", state_path=path,
+        verification={"verified": False, "evidence": []},
     ).success
-    assert tool.execute(action="get", state_path=path).data["tasks"][0]["status"] == "bloqueada"
+    task = tool.execute(action="get", state_path=path).data["tasks"][0]
+    assert task["status"] == "bloqueada"
+    assert task["success_criteria"] == ["tests pass"]
+    assert task["budget"] == {"max_tokens": 100}
+    assert task["correlation_id"] == "corr-test"
+    assert task["verification"]["verified"] is False
     assert tool.execute(action="post_mortems", state_path=path).data == {"post_mortems": []}
     assert tool.execute(action="clear", state_path=path).data["cleared"] is True
 

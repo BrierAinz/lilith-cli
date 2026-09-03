@@ -400,7 +400,7 @@ def test_unknown_channel_lists_valid_channels(
         ops_spawn.spawn(
             agent="hela",
             task="anything",
-            channel="deepseek",
+            channel="retired-provider",
             timeout=10,
             dry_run=True,  # even dry-run should reject early
             db=fake_repo_root / ".ygg" / "lilith_bus.db",
@@ -408,7 +408,7 @@ def test_unknown_channel_lists_valid_channels(
         )
     assert excinfo.value.code == 2
     out = capsys.readouterr().out
-    assert "deepseek" in out
+    assert "retired-provider" in out
     assert "minimax" in out
     assert "sakana" in out
     assert "opencode-go" not in out

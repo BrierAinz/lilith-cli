@@ -29,6 +29,7 @@ for _mod in (
     "watcher",
     "snippets",
     "delegate",
+    "cli_delegate",
     "hermes_delegate",
     "conclave",
     "memory",

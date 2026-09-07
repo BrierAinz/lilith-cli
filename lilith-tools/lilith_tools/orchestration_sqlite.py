@@ -53,6 +53,8 @@ def empty_costs() -> dict[str, Any]:
 class SQLiteOrchestrationBackend:
     """Process-safe backend used by production orchestration state."""
 
+    SCHEMA_VERSION = 3
+
     def __init__(self, path: Path, *, legacy_json: Path | None = None) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -73,12 +75,26 @@ class SQLiteOrchestrationBackend:
                     conn.close()
                     raise
                 time.sleep(0.02)
-        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA synchronous=FULL")
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
     def _init_db(self) -> None:
         with self._connect() as conn:
+            current_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+            if current_version > self.SCHEMA_VERSION:
+                raise RuntimeError(
+                    f"orchestration DB schema {current_version} is newer than "
+                    f"supported {self.SCHEMA_VERSION}"
+                )
+            existing_tables = {
+                str(row[0])
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+                ).fetchall()
+            }
+            self._validate_schema(conn, tables=existing_tables, require_all=False)
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS state_meta (
@@ -125,11 +141,56 @@ class SQLiteOrchestrationBackend:
                     ON task_checkpoints(task_id, created_at DESC);
                 """
             )
-            self._set_meta(conn, "version", 3)
+            self._validate_schema(conn)
+            conn.execute(f"PRAGMA user_version={self.SCHEMA_VERSION}")
+            self._set_meta(conn, "version", self.SCHEMA_VERSION)
             if self._get_meta(conn, "costs", None) is None:
                 self._set_meta(conn, "costs", empty_costs())
             if self._get_meta(conn, "revision", None) is None:
                 self._set_meta(conn, "revision", 0)
+
+    @staticmethod
+    def _validate_schema(
+        conn: sqlite3.Connection,
+        *,
+        tables: set[str] | None = None,
+        require_all: bool = True,
+    ) -> None:
+        required = {
+            "state_meta": {"key", "value"},
+            "tasks": {"id", "idempotency_key", "payload", "created_at", "updated_at"},
+            "post_mortems": {"seq", "payload", "created_at"},
+            "orchestration_events": {
+                "seq",
+                "event_type",
+                "task_id",
+                "correlation_id",
+                "payload",
+                "created_at",
+            },
+            "task_leases": {
+                "task_id",
+                "owner",
+                "acquired_at",
+                "heartbeat_at",
+                "expires_at",
+            },
+            "task_checkpoints": {"id", "task_id", "label", "payload", "created_at"},
+        }
+        for table, expected in required.items():
+            if tables is not None and table not in tables:
+                if require_all:
+                    raise RuntimeError(f"orchestration DB table {table!r} is missing")
+                continue
+            actual = {
+                str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            missing = expected - actual
+            if missing:
+                raise RuntimeError(
+                    f"orchestration DB table {table!r} is missing columns: "
+                    f"{', '.join(sorted(missing))}"
+                )
 
     @staticmethod
     def _get_meta(conn: sqlite3.Connection, key: str, default: Any) -> Any:

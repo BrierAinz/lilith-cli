@@ -47,6 +47,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 import time
 import uuid
@@ -55,7 +56,34 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from lilith_core.persistence_lock import storage_lock
+
+
 logger = logging.getLogger("lilith.goal_state")
+
+_STORAGE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+class RevisionConflictError(RuntimeError):
+    """Raised when stale goal state would replace a newer revision."""
+
+
+class GoalPersistenceError(RuntimeError):
+    """Raised when persisted goal bytes cannot be trusted."""
+
+
+def _atomic_json_write(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    staging = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with staging.open("w", encoding="utf-8", newline="\n") as handle:
+            json.dump(payload, handle, indent=2, ensure_ascii=False)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        staging.replace(path)
+    finally:
+        staging.unlink(missing_ok=True)
 
 
 # ── Enums ────────────────────────────────────────────────────────────────────
@@ -222,6 +250,7 @@ class Goal:
     quota_max_tokens: int = 0  # 0 = unlimited
     quota_used_tokens: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
+    revision: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -240,6 +269,10 @@ class Goal:
             "quota_max_tokens": self.quota_max_tokens,
             "quota_used_tokens": self.quota_used_tokens,
             "metadata": self.metadata,
+            "schema_id": "lilith-core-goal",
+            "schema_version": 1,
+            "revision": self.revision,
+            "writer": "lilith_core.goal_state",
         }
 
     @classmethod
@@ -260,6 +293,7 @@ class Goal:
             quota_max_tokens=data.get("quota_max_tokens", 0),
             quota_used_tokens=data.get("quota_used_tokens", 0),
             metadata=data.get("metadata", {}),
+            revision=int(data.get("revision") or 0),
         )
 
     @property
@@ -303,6 +337,7 @@ class GoalStateManager:
 
     def __init__(self, storage_dir: str | Path | None = None) -> None:
         self._goals: dict[str, Goal] = {}
+        self._load_errors: dict[str, str] = {}
         self._lock = threading.RLock()
 
         if storage_dir is None:
@@ -316,12 +351,47 @@ class GoalStateManager:
     # ── Persistence ──────────────────────────────────────────────────────────
 
     def _goal_path(self, goal_id: str) -> Path:
-        return self._storage_dir / f"{goal_id}.json"
+        if not isinstance(goal_id, str) or not _STORAGE_ID_RE.fullmatch(goal_id):
+            raise ValueError(f"invalid goal id: {goal_id!r}")
+        root = self._storage_dir.resolve()
+        path = (root / f"{goal_id}.json").resolve()
+        path.relative_to(root)
+        return path
 
     def _save(self, goal: Goal) -> None:
         path = self._goal_path(goal.id)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(goal.to_dict(), f, indent=2, ensure_ascii=False)
+        with storage_lock(path):
+            self._save_locked(goal, path)
+
+    def _save_locked(self, goal: Goal, path: Path) -> None:
+        current_revision = -1
+        current: dict[str, Any] | None = None
+        if path.exists():
+            persisted = self._load(goal.id)
+            if persisted is None:
+                raise GoalPersistenceError(f"goal disappeared: {goal.id}")
+            current = persisted.to_dict()
+            current_revision = persisted.revision
+        expected_revision = goal.revision if current_revision >= 0 else -1
+        if current_revision != expected_revision:
+            if current is not None:
+                self._goals[goal.id] = Goal.from_dict(current)
+            raise RevisionConflictError(
+                f"goal {goal.id!r} revision conflict: "
+                f"expected {expected_revision}, found {current_revision}"
+            )
+        next_revision = current_revision + 1
+        payload = goal.to_dict()
+        payload["revision"] = next_revision
+        try:
+            _atomic_json_write(path, payload)
+        except Exception:
+            if current is None:
+                self._goals.pop(goal.id, None)
+            else:
+                self._goals[goal.id] = Goal.from_dict(current)
+            raise
+        goal.revision = next_revision
 
     def _load(self, goal_id: str) -> Goal | None:
         path = self._goal_path(goal_id)
@@ -329,17 +399,29 @@ class GoalStateManager:
             return None
         try:
             with open(path, encoding="utf-8") as f:
-                return Goal.from_dict(json.load(f))
-        except (json.JSONDecodeError, KeyError, TypeError) as exc:
-            logger.warning("Failed to load goal %s: %s", goal_id, exc)
-            return None
+                data = json.load(f)
+            schema_id = data.get("schema_id")
+            if schema_id not in (None, "lilith-core-goal"):
+                raise GoalPersistenceError(f"unsupported goal schema: {schema_id!r}")
+            if schema_id is not None and data.get("schema_version") != 1:
+                raise GoalPersistenceError("unsupported goal schema version")
+            if data.get("id") != goal_id:
+                raise GoalPersistenceError("goal file identity mismatch")
+            return Goal.from_dict(data)
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError, AttributeError) as exc:
+            raise GoalPersistenceError(f"failed to load goal {goal_id}: {exc}") from exc
 
     def _load_all(self) -> None:
         if not self._storage_dir.exists():
             return
         for path in self._storage_dir.glob("*.json"):
             goal_id = path.stem
-            goal = self._load(goal_id)
+            try:
+                goal = self._load(goal_id)
+            except GoalPersistenceError as exc:
+                self._load_errors[goal_id] = str(exc)
+                logger.warning("%s", exc)
+                continue
             if goal is not None:
                 self._goals[goal_id] = goal
 
@@ -591,7 +673,10 @@ class GoalStateManager:
 
             return {
                 "handoff_version": "1.0",
+                "schema_id": "lilith-core-goal-handoff",
+                "schema_version": 1,
                 "goal_id": goal.id,
+                "goal_revision": goal.revision,
                 "name": goal.name,
                 "description": goal.description,
                 "project": goal.project,
@@ -612,8 +697,26 @@ class GoalStateManager:
     def import_handoff(self, data: dict[str, Any]) -> Goal:
         """Import a handoff pack, creating or updating the goal."""
         with self._lock:
-            full_state = data.get("full_state", data)
+            schema_id = data.get("schema_id")
+            if schema_id not in (None, "lilith-core-goal-handoff"):
+                raise GoalPersistenceError("unsupported handoff schema_id")
+            if schema_id is not None and data.get("schema_version") != 1:
+                raise GoalPersistenceError("unsupported handoff schema_version")
+            full_state = data.get("full_state")
+            if schema_id is None and "full_state" not in data:
+                full_state = data  # Legacy API also accepted a raw goal dictionary.
+            if not isinstance(full_state, dict):
+                raise GoalPersistenceError("handoff full_state is missing")
+            if full_state.get("schema_id") not in (None, "lilith-core-goal"):
+                raise GoalPersistenceError("unsupported full_state schema")
+            if full_state.get("schema_id") is not None and full_state.get("schema_version") != 1:
+                raise GoalPersistenceError("unsupported full_state schema version")
             goal = Goal.from_dict(full_state)
+            self._goal_path(goal.id)
+            if full_state is not data and goal.id != data.get("goal_id"):
+                raise GoalPersistenceError("handoff identity or revision mismatch")
+            if schema_id is not None and goal.revision != data.get("goal_revision"):
+                raise GoalPersistenceError("handoff identity or revision mismatch")
             goal.updated_at = time.time()
             self._goals[goal.id] = goal
             self._save(goal)

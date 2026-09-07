@@ -10,6 +10,42 @@ import pytest
 from lilith_tools.orchestration_sqlite import SQLiteOrchestrationBackend
 
 
+def test_schema_version_and_full_durability_are_declared(tmp_path: Path) -> None:
+    path = tmp_path / "state.sqlite3"
+    SQLiteOrchestrationBackend(path)
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    backend = SQLiteOrchestrationBackend(path)
+    with backend._connect() as conn:
+        assert conn.execute("PRAGMA synchronous").fetchone()[0] == 2
+
+
+def test_newer_schema_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "future.sqlite3"
+    with sqlite3.connect(path) as conn:
+        conn.execute("PRAGMA user_version=99")
+    with pytest.raises(RuntimeError, match="newer than supported"):
+        SQLiteOrchestrationBackend(path)
+
+
+def test_incomplete_legacy_schema_is_not_marked_current(tmp_path: Path) -> None:
+    path = tmp_path / "incomplete.sqlite3"
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE tasks (id TEXT PRIMARY KEY, payload TEXT NOT NULL)")
+    with pytest.raises(RuntimeError, match="missing columns"):
+        SQLiteOrchestrationBackend(path)
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 0
+        tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            )
+        }
+        assert tables == {"tasks"}
+
+
 def test_json_snapshot_is_imported_without_deleting_source(tmp_path: Path) -> None:
     legacy = tmp_path / "orchestration_state.json"
     legacy.write_text(

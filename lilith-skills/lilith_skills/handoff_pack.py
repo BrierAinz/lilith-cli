@@ -34,13 +34,40 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+
 logger = logging.getLogger("lilith.skills.handoff_pack")
+
+_PACK_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _pack_path(directory: Path, pack_id: str) -> Path:
+    if not isinstance(pack_id, str) or not _PACK_ID_RE.fullmatch(pack_id):
+        raise ValueError(f"invalid handoff pack id: {pack_id!r}")
+    root = directory.resolve()
+    path = (root / f"{pack_id}.json").resolve()
+    path.relative_to(root)
+    return path
+
+
+def _atomic_json_write(path: Path, payload: dict[str, Any]) -> None:
+    staging = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with staging.open("w", encoding="utf-8", newline="\n") as handle:
+            json.dump(payload, handle, indent=2, ensure_ascii=False)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        staging.replace(path)
+    finally:
+        staging.unlink(missing_ok=True)
 
 
 # ── Data classes ─────────────────────────────────────────────────────────────
@@ -85,6 +112,8 @@ class HandoffPack:
     def to_dict(self) -> dict[str, Any]:
         """Serialize pack to dict."""
         return {
+            "schema_id": "lilith-session-handoff",
+            "schema_version": 1,
             "pack_id": self.pack_id,
             "session_id": self.session_id,
             "agent": self.agent,
@@ -318,7 +347,7 @@ class HandoffPackManager:
 
     def get(self, pack_id: str) -> HandoffPack | None:
         """Get a handoff pack by ID."""
-        path = self.storage_dir / f"{pack_id}.json"
+        path = _pack_path(self.storage_dir, pack_id)
         if not path.exists():
             return None
         try:
@@ -346,7 +375,7 @@ class HandoffPackManager:
 
     def delete(self, pack_id: str) -> bool:
         """Delete a handoff pack."""
-        path = self.storage_dir / f"{pack_id}.json"
+        path = _pack_path(self.storage_dir, pack_id)
         if path.exists():
             path.unlink()
             logger.info("Deleted handoff pack %s", pack_id)
@@ -370,9 +399,8 @@ class HandoffPackManager:
 
     def _save(self, pack: HandoffPack) -> None:
         """Save a pack to disk."""
-        path = self.storage_dir / f"{pack.pack_id}.json"
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(pack.to_dict(), f, indent=2, ensure_ascii=False)
+        path = _pack_path(self.storage_dir, pack.pack_id)
+        _atomic_json_write(path, pack.to_dict())
 
     def auto_capture_from_session(
         self,

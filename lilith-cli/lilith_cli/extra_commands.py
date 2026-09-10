@@ -9333,7 +9333,10 @@ async def run_cd_command(session: SessionRuntime, args: str) -> None:  # noqa: A
     """
     raw_path = args.strip()
     if not raw_path:
-        console.print(f"[info]Directorio actual:[/] [bold cyan]{Path.cwd()}[/]")
+        console.print(
+            f"[info]Directorio actual:[/] [bold cyan]{Path.cwd()}[/]",
+            soft_wrap=True,
+        )
         return
 
     # Las rutas con espacios se escriben entre comillas por costumbre de shell
@@ -9364,7 +9367,10 @@ async def run_cd_command(session: SessionRuntime, args: str) -> None:  # noqa: A
         render_error(f"No pude cambiar de directorio: {exc}")
         return
 
-    console.print(f"[success]✓ Directorio actual:[/] [bold cyan]{Path.cwd()}[/]")
+    console.print(
+        f"[success]✓ Directorio actual:[/] [bold cyan]{Path.cwd()}[/]",
+        soft_wrap=True,
+    )
 
 
 # ── /epoch command ────────────────────────────────────────────────────────────

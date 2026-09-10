@@ -27,3 +27,7 @@ Thumbs.db
 *.log
 .env
 .env.*
+
+# Runtime Yggdrasil context written by the CLI and by the test suite
+# (hook audit log). Discovered upward like .git; never committed.
+.ygg/

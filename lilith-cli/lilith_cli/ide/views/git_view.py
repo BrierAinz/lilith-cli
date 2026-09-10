@@ -260,14 +260,17 @@ class GitMixin:
 
     async def _git_status_for_file(self, rel_path: str) -> str:
         """Return a one-letter git status for *rel_path* (M/A/D/?)."""
-        proc = await asyncio.create_subprocess_shell(
-            f'git status --porcelain -- "{rel_path}"',
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        result = await asyncio.to_thread(
+            subprocess.run,
+            ["git", "status", "--porcelain", "--", rel_path],
             cwd=self.root,  # type: ignore[attr-defined]
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=1.0,
         )
-        stdout, _ = await proc.communicate()
-        line = stdout.decode("utf-8", errors="replace").strip()
+        line = result.stdout.strip()
         if not line:
             return ""
         # XY format: first char is index, second is working tree.
@@ -275,14 +278,17 @@ class GitMixin:
 
     async def _git_blame_for_line(self, rel_path: str, line: int) -> str:
         """Return a short blame string for *line* of *rel_path*."""
-        proc = await asyncio.create_subprocess_shell(
-            f'git blame -L {line},{line} --date=short -- "{rel_path}"',
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        result = await asyncio.to_thread(
+            subprocess.run,
+            ["git", "blame", "-L", f"{line},{line}", "--date=short", "--", rel_path],
             cwd=self.root,  # type: ignore[attr-defined]
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=1.0,
         )
-        stdout, _ = await proc.communicate()
-        text = stdout.decode("utf-8", errors="replace").strip()
+        text = result.stdout.strip()
         if not text:
             return ""
         # Typical output: abc1234 (Author 2024-01-01 12:00:00 +0000 1) code

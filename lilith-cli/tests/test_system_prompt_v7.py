@@ -126,5 +126,7 @@ class TestUserConfigYamlSystemPrompt:
 
         parsed = yaml.safe_load(self.USER_CONFIG_PATH.read_text(encoding="utf-8"))
         prompt = parsed.get("system_prompt", "")
-        assert "You are Lilith" in prompt
-        assert "Where Ancient Meets Digital" in prompt
+        # The live prompt is operator-owned and may be localized or customized.
+        # Canonical English wording/branding is enforced above for fresh installs;
+        # here we only require that the personalized prompt preserves Lilith's identity.
+        assert "lilith" in prompt.casefold()

@@ -51,6 +51,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -552,23 +553,46 @@ class DelegateSubagentTool(BaseTool):
             state_store = None
             state_task_id = None
 
+        started = time.perf_counter()
         result = self._execute_delegate(preset_name, prompt, kwargs)
+        latency_ms = max(0, int((time.perf_counter() - started) * 1000))
         if state_store is not None and state_task_id is not None:
             data = result.data if isinstance(result.data, dict) else {}
             content = data.get("content") or data.get("raw_content") or result.error
             usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
             provider = str(data.get("provider") or "unknown")
             session_id = str(kwargs.get("session_id") or "default")
+            turns_used = int(data.get("turns_used", 0) or 0)
+            partial = bool(data.get("partial", False))
+            post_mortem: dict[str, Any] = {
+                "task_id": state_task_id,
+                "preset": preset_name,
+                "provider": provider,
+                "turns": turns_used,
+                "usage": usage,
+                "success": bool(result.success),
+                "cause": "" if result.success else str(result.error or content or "")[:1000],
+                "quality": 0.5 if result.success and partial else (1.0 if result.success else 0.0),
+                "latency_ms": latency_ms,
+                "agentic": bool(kwargs.get("agentic", False)),
+                "structured": bool(kwargs.get("structured", False)),
+            }
+            if kwargs.get("max_tokens") is not None:
+                post_mortem["max_tokens"] = int(kwargs["max_tokens"])
             try:
                 if usage:
                     state_store.record_cost(
                         preset_name, provider, usage, session_id=session_id
                     )
+                state_store.append_post_mortem(post_mortem)
                 state_store.update_task(
                     state_task_id,
                     status="completada" if result.success else "fallida",
                     result=str(content or "")[:1000],
                     usage=usage,
+                    provider=provider,
+                    turns=turns_used,
+                    post_mortem=post_mortem,
                 )
             except Exception:
                 pass
@@ -682,7 +706,12 @@ class DelegateSubagentTool(BaseTool):
         except Exception as exc:
             return ToolResult(
                 success=False,
-                data=None,
+                data={
+                    "preset": preset_name,
+                    "provider": provider_name,
+                    "model": cfg.model,
+                    "usage": {},
+                },
                 error=f"Sub-agente '{preset_name}' falló: {exc}",
             )
 

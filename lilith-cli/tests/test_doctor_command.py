@@ -426,6 +426,66 @@ class TestOrchestrationState:
         assert "sqlite WAL" in row["message"]
 
 
+class TestRoutingEvidence:
+    def test_warns_when_no_v8_samples(self, tmp_path, monkeypatch):
+        from lilith_cli import main as cli_main
+
+        monkeypatch.setenv(
+            "YGGDRASIL_ORCHESTRATION_STATE",
+            str(tmp_path / "orchestration_state.sqlite3"),
+        )
+        row = cli_main._check_routing_evidence()
+
+        assert row["check"] == "routing.evidence"
+        assert row["status"] == "warn"
+        assert "0 post-mortems" in row["message"]
+        assert "aprendizaje inactivo" in row["message"]
+
+    def test_unknown_legacy_presets_do_not_activate_learning(self, tmp_path, monkeypatch):
+        from lilith_cli import main as cli_main
+        from lilith_tools.orchestration_state import OrchestrationStateStore
+
+        path = tmp_path / "orchestration_state.sqlite3"
+        monkeypatch.setenv("YGGDRASIL_ORCHESTRATION_STATE", str(path))
+        store = OrchestrationStateStore(path)
+        for index in range(4):
+            store.append_post_mortem({
+                "task_id": f"legacy-{index}",
+                "preset": "legacy-provider",
+                "success": True,
+                "quality": 1.0,
+                "usage": {"total_tokens": 10},
+            })
+
+        row = cli_main._check_routing_evidence()
+
+        assert row["status"] == "warn"
+        assert "4 post-mortems" in row["message"]
+        assert "0 muestras de presets v8" in row["message"]
+
+    def test_reports_active_learning_after_router_threshold(self, tmp_path, monkeypatch):
+        from lilith_cli import main as cli_main
+        from lilith_tools.orchestration_state import OrchestrationStateStore
+
+        path = tmp_path / "orchestration_state.sqlite3"
+        monkeypatch.setenv("YGGDRASIL_ORCHESTRATION_STATE", str(path))
+        store = OrchestrationStateStore(path)
+        for index in range(3):
+            store.append_post_mortem({
+                "task_id": f"quick-{index}",
+                "preset": "quick",
+                "success": True,
+                "quality": 1.0,
+                "usage": {"total_tokens": 10},
+            })
+
+        row = cli_main._check_routing_evidence()
+
+        assert row["status"] == "ok"
+        assert "evidencia activa" in row["message"]
+        assert "quick=3" in row["message"]
+
+
 # ── (f) Package versions ──────────────────────────────────────────────
 
 
@@ -476,6 +536,7 @@ class TestRunDoctorChecks:
             for r in rows
         }
         assert {"config.yaml", "api_key", "ping", "memory.db", "pkg", "mcp_servers"} <= categories
+        assert "routing.evidence" in categories
         # No error rows when everything is happy.
         errors = [r for r in rows if r["status"] == "error"]
         assert errors == [], f"unexpected errors: {errors}"

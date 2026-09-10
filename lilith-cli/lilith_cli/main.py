@@ -993,6 +993,51 @@ def _check_orchestration_state() -> dict[str, str]:
     }
 
 
+def _check_routing_evidence() -> dict[str, str]:
+    """Report whether evidence-weighted routing has enough v8 samples."""
+    try:
+        from lilith_orchestrator.task_router import TaskRouter
+        from lilith_tools.orchestration_state import OrchestrationStateStore
+
+        store = OrchestrationStateStore()
+        router = TaskRouter(store=store, telemetry=False)
+        evidence = router._evidence()
+        state = store.get()
+    except Exception as exc:
+        return {
+            "check": "routing.evidence",
+            "status": "error",
+            "message": f"no accesible: {exc}",
+        }
+
+    threshold = router.min_evidence_samples
+    samples = {
+        name: int(data.get("samples", 0) or 0)
+        for name, data in evidence.items()
+        if name in router.routing_presets
+    }
+    ready = {name: count for name, count in samples.items() if count >= threshold}
+    total = len(state.get("post_mortems") or [])
+    if ready:
+        active = ", ".join(f"{name}={count}" for name, count in sorted(ready.items()))
+        return {
+            "check": "routing.evidence",
+            "status": "ok",
+            "message": f"{total} post-mortems; evidencia activa: {active}",
+        }
+
+    best = max(samples.values(), default=0)
+    usable = sum(samples.values())
+    return {
+        "check": "routing.evidence",
+        "status": "warn",
+        "message": (
+            f"{total} post-mortems; {usable} muestras de presets v8; "
+            f"maximo {best}/{threshold} por preset; aprendizaje inactivo"
+        ),
+    }
+
+
 def _check_package_versions() -> list[dict[str, str]]:
     """Report the installed version of every lilith-* package."""
     import importlib.metadata as md
@@ -1080,6 +1125,7 @@ def run_doctor_checks(
         rows.extend(_check_mcp_servers(cfg))
     rows.append(_check_memory_db(cfg))
     rows.append(_check_orchestration_state())
+    rows.append(_check_routing_evidence())
     rows.extend(_check_package_versions())
     return rows
 
@@ -1099,7 +1145,7 @@ def doctor(
         Parameter(name="--json", help="Salida JSON estable para automatizacion"),
     ] = False,
 ) -> None:
-    """Chequeo de salud: config, providers, MCP, memory, paquetes.
+    """Chequeo de salud: config, providers, MCP, memory, orchestration, routing, paquetes.
 
     Imprime una tabla con una fila por chequeo (estado: ok/warn/error)
     y sale con codigo 0 si todo esta bien, 1 si algun chequeo reporta

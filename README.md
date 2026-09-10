@@ -79,6 +79,40 @@ now marks only tests inside `tests/e2e`. Sibling unit suites remain selectable w
 `-m 'not e2e'`; regression coverage lives in `tests/test_e2e_collection_scope.py`.
 These checks do not cover live provider calls, other packages or deployment.
 
+## Yggdrasil Router bridge
+
+Lilith can consume the provider/account router in `Vanaheim/Core/yggdrasil_router`
+without taking ownership of its account registry. The boundary is intentional:
+
+```text
+Lilith TaskRouter (intent/tier)
+        |
+        v
+Yggdrasil Router (provider/account/model/quota)
+        |
+        v
+provider/runtime execution
+```
+
+The bridge is opt-in through `YGGDRASIL_ROUTER_CONFIG`. If the router package is
+not installed, Lilith can load the sibling checkout or an explicit
+`YGGDRASIL_ROUTER_HOME`. `YGGDRASIL_ROUTER_MODE=shadow` is the safe default: it asks the global router
+across all configured providers/accounts, records the sanitized recommendation
+and whether Lilith's current executor could honor it, but keeps the existing
+preset credential. `YGGDRASIL_ROUTER_MODE=enforce` is intentionally narrower
+until a cross-provider execution adapter exists: it pins the current Lilith
+provider/model, lets Yggdrasil choose among eligible accounts/quotas for that
+backend, and applies the selected account only when its credential is an
+`env://` reference that resolves in-process. Otherwise the request fails closed
+before contacting a provider.
+
+Neither route output nor orchestration post-mortems persist `secret_ref` or the
+resolved credential value. In `enforce`, the router instance is cached by config
+path + mtime so request/token quotas and circuit state evolve during the Lilith
+process; durable cross-process state remains a Yggdrasil Router/Niflheim concern.
+`lilith doctor --fast --json` reports the gateway as `yggdrasil.gateway` and
+distinguishes unconfigured, shadow and enforce states.
+
 ## License
 
 [MIT](LICENSE) © 2026 BrierAinz (BrierStudios)

@@ -435,6 +435,103 @@ def _parse_tool_arguments(name: str, raw_args: Any) -> dict[str, Any] | None:
     return None
 
 
+def _gateway_route_for_delegate(
+    *,
+    cfg: Any,
+    provider_name: str,
+    preset_name: str,
+    agentic: bool,
+    structured: bool,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Return sanitized Yggdrasil routing metadata and an optional fatal error."""
+    try:
+        from .yggdrasil_gateway import (
+            GatewayError,
+            YggdrasilGateway,
+            resolve_env_secret,
+            router_mode,
+        )
+    except ImportError:
+        return None, None
+
+    try:
+        gateway = YggdrasilGateway.from_env()
+    except GatewayError as exc:
+        # A broken gateway must not break legacy delegation unless enforcement
+        # was explicitly requested.
+        try:
+            mode = router_mode()
+        except GatewayError as mode_exc:
+            return {"mode": "invalid", "status": "error", "error": str(mode_exc)}, str(mode_exc)
+        route = {"mode": mode, "status": "fallback", "error": str(exc)}
+        return route, str(exc) if mode == "enforce" else None
+
+    if gateway is None:
+        return None, None
+
+    try:
+        mode = router_mode()
+    except GatewayError as exc:
+        return {"mode": "invalid", "status": "error", "error": str(exc)}, str(exc)
+
+    capability = "code" if agentic else "chat"
+    current_model = str(getattr(cfg, "model", "") or "") or None
+    # Shadow mode is allowed to observe the *global* router decision across
+    # providers. Enforce remains pinned to Lilith's current execution adapter
+    # until Yggdrasil exposes a provider/runtime executor contract.
+    preferred_provider = provider_name if mode == "enforce" else None
+    preferred_model = current_model if mode == "enforce" else None
+    try:
+        decision = gateway.route(
+            capability=capability,
+            estimated_tokens=int(getattr(cfg, "max_tokens", 0) or 0),
+            preferred_provider=preferred_provider,
+            preferred_model=preferred_model,
+            tags={
+                "lilith",
+                f"preset:{preset_name}",
+                "agentic" if agentic else "one-shot",
+                "structured" if structured else "unstructured",
+            },
+        )
+        compatible = decision.provider == provider_name and (
+            decision.model is None or current_model is None or decision.model == current_model
+        )
+        route = {
+            **decision.public_dict(),
+            "mode": mode,
+            "status": "selected",
+            "capability": capability,
+            "current_provider": provider_name,
+            "current_model": current_model,
+            "compatible_with_current_executor": compatible,
+        }
+        if mode == "enforce":
+            from pydantic import SecretStr
+
+            # The credential value remains in-process only.  Neither the route
+            # metadata nor post-mortems receive it.
+            cfg.api_key = SecretStr(resolve_env_secret(decision.secret_ref))
+        return route, None
+    except GatewayError as exc:
+        route = {"mode": mode, "status": "fallback", "error": str(exc)}
+        return route, str(exc) if mode == "enforce" else None
+
+
+def _with_gateway_route(result: ToolResult, route: dict[str, Any] | None) -> ToolResult:
+    if route is None:
+        return result
+    if isinstance(result.data, dict):
+        data = dict(result.data)
+    elif result.data is None:
+        data = {}
+    else:
+        data = {"content": result.data}
+    data["gateway_route"] = route
+    result.data = data
+    return result
+
+
 @ToolRegistry.register
 class DelegateSubagentTool(BaseTool):
     """Delegate a task to a Hlidskjalf sub-agent preset and return its answer.
@@ -564,6 +661,20 @@ class DelegateSubagentTool(BaseTool):
             session_id = str(kwargs.get("session_id") or "default")
             turns_used = int(data.get("turns_used", 0) or 0)
             partial = bool(data.get("partial", False))
+            gateway_route = data.get("gateway_route") if isinstance(data.get("gateway_route"), dict) else None
+            if gateway_route:
+                try:
+                    from .yggdrasil_gateway import record_gateway_outcome
+
+                    record_gateway_outcome(
+                        gateway_route,
+                        success=bool(result.success),
+                        usage=usage,
+                    )
+                except Exception:
+                    # Router accounting is best-effort and must not replace the
+                    # provider result or leak credential details.
+                    pass
             post_mortem: dict[str, Any] = {
                 "task_id": state_task_id,
                 "preset": preset_name,
@@ -579,6 +690,8 @@ class DelegateSubagentTool(BaseTool):
             }
             if kwargs.get("max_tokens") is not None:
                 post_mortem["max_tokens"] = int(kwargs["max_tokens"])
+            if gateway_route:
+                post_mortem["gateway_route"] = dict(gateway_route)
             try:
                 if usage:
                     state_store.record_cost(
@@ -593,6 +706,7 @@ class DelegateSubagentTool(BaseTool):
                     provider=provider,
                     turns=turns_used,
                     post_mortem=post_mortem,
+                    **({"routing": {"gateway": dict(gateway_route)}} if gateway_route else {}),
                 )
             except Exception:
                 pass
@@ -669,19 +783,42 @@ class DelegateSubagentTool(BaseTool):
         if preset.get("temperature") is not None:
             cfg.temperature = float(preset["temperature"])
 
+        gateway_route, gateway_error = _gateway_route_for_delegate(
+            cfg=cfg,
+            provider_name=provider_name,
+            preset_name=preset_name,
+            agentic=agentic,
+            structured=structured,
+        )
+        if gateway_error:
+            return ToolResult(
+                success=False,
+                data={
+                    "preset": preset_name,
+                    "provider": provider_name,
+                    "model": cfg.model,
+                    "usage": {},
+                    "gateway_route": gateway_route,
+                },
+                error=f"Yggdrasil Router enforce failed: {gateway_error}",
+            )
+
         base_system = str(preset.get("system_prompt") or "")
 
         if agentic:
-            return self._execute_agentic(
-                preset_name=preset_name,
-                provider_name=provider_name,
-                cfg=cfg,
-                prompt=prompt,
-                base_system=base_system,
-                workdir_arg=workdir_arg,
-                max_turns=max_turns,
-                structured=structured,
-                LLMProviderWrapper=LLMProviderWrapper,
+            return _with_gateway_route(
+                self._execute_agentic(
+                    preset_name=preset_name,
+                    provider_name=provider_name,
+                    cfg=cfg,
+                    prompt=prompt,
+                    base_system=base_system,
+                    workdir_arg=workdir_arg,
+                    max_turns=max_turns,
+                    structured=structured,
+                    LLMProviderWrapper=LLMProviderWrapper,
+                ),
+                gateway_route,
             )
 
         # ── One-shot path (unchanged from tanda 1) ─────────────────────
@@ -704,15 +841,18 @@ class DelegateSubagentTool(BaseTool):
         try:
             result = asyncio.run(_run())
         except Exception as exc:
-            return ToolResult(
-                success=False,
-                data={
-                    "preset": preset_name,
-                    "provider": provider_name,
-                    "model": cfg.model,
-                    "usage": {},
-                },
-                error=f"Sub-agente '{preset_name}' falló: {exc}",
+            return _with_gateway_route(
+                ToolResult(
+                    success=False,
+                    data={
+                        "preset": preset_name,
+                        "provider": provider_name,
+                        "model": cfg.model,
+                        "usage": {},
+                    },
+                    error=f"Sub-agente '{preset_name}' falló: {exc}",
+                ),
+                gateway_route,
             )
 
         content = result.get("content", "")
@@ -729,32 +869,38 @@ class DelegateSubagentTool(BaseTool):
                     response_format=self._provider_response_format(),
                 )
             )
-            return ToolResult(
-                success=validated is not None,
+            return _with_gateway_route(
+                ToolResult(
+                    success=validated is not None,
+                    data={
+                        "preset": preset_name,
+                        "provider": provider_name,
+                        "model": cfg.model,
+                        "content": (validated.get("summary", "") if validated else content),
+                        "usage": usage,
+                        "structured": validated,
+                        "validation_errors": errors,
+                        "raw_content": raw_content if validated is None else None,
+                    },
+                    error="" if validated is not None else (
+                        f"structured output failed validation: {errors}"
+                    ),
+                ),
+                gateway_route,
+            )
+
+        return _with_gateway_route(
+            ToolResult(
+                success=True,
                 data={
                     "preset": preset_name,
                     "provider": provider_name,
                     "model": cfg.model,
-                    "content": (validated.get("summary", "") if validated else content),
+                    "content": content,
                     "usage": usage,
-                    "structured": validated,
-                    "validation_errors": errors,
-                    "raw_content": raw_content if validated is None else None,
                 },
-                error="" if validated is not None else (
-                    f"structured output failed validation: {errors}"
-                ),
-            )
-
-        return ToolResult(
-            success=True,
-            data={
-                "preset": preset_name,
-                "provider": provider_name,
-                "model": cfg.model,
-                "content": content,
-                "usage": usage,
-            },
+            ),
+            gateway_route,
         )
 
     # ── Agentic mini-loop ─────────────────────────────────────────────

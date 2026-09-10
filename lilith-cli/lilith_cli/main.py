@@ -1038,6 +1038,40 @@ def _check_routing_evidence() -> dict[str, str]:
     }
 
 
+def _check_yggdrasil_gateway() -> dict[str, str]:
+    """Report whether Lilith can see the external provider/account router."""
+    try:
+        from lilith_tools.yggdrasil_gateway import probe_gateway
+
+        probe = probe_gateway()
+    except Exception as exc:
+        return {
+            "check": "yggdrasil.gateway",
+            "status": "error",
+            "message": f"diagnostico no disponible: {type(exc).__name__}",
+        }
+
+    if not probe.configured:
+        return {
+            "check": "yggdrasil.gateway",
+            "status": "warn",
+            "message": "sin configurar; delegacion Lilith mantiene su provider/preset actual",
+        }
+    if not probe.available:
+        return {
+            "check": "yggdrasil.gateway",
+            "status": "error",
+            "message": f"configurado pero no disponible: {probe.error}",
+        }
+    status = "ok" if probe.mode == "enforce" else "warn"
+    suffix = "seleccion activa" if probe.mode == "enforce" else "solo observacion"
+    return {
+        "check": "yggdrasil.gateway",
+        "status": status,
+        "message": f"{probe.account_count} cuentas; mode={probe.mode}; {suffix}",
+    }
+
+
 def _check_package_versions() -> list[dict[str, str]]:
     """Report the installed version of every lilith-* package."""
     import importlib.metadata as md
@@ -1126,6 +1160,7 @@ def run_doctor_checks(
     rows.append(_check_memory_db(cfg))
     rows.append(_check_orchestration_state())
     rows.append(_check_routing_evidence())
+    rows.append(_check_yggdrasil_gateway())
     rows.extend(_check_package_versions())
     return rows
 

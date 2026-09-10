@@ -445,22 +445,28 @@ class TestLilithIDEAppQoLv2:
 
 
 class TestRuneDirectoryTree:
-    """Tests for the Norse-themed file tree."""
+    """Tests for rune selection without starting Textual widget lifecycle."""
+
+    @staticmethod
+    def _unmounted_tree() -> RuneDirectoryTree:
+        # DirectoryTree.__init__ schedules the async watch_path reactive watcher.
+        # These tests only exercise the pure rune lookup, so bypass widget init.
+        return object.__new__(RuneDirectoryTree)
 
     def test_rune_for_python_file(self, tmp_path):
-        tree = RuneDirectoryTree(tmp_path)
+        tree = self._unmounted_tree()
         assert tree.rune_for_path(tmp_path / "main.py") == "ᛈ"
 
     def test_rune_for_rust_file(self, tmp_path):
-        tree = RuneDirectoryTree(tmp_path)
+        tree = self._unmounted_tree()
         assert tree.rune_for_path(tmp_path / "lib.rs") == "ᚱ"
 
     def test_rune_for_directory(self, tmp_path):
-        tree = RuneDirectoryTree(tmp_path)
+        tree = self._unmounted_tree()
         assert tree.rune_for_path(tmp_path) == tree.ICON_NODE
 
     def test_default_rune_for_unknown_extension(self, tmp_path):
-        tree = RuneDirectoryTree(tmp_path)
+        tree = self._unmounted_tree()
         assert tree.rune_for_path(tmp_path / "data.xyz") == "ᚠ"
 
 

@@ -74,9 +74,9 @@ uv run --no-sync python -m pytest -q lilith-stack/lilith-core/tests lilith-stack
 uv run --no-sync python -m pytest -q lilith-stack/lilith-core/tests/test_persistence_hardening.py lilith-stack/lilith-core/tests/test_goal_state.py
 ```
 
-Known test infrastructure follow-up: `lilith-tools/tests/e2e/conftest.py` currently
-marks every collected item as E2E, including sibling suites. Exclude that directory
-explicitly for local validation; `-m 'not e2e'` alone deselects the entire collection.
+Test infrastructure note (resolved 2026-09-10): `lilith-tools/tests/e2e/conftest.py`
+now marks only tests inside `tests/e2e`. Sibling unit suites remain selectable with
+`-m 'not e2e'`; regression coverage lives in `tests/test_e2e_collection_scope.py`.
 These checks do not cover live provider calls, other packages or deployment.
 
 ## License

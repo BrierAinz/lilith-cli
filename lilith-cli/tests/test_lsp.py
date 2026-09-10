@@ -79,6 +79,21 @@ class TestLSPManager:
         await mgr.stop_all()  # should not raise
 
 
+class TestLSPAppLifecycle:
+    """IDE shutdown must reap language-server processes."""
+
+    @pytest.mark.asyncio
+    async def test_app_unmount_stops_lsp_manager(self, fake_session, tmp_path):
+        app = LilithIDEApp(fake_session, root=tmp_path, show_splash=False)
+        stop_all = AsyncMock()
+        app.lsp_manager.stop_all = stop_all
+
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+
+        stop_all.assert_awaited_once_with()
+
+
 class TestLSPClientDiagnostics:
     """Unit tests for LSP diagnostic storage."""
 

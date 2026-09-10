@@ -210,6 +210,15 @@ class LilithIDEApp(
             "md": "# Título\n\n## Subtítulo\n\nTexto.\n",
         }
 
+    async def on_unmount(self) -> None:
+        """Release terminal and language-server processes on IDE shutdown."""
+        self._shutdown_terminals()
+        try:
+            await self.lsp_manager.stop_all()
+        except Exception:
+            # Shutdown must remain best-effort even if a language server is wedged.
+            pass
+
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         with Vertical(id="main"):

@@ -1,6 +1,6 @@
 """Smoke test for every ``run_*_command`` slash-command entry point.
 
-``lilith_cli.extra_commands`` exposes ~70 ``async def run_*_command(session, args)``
+``lilith_cli.extra_commands`` exposes ~90 ``async def run_*_command(session, args)``
 coroutines — one per slash command the Lilith CLI recognises. This test
 discovers them by introspection (no hand-maintained list) and invokes each
 with the shared ``fake_session`` fixture and an empty ``args`` string.
@@ -14,6 +14,15 @@ Commands that cannot be smoke-tested safely are listed in ``EXCLUDED``
 below with a short reason. They still appear in the inventory through
 ``pytest.mark.skip`` so it is obvious which commands are covered and
 which are deliberately skipped.
+
+WARNING / ARCHITECTURAL NOTE:
+``EXCLUDED`` is a DENYLIST and therefore fails open (falla en abierto).
+Any new ``run_*_command`` added to ``extra_commands.py`` (or imported into
+its namespace) will automatically be discovered by this suite and executed
+with empty arguments without prior manual review. If a newly introduced
+command can spawn subprocesses, touch the network, mutate disk/repository,
+or prompt interactively, it must be explicitly audited and added to
+``EXCLUDED``.
 """
 
 from __future__ import annotations
@@ -27,7 +36,7 @@ import lilith_cli.extra_commands as extra_commands
 
 
 # ---------------------------------------------------------------------------
-# Explicit exclusion set.
+# Explicit exclusion set (DENYLIST — fails open / falla en abierto).
 #
 # Each entry maps ``run_<name>_command`` to a short reason describing why
 # calling it with empty ``args`` would either spawn a subprocess, hit the
@@ -36,11 +45,17 @@ import lilith_cli.extra_commands as extra_commands
 # (``await session.process_message_stream(...)`` on an async generator
 # raises ``TypeError``) that cannot be fixed without modifying the
 # source under test.
+#
+# NOTE: Because this list is a denylist, any newly added command in
+# ``extra_commands.py`` enters the suite automatically and is invoked with
+# empty args unless deliberately added here.
 # ---------------------------------------------------------------------------
 EXCLUDED: dict[str, str] = {
     # ── Subprocess execution ────────────────────────────────────────────
     # Runs `git diff --cached` to summarise staged changes.
     "run_diff_staged_command": "spawns `git diff --cached`",
+    # Runs `git diff` to summarise unstaged changes.
+    "run_diff_unstaged_command": "spawns `git diff`",
     # Runs `git diff` plus an external linter (ruff / flake8 / black).
     "run_lint_command": "spawns git + external linter",
     # Runs `ruff check --fix` or `black` to rewrite files in place.
@@ -54,6 +69,11 @@ EXCLUDED: dict[str, str] = {
     "run_test_command": "spawns pytest via RunTestTool",
     # Runs `git rev-parse` and `git log` to populate the context panel.
     "run_whereami_command": "spawns git rev-parse/log subprocesses",
+    # Pushes branch to origin and opens a PR via gh (subprocesses, network, remote mutation, GUI auth prompt).
+    "run_pr_command": "spawns `git push` + `gh pr create`",
+    # ── File mutation / export ──────────────────────────────────────────
+    # Unconditionally writes a timestamped conversation export file to disk.
+    "run_export_command": "writes conversation export to disk",
     # ── Provider / network ──────────────────────────────────────────────
     # Builds a real LLM provider (e.g. Ollama / OpenAI) and streams
     # completions to measure latency — may hit the network or a remote

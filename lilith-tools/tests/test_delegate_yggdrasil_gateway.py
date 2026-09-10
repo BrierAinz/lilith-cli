@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
+import sys
+import types
 from types import SimpleNamespace
 
+import pytest
 from pydantic import SecretStr
 
 from lilith_tools.base import ToolResult
@@ -211,3 +215,124 @@ def test_delegate_persists_only_sanitized_gateway_route(monkeypatch, tmp_path):
     serialized = repr(state)
     assert "secret_ref" not in serialized
     assert "routed-secret-value" not in serialized
+
+
+def test_enforce_rotates_real_router_accounts_end_to_end_without_network(monkeypatch, tmp_path):
+    router_home = yggdrasil_gateway._candidate_router_package()
+    if router_home is None:
+        pytest.skip("Yggdrasil Router checkout not present")
+
+    router_config = tmp_path / "router.json"
+    router_config.write_text(
+        json.dumps(
+            {
+                "failure_threshold": 3,
+                "accounts": [
+                    {
+                        "account_id": "deepseek-a",
+                        "provider": "deepseek",
+                        "secret_ref": "env://TEST_LILITH_ROUTER_ACCOUNT_A",
+                        "capabilities": ["chat"],
+                        "models": ["deepseek-v4-flash"],
+                        "status": "healthy",
+                        "priority": 100,
+                        "quota_remaining": 1,
+                        "token_quota_remaining": 1000,
+                    },
+                    {
+                        "account_id": "deepseek-b",
+                        "provider": "deepseek",
+                        "secret_ref": "env://TEST_LILITH_ROUTER_ACCOUNT_B",
+                        "capabilities": ["chat"],
+                        "models": ["deepseek-v4-flash"],
+                        "status": "healthy",
+                        "priority": 90,
+                        "quota_remaining": 5,
+                        "token_quota_remaining": 1000,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    state_path = tmp_path / "orchestration.json"
+    monkeypatch.setenv("YGGDRASIL_ORCHESTRATION_STATE", str(state_path))
+    monkeypatch.setenv(yggdrasil_gateway.ROUTER_CONFIG_ENV, str(router_config))
+    monkeypatch.setenv(yggdrasil_gateway.ROUTER_HOME_ENV, str(router_home))
+    monkeypatch.setenv(yggdrasil_gateway.ROUTER_MODE_ENV, "enforce")
+    monkeypatch.setenv("TEST_LILITH_ROUTER_ACCOUNT_A", "opaque-account-a")
+    monkeypatch.setenv("TEST_LILITH_ROUTER_ACCOUNT_B", "opaque-account-b")
+    yggdrasil_gateway.clear_gateway_cache()
+
+    profile = SimpleNamespace(
+        model="deepseek-v4-flash",
+        api_key=SecretStr("preset-default"),
+        base_url="https://example.invalid/v1",
+        max_tokens=None,
+        temperature=None,
+    )
+    cfg = SimpleNamespace(
+        provider="deepseek",
+        model="deepseek-v4-flash",
+        api_key=SecretStr("preset-default"),
+        base_url="https://example.invalid/v1",
+        providers={"deepseek": profile},
+        max_tokens=100,
+        temperature=0.0,
+    )
+    seen_credentials: list[str] = []
+
+    class Provider:
+        def __init__(self, routed_cfg):
+            seen_credentials.append(routed_cfg.api_key.get_secret_value())
+
+        async def complete(self, messages, *, tools=None, **kwargs):
+            return {
+                "content": "ok",
+                "usage": {"prompt_tokens": 7, "completion_tokens": 4, "total_tokens": 11},
+                "tool_calls": [],
+            }
+
+        async def close(self):
+            return None
+
+    cfg_mod = types.ModuleType("lilith_cli.config")
+    cfg_mod.load_config = lambda: cfg
+    cfg_mod.require_supported_provider = lambda name: name
+    cfg_mod.require_supported_model = lambda provider, model: model
+    main_mod = types.ModuleType("lilith_cli.main")
+    main_mod._load_subagent_presets = lambda config_path=None: {
+        "batch-deepseek": {
+            "provider": "deepseek",
+            "model": "deepseek-v4-flash",
+            "system_prompt": "test",
+        }
+    }
+    providers_mod = types.ModuleType("lilith_cli.providers")
+    providers_mod.LLMProviderWrapper = Provider
+    providers_mod.ToolCall = type("ToolCall", (), {})
+    providers_mod.ToolResult = type("ToolResult", (), {})
+    for module in (cfg_mod, main_mod, providers_mod):
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+
+    tool = DelegateSubagentTool()
+    first = tool.execute(preset="batch-deepseek", prompt="first")
+    second = tool.execute(preset="batch-deepseek", prompt="second")
+
+    assert first.success is True
+    assert second.success is True
+    assert first.data["gateway_route"]["account_id"] == "deepseek-a"
+    assert second.data["gateway_route"]["account_id"] == "deepseek-b"
+    assert seen_credentials == ["opaque-account-a", "opaque-account-b"]
+
+    state = OrchestrationStateStore(state_path).get()
+    assert [task["routing"]["gateway"]["account_id"] for task in state["tasks"]] == [
+        "deepseek-a",
+        "deepseek-b",
+    ]
+    serialized = repr(state)
+    assert "opaque-account-a" not in serialized
+    assert "opaque-account-b" not in serialized
+    assert "TEST_LILITH_ROUTER_ACCOUNT_A" not in serialized
+    assert "TEST_LILITH_ROUTER_ACCOUNT_B" not in serialized
+    yggdrasil_gateway.clear_gateway_cache()

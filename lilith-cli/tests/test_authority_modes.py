@@ -74,6 +74,15 @@ def test_no_tools_override_is_terminal() -> None:
     assert session.get_tool_descriptions() == []
 
 
+def test_collaborator_inspection_is_readonly_but_dispatch_is_not():
+    mode = get_agent_mode("review-only")
+    assert mode_allows_tool(mode, "cli_job_inspect")
+    assert mode_allows_tool(mode, "cli_jobs_recent")
+    assert mode_allows_tool(mode, "cli_job_reference")
+    assert not mode_allows_tool(mode, "vor_delegate")
+    assert not mode_allows_tool(mode, "huginn_delegate")
+
+
 @pytest.mark.asyncio
 async def test_no_tools_denies_direct_execution_before_instantiation() -> None:
     MutatingTool.calls = 0

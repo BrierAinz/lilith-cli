@@ -98,9 +98,12 @@ class TerminalMixin:
             except Exception:
                 pass
 
-    def on_unmount(self) -> None:
+    async def on_unmount(self) -> None:
         """Kill every PTY shell on IDE shutdown (no conhost zombies)."""
         self._shutdown_terminals()
+        manager = getattr(self, "lsp_manager", None)
+        if manager is not None:
+            await manager.stop_all()
 
     def on_resize(self, event) -> None:  # noqa: ANN001 - textual event
         """Keep the active PTY's size in sync with the panel."""

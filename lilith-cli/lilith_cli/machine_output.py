@@ -65,6 +65,16 @@ def _err(msg: str, *, err: TextIO | None = None) -> None:
 
 
 async def _run_agent_stream(session: SessionRuntime, text: str) -> dict[str, Any]:
+    stream = session.process_message_stream(text)
+    try:
+        return await _collect_agent_stream(stream)
+    finally:
+        close = getattr(stream, "aclose", None)
+        if close is not None:
+            await close()
+
+
+async def _collect_agent_stream(stream) -> dict[str, Any]:
     """Consume ``session.process_message_stream`` and collect the result.
 
     Returns a dict with ``response``, ``usage``, ``tool_errors`` and
@@ -77,7 +87,7 @@ async def _run_agent_stream(session: SessionRuntime, text: str) -> dict[str, Any
     tool_errors: list[str] = []
     cancelled = False
 
-    async for event in session.process_message_stream(text):
+    async for event in stream:
         event_type = event.get("type", "")
         if event_type == "text":
             text_parts.append(event.get("content") or "")

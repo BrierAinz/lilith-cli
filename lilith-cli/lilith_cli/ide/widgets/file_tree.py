@@ -99,8 +99,9 @@ class RuneDirectoryTree(DirectoryTree):
 
         return Text.assemble(prefix, node_label)
 
-    def rune_for_path(self, path: Path) -> str:
+    @classmethod
+    def rune_for_path(cls, path: Path) -> str:
         """Return the rune icon that would be used for *path*."""
         if path.is_dir():
-            return self.ICON_NODE
+            return cls.ICON_NODE
         return _RUNE_ICONS.get(path.suffix.lower(), _DEFAULT_RUNE)

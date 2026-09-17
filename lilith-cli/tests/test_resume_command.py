@@ -140,3 +140,46 @@ def test_resume_command_metadata():
     assert cmd.name == "resume"
     assert "load" in cmd.aliases
     assert cmd.description  # non-empty
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("snapshot", [None, {"version": 1, "entries": [
+    {"tool": "vor_delegate", "call_id": "saved", "request_id": "a" * 32}]}])
+async def test_slash_resume_restores_keys_and_clears_previous_session(tmp_path, monkeypatch, snapshot):
+    from types import SimpleNamespace
+    from lilith_cli.commands import ResumeCommand
+    from lilith_cli import repl
+
+    path = _write_conv(tmp_path, "saved", [{"role": "user", "content": "restored"}])
+    data = json.loads(path.read_text())
+    if snapshot is not None:
+        data["delegation_requests"] = snapshot
+    path.write_text(json.dumps(data))
+    monkeypatch.setattr(repl, "_CONVERSATIONS_DIR", tmp_path)
+    session = SimpleNamespace(history=[{"role": "user", "content": "before"}],
+        _delegation_request_ids={("huginn_delegate", "old"): "b" * 32})
+    await ResumeCommand(session).execute("1")
+    assert session.history == data["messages"]
+    assert session._delegation_request_ids == ({("vor_delegate", "saved"): "a" * 32} if snapshot else {})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("extra", [{"delegation_requests": {"version": 1, "entries": [
+    {"tool": "vor_delegate", "call_id": "saved", "request_id": "bad"}]}},
+    {"progress": {"pending": [{"id": "unknown"}]}},
+    {"usage": {"total_tokens": "bad"}}, {"per_model_usage": {"model": 5}},
+    {"per_model_usage": {"model": {"cost": float("nan")}}}])
+async def test_slash_resume_rejects_unsafe_restore_without_mutation(tmp_path, monkeypatch, extra):
+    from types import SimpleNamespace
+    from lilith_cli.commands import ResumeCommand
+    from lilith_cli import repl
+
+    path = _write_conv(tmp_path, "saved", [{"role": "user", "content": "restored"}])
+    data = json.loads(path.read_text()) | extra
+    path.write_text(json.dumps(data))
+    monkeypatch.setattr(repl, "_CONVERSATIONS_DIR", tmp_path)
+    session = SimpleNamespace(history=[{"role": "user", "content": "before"}],
+        _delegation_request_ids={("huginn_delegate", "old"): "b" * 32})
+    await ResumeCommand(session).execute("1")
+    assert session.history[0]["content"] == "before"
+    assert session._delegation_request_ids == {("huginn_delegate", "old"): "b" * 32}

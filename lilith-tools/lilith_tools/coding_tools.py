@@ -172,7 +172,12 @@ class RunTestTool(BaseTool):
     """
 
     name = "run_test"
-    description = "Ejecuta tests del proyecto en un subproceso con timeout"
+    description = (
+        "Ejecuta tests del proyecto en un subproceso con timeout. "
+        "Para una suite grande SUBE timeout: el defecto de 60s no basta y "
+        "un timeout NO es un fallo de los tests, es que te rendiste antes. "
+        "La suite completa de lilith-cli tarda unos 210s: pasa timeout=300."
+    )
     parameters = {
         "path": {
             "type": "string",
@@ -190,7 +195,7 @@ class RunTestTool(BaseTool):
             "type": "integer",
             "required": False,
             "default": 60,
-            "description": "Timeout en segundos",
+            "description": "Segundos antes de rendirse (defecto 60). Subelo para suites grandes: 300 para la suite completa. Rendirse pronto se lee como un fallo que no es",
         },
     }
 

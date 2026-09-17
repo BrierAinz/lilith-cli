@@ -285,10 +285,10 @@ def test_bus_claim_returns_message_and_marks_claimer(bus_db: Path, capsys):
     assert m.claimed_by == "skadi"
 
     # Second claim from a different claimer should yield the next message.
-    m2 = claim(role="r1", claimer="sakana", db=bus_db)
+    m2 = claim(role="r1", claimer="experiential", db=bus_db)
     assert m2 is not None
     assert m2.topic == "b"
-    assert m2.claimed_by == "sakana"
+    assert m2.claimed_by == "experiential"
 
     out = capsys.readouterr().out
     assert "Claimed id=1" in out
@@ -339,7 +339,7 @@ def test_bus_ack_wrong_claimer_exits(bus_db: Path, capsys):
     claim(role="r1", claimer="skadi", db=bus_db)
 
     with pytest.raises(SystemExit) as excinfo:
-        ack(msg_id=1, claimer="sakana", db=bus_db)
+        ack(msg_id=1, claimer="experiential", db=bus_db)
     assert excinfo.value.code == 1
     assert "Could not ack" in capsys.readouterr().out
 

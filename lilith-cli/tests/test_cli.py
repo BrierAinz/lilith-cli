@@ -23,7 +23,7 @@ def test_app_instance():
 
     # Cyclopts name can be a tuple or string
     name = app.name if isinstance(app.name, str) else app.name[0]
-    assert name == "yggdrasil"
+    assert name == "lilith"
     assert app.version == "4.6.0"
 
 

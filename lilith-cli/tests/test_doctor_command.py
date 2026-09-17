@@ -42,7 +42,6 @@ def _make_provider_profile(
         model=model,
         temperature=None,
         max_tokens=max_tokens,
-        use_responses=None,
     )
 
 
@@ -502,6 +501,50 @@ class TestRunDoctorChecks:
         rows = cli_main.run_doctor_checks()
         ping_rows = [r for r in rows if r["check"].startswith("ping:")]
         assert any(r["status"] == "error" for r in ping_rows)
+
+    def test_fabric_mode_does_not_probe_direct_provider_credentials(
+        self, monkeypatch, tmp_path
+    ):
+        from lilith_cli import config as cli_config
+        from lilith_cli import main as cli_main
+
+        cfg = _make_cfg(
+            providers={
+                "direct-only": _make_provider_profile(api_key="${DIRECT_ONLY_SECRET}")
+            },
+            mcp_servers=None,
+            memory_db=str(tmp_path / "memory.db"),
+        )
+        cfg.provider = "fabric"
+        cfg.fabric_token_env = "YGGDRASIL_FABRIC_TOKEN"
+        cfg.fabric_url = "http://127.0.0.1:8788"
+        monkeypatch.setenv("YGGDRASIL_FABRIC_TOKEN", "test-fabric-token")
+        monkeypatch.delenv("DIRECT_ONLY_SECRET", raising=False)
+        monkeypatch.setattr(cli_config, "load_config", lambda *a, **k: cfg)
+        monkeypatch.setattr(
+            cli_main,
+            "_check_fabric_health",
+            lambda *_a, **_k: {
+                "check": "fabric",
+                "status": "ok",
+                "message": "señal HTTP activa en loopback",
+            },
+        )
+
+        async def _forbidden_direct_pings(*_a, **_k):
+            raise AssertionError("Fabric mode must not ping direct providers")
+
+        monkeypatch.setattr(cli_main, "_run_provider_pings", _forbidden_direct_pings)
+        rows = cli_main.run_doctor_checks(network=True, start_mcp=False)
+
+        names = [row["check"] for row in rows]
+        assert "fabric" in names
+        assert "providers" in names
+        assert not any(name.startswith("api_key:") for name in names)
+        assert not any(name.startswith("ping:") for name in names)
+        scope = next(row for row in rows if row["check"] == "providers")
+        assert scope["status"] == "ok"
+        assert "Fabric/Router" in scope["message"]
 
     def test_config_broken_short_circuits_remaining_checks(
         self, monkeypatch

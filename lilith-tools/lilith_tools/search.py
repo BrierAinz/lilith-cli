@@ -12,6 +12,7 @@ from typing import Any
 
 from .base import BaseTool, ToolResult
 from .registry import ToolRegistry
+from .file_walk import WalkReport, walk_text_files
 
 
 @ToolRegistry.register
@@ -168,6 +169,18 @@ class SearchAcrossFilesTool(BaseTool):
             "default": 20,
             "description": "Maximo de coincidencias a devolver",
         },
+        "apply_exclusions": {
+            "type": "boolean",
+            "required": False,
+            "default": True,
+            "description": "Poda node_modules/.venv/.git y salta binarios. Ponlo en false para buscar DENTRO de esos arboles",
+        },
+        "time_budget": {
+            "type": "number",
+            "required": False,
+            "default": 25.0,
+            "description": "Segundos de recorrido. Al agotarse el resultado se marca truncated:true en vez de fingir un cero",
+        },
     }
 
     def execute(
@@ -176,6 +189,8 @@ class SearchAcrossFilesTool(BaseTool):
         path: str = ".",
         file_glob: str = "*",
         limit: int = 20,
+        apply_exclusions: bool = True,
+        time_budget: float = 25.0,
         **_: Any,
     ) -> ToolResult:
         """Busca un patron en multiples archivos."""
@@ -199,13 +214,28 @@ class SearchAcrossFilesTool(BaseTool):
 
         glob = file_glob.strip() if file_glob else "*"
         results: list[dict[str, Any]] = []
+        report = WalkReport()
+
+        def _resultado() -> ToolResult:
+            # El informe viaja CON los datos. Separarlos es lo que permitio que
+            # un recorrido truncado se leyera como "no existe".
+            return ToolResult(
+                success=True,
+                data={"matches": results, "count": len(results), **report.as_dict()},
+            )
+
         try:
-            for file_path in directory.rglob(glob):
-                if not file_path.is_file():
-                    continue
+            for file_path in walk_text_files(
+                directory,
+                glob,
+                report=report,
+                apply_exclusions=apply_exclusions,
+                time_budget=time_budget,
+            ):
                 try:
                     text = file_path.read_text(encoding="utf-8", errors="ignore")
                 except Exception:
+                    report.unreadable += 1
                     continue
                 for line_number, line in enumerate(text.splitlines(), start=1):
                     if compiled.search(line):
@@ -217,8 +247,11 @@ class SearchAcrossFilesTool(BaseTool):
                             }
                         )
                         if len(results) >= limit:
-                            return ToolResult(success=True, data={"matches": results, "count": len(results)})
-            return ToolResult(success=True, data={"matches": results, "count": len(results)})
+                            report.mark_truncated(
+                                f"se alcanzo el tope de {limit} coincidencias"
+                            )
+                            return _resultado()
+            return _resultado()
         except Exception as e:
             return ToolResult(success=False, data=None, error=str(e))
 

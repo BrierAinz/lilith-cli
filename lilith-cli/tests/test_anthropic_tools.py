@@ -33,7 +33,6 @@ def _config():
         api_key="test",
         model="MiniMax-M2",
         max_tokens=1024,
-        use_responses=False,
     )
     return SimpleNamespace(
         provider="minimax",

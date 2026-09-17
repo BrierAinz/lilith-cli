@@ -66,6 +66,7 @@ Usage::
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 import uuid
@@ -73,6 +74,38 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable, Iterator
+
+from lilith_core.persistence_lock import storage_lock
+
+_STORAGE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+class RevisionConflictError(RuntimeError):
+    """Raised when stale JSON state attempts to replace a newer revision."""
+
+
+def _storage_path(directory: Path, storage_id: str) -> Path:
+    if not isinstance(storage_id, str) or not _STORAGE_ID_RE.fullmatch(storage_id):
+        raise ValueError(f"invalid storage id: {storage_id!r}")
+    root = directory.resolve()
+    path = (root / f"{storage_id}.json").resolve()
+    path.relative_to(root)
+    return path
+
+
+def _atomic_json_write(path: Path, payload: dict[str, Any]) -> None:
+    """Durably replace one JSON document without exposing partial bytes."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    staging = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with staging.open("w", encoding="utf-8", newline="\n") as handle:
+            json.dump(payload, handle, indent=2, ensure_ascii=False)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        staging.replace(path)
+    finally:
+        staging.unlink(missing_ok=True)
 
 # ── Optional YAML ─────────────────────────────────────────────────────────────
 try:  # pragma: no cover — import guard
@@ -136,9 +169,14 @@ def _parse_ts(ts: str | float | int | None) -> datetime | None:
 
 def _json_load(path: Path) -> dict[str, Any]:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise TypeError(f"persisted JSON must be an object: {path}")
+        return data
+    except FileNotFoundError:
         return {}
+    except (json.JSONDecodeError, OSError) as exc:
+        raise ValueError(f"persisted JSON is corrupt or unreadable: {path}") from exc
 
 
 def _yaml_load(text: str) -> Any:
@@ -350,6 +388,7 @@ class Goal:
     quota_max_tokens: int = 0
     quota_used_tokens: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
+    revision: int = 0
 
     # ── Convenience ─────────────────────────────────────────────────────
 
@@ -436,6 +475,10 @@ class Goal:
             "quota_max_tokens": self.quota_max_tokens,
             "quota_used_tokens": self.quota_used_tokens,
             "metadata": dict(self.metadata),
+            "schema_id": "lilith-cross-goal",
+            "schema_version": 1,
+            "revision": self.revision,
+            "writer": "lilith_skills.cross_context",
         }
 
     @classmethod
@@ -460,6 +503,7 @@ class Goal:
             quota_max_tokens=int(data.get("quota_max_tokens") or 0),
             quota_used_tokens=int(data.get("quota_used_tokens") or 0),
             metadata=dict(data.get("metadata") or {}),
+            revision=int(data.get("revision") or 0),
         )
 
 
@@ -487,17 +531,27 @@ class GoalsStore:
             return []
         out: list[Goal] = []
         for p in sorted(self.goals_dir.glob("*.json")):
-            data = _json_load(p)
-            if data:
-                out.append(Goal.from_dict(data))
+            goal = self.get(p.stem)
+            if goal is not None:
+                out.append(goal)
         return out
 
     def get(self, goal_id: str) -> Goal | None:
-        path = self.goals_dir / f"{goal_id}.json"
+        path = _storage_path(self.goals_dir, goal_id)
         if not path.exists():
             return None
         data = _json_load(path)
-        return Goal.from_dict(data) if data else None
+        self._validate_goal(data, goal_id)
+        return Goal.from_dict(data)
+
+    @staticmethod
+    def _validate_goal(data: dict[str, Any], goal_id: str) -> None:
+        if data.get("schema_id") not in (None, "lilith-cross-goal"):
+            raise ValueError("unsupported goal schema")
+        if data.get("schema_id") is not None and data.get("schema_version") != 1:
+            raise ValueError("unsupported goal schema version")
+        if data.get("id") != goal_id:
+            raise ValueError("goal file identity mismatch")
 
     def create(
         self,
@@ -519,20 +573,42 @@ class GoalsStore:
             quota_max_calls=quota_max_calls,
             quota_max_tokens=quota_max_tokens,
         )
-        self.save(goal)
+        path = _storage_path(self.goals_dir, gid)
+        with storage_lock(path):
+            if path.exists():
+                raise FileExistsError(f"goal already exists: {gid}")
+            self._save_locked(goal, path)
         return goal
 
     def save(self, goal: Goal) -> None:
         self._ensure()
+        path = _storage_path(self.goals_dir, goal.id)
+        with storage_lock(path):
+            self._save_locked(goal, path)
+
+    def _save_locked(self, goal: Goal, path: Path) -> None:
+        current_revision = -1
+        if path.exists():
+            current = _json_load(path)
+            self._validate_goal(current, goal.id)
+            if not current:
+                raise ValueError(f"goal file is corrupt: {path.name}")
+            current_revision = int(current.get("revision") or 0)
+        expected_revision = goal.revision if current_revision >= 0 else -1
+        if current_revision != expected_revision:
+            raise RevisionConflictError(
+                f"goal {goal.id!r} revision conflict: "
+                f"expected {expected_revision}, found {current_revision}"
+            )
         goal.updated_at = time.time()
-        path = self.goals_dir / f"{goal.id}.json"
-        path.write_text(
-            json.dumps(goal.to_dict(), indent=2),
-            encoding="utf-8",
-        )
+        next_revision = current_revision + 1
+        payload = goal.to_dict()
+        payload["revision"] = next_revision
+        _atomic_json_write(path, payload)
+        goal.revision = next_revision
 
     def delete(self, goal_id: str) -> bool:
-        path = self.goals_dir / f"{goal_id}.json"
+        path = _storage_path(self.goals_dir, goal_id)
         if path.exists():
             path.unlink()
             return True
@@ -571,11 +647,15 @@ class HandoffPack:
     quota_remaining: dict[str, int] = field(default_factory=dict)
     summary: str = ""
     handoff_version: str = "1.0"
+    goal_revision: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "handoff_version": self.handoff_version,
+            "schema_id": "lilith-cross-goal-handoff",
+            "schema_version": 1,
             "goal_id": self.goal_id,
+            "goal_revision": self.goal_revision,
             "name": self.name,
             "description": self.description,
             "project": self.project,
@@ -597,6 +677,7 @@ class HandoffPack:
         last_turn = goal.turns[-1] if goal.turns else None
         return cls(
             goal_id=goal.id,
+            goal_revision=goal.revision,
             name=goal.name,
             description=goal.description,
             project=goal.project,
@@ -618,6 +699,7 @@ class HandoffPack:
         summary = data.get("summary") or {}
         return cls(
             handoff_version=str(data.get("handoff_version") or "1.0"),
+            goal_revision=int(data.get("goal_revision") or 0),
             goal_id=str(data.get("goal_id") or "unknown"),
             name=str(data.get("name") or "unknown"),
             description=str(data.get("description") or ""),
@@ -660,7 +742,7 @@ class HandoffsStore:
         return out
 
     def get(self, goal_id: str) -> HandoffPack | None:
-        path = self.handoffs_dir / f"{goal_id}.json"
+        path = _storage_path(self.handoffs_dir, goal_id)
         if not path.exists():
             return None
         data = _json_load(path)
@@ -669,15 +751,12 @@ class HandoffsStore:
     def write_for(self, goal: Goal) -> HandoffPack:
         self._ensure()
         pack = HandoffPack.from_goal(goal)
-        path = self.handoffs_dir / f"{goal.id}.json"
-        path.write_text(
-            json.dumps(pack.to_dict(), indent=2),
-            encoding="utf-8",
-        )
+        path = _storage_path(self.handoffs_dir, goal.id)
+        _atomic_json_write(path, pack.to_dict())
         return pack
 
     def delete(self, goal_id: str) -> bool:
-        path = self.handoffs_dir / f"{goal_id}.json"
+        path = _storage_path(self.handoffs_dir, goal_id)
         if path.exists():
             path.unlink()
             return True

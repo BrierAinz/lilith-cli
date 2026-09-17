@@ -92,7 +92,7 @@ class ConclaveTool(BaseTool):
             "items": {"type": "string"},
             "description": (
                 "Lista de 2-4 nombres de preset. Default: "
-                "['investigador-minimax', 'grok-research']."
+                "['batch-deepseek', 'grok-research']."
             ),
             "required": False,
         },

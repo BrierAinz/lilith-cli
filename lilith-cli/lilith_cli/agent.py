@@ -12,10 +12,12 @@ import contextlib
 import difflib
 import json
 import logging
+import socket
+import uuid
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -29,16 +31,75 @@ from .providers import (
     lilith_tools_to_openai,
 )
 from .tool_hook_dispatcher import ToolHookDispatcher
-
+from .unicode_safety import sanitize_text, sanitize_unicode
 
 logger = logging.getLogger(__name__)
+
+
+DECISION_SUPPORT_INSTRUCTIONS = """
+DECISION SUPPORT:
+- When the user would benefit from choosing among materially different paths,
+  present 2 to 4 concise, mutually distinct options.
+- Mark exactly one option as "Recommended" and explain its main reason and
+  practical effect. Let the user choose by number or by option name.
+- Ask for a choice only when it would materially change scope, risk, cost,
+  privacy, architecture, or an irreversible outcome. Otherwise make a
+  reasonable assumption, state it briefly when useful, and continue.
+- Options are decision support, not a substitute for required safety or
+  authorization checks. Never describe an unsafe or unauthorized path as the
+  recommended option.
+""".strip()
 
 # ── Tool execution limits (v4.3.1) ──────────────────────────────────
 # Protect the conversation from a single tool call flooding the context.
 # Tools that produce large output (file_read on a big file, web_search,
 # directory_list on a huge tree) are truncated after these limits.
 _MAX_TOOL_RESULT_CHARS = 50_000        # hard cap on a single tool result
-_TRUNCATION_NOTICE = "\n\n[…resultado truncado para proteger el contexto. Si necesitas ver el resto, usa search_files con un patrón más específico o file_read con offset/limit.]"
+_DEFAULT_HISTORY_CHAR_BUDGET = 120_000
+_DEFAULT_TOOL_RESULT_CHAR_CAP = 8_000
+_HISTORY_OMISSION_MARKER = "\n...[contenido omitido]...\n"
+
+
+def _shrink_tool_result(text: Any, cap: int) -> Any:
+    """Limit a string tool result while retaining useful context at both ends."""
+    if not isinstance(text, str) or cap < 0 or len(text) <= cap:
+        return text
+    if cap == 0:
+        return ""
+    if cap <= len(_HISTORY_OMISSION_MARKER):
+        return text[:cap]
+
+    remaining = cap - len(_HISTORY_OMISSION_MARKER)
+    head = (remaining + 1) // 2
+    tail = remaining - head
+    suffix = text[-tail:] if tail else ""
+    return text[:head] + _HISTORY_OMISSION_MARKER + suffix
+
+
+def _trim_history_to_budget(
+    history: list[dict[str, Any]],
+    budget: int,
+    tool_cap: int,
+) -> list[dict[str, Any]]:
+    """Cap tool output, then discard oldest messages until history fits."""
+    trimmed: list[dict[str, Any]] = []
+    for message in history:
+        if isinstance(message, dict) and message.get("role") == "tool":
+            content = message.get("content")
+            shrunk = _shrink_tool_result(content, tool_cap)
+            if shrunk is not content:
+                message = {**message, "content": shrunk}
+        trimmed.append(message)
+
+    def content_size(message: dict[str, Any]) -> int:
+        content = message.get("content") if isinstance(message, dict) else None
+        return len(content) if isinstance(content, str) else 0
+
+    total = sum(content_size(message) for message in trimmed)
+    while len(trimmed) > 1 and total > budget:
+        total -= content_size(trimmed.pop(0))
+    return trimmed
+_TRUNCATION_NOTICE = "\n\n[…resultado truncado para proteger el contexto. Si necesitas ver el resto, usa search_files con un patrón m\u00e1s específico o file_read con offset/limit.]"
 
 # ── Conversation history message ─────────────────────────────────────
 
@@ -49,12 +110,12 @@ class Message(dict):
     @staticmethod
     def user(text: str) -> dict[str, Any]:
         """Create a user-role message dict."""
-        return {"role": "user", "content": text}
+        return {"role": "user", "content": sanitize_text(text)}
 
     @staticmethod
     def assistant(text: str, tool_calls: list[ToolCall] | None = None) -> dict[str, Any]:
         """Create an assistant-role message dict, optionally with tool calls."""
-        msg: dict[str, Any] = {"role": "assistant", "content": text}
+        msg: dict[str, Any] = {"role": "assistant", "content": sanitize_text(text)}
         if tool_calls:
             msg["tool_calls"] = [
                 {
@@ -74,19 +135,19 @@ class Message(dict):
     @staticmethod
     def tool_result(tc: ToolResult) -> dict[str, Any]:
         """Create a tool-result message dict from a ToolResult."""
-        return tc.to_openai_message()
+        return sanitize_unicode(tc.to_openai_message())
 
     @staticmethod
     def system(text: str) -> dict[str, Any]:
         """Create a system-role message dict."""
-        return {"role": "system", "content": text}
+        return {"role": "system", "content": sanitize_text(text)}
 
 
 def _drop_orphan_tool_messages(
     history: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Repara el pairing tool_call↔tool_result de un historial (posiblemente
-    truncado) para que sea válido ante la API de chat/completions.
+    truncado) para que sea v\u00e1lido ante la API de chat/completions.
 
     Dos desajustes que el truncamiento por max_turns puede introducir y que el
     proveedor (k3/OpenAI) rechaza con ``tool_call_id is not found`` (400):
@@ -204,7 +265,10 @@ class AgentSession:
         configured_mode = get_agent_mode(config.agent_mode)
         if configured_mode is None:
             raise ValueError(f"Unknown agent_mode: {config.agent_mode!r}")
+        requested_confirmation = config.confirm_write
         apply_agent_mode(self, configured_mode)
+        if configured_mode.name == "default":
+            config.confirm_write = requested_confirmation
 
         # Auto-execute settings: pre-approved tool patterns.
         self._auto_execute: bool = False
@@ -239,6 +303,20 @@ class AgentSession:
         self._identical_tool_failures: int = 0
         self._last_auto_continuations: int = 0
 
+        # Interactive Mission ownership. mission_prepare registers + claims with
+        # this owner; a heartbeat keeps the lease alive while the REPL event loop
+        # exists. A crashed process stops heartbeating and the campaign runtime
+        # can recover the expired lease.
+        self._mission_owner: str = (
+            f"lilith-session:{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
+        )
+        self._mission_task_id: str | None = None
+        self._mission_id: str | None = None
+        self._mission_lease_seconds: float = 300.0
+        self._mission_heartbeat_seconds: float = 60.0
+        self._mission_heartbeat_task: asyncio.Task | None = None
+        self._mission_lease_lost: bool = False
+
     # ── Cancellation ────────────────────────────────────────────────
 
     def cancel(self) -> None:
@@ -248,6 +326,84 @@ class AgentSession:
         """
         if self._cancel_event is not None and not self._cancel_event.is_set():
             self._cancel_event.set()
+
+    async def _mission_heartbeat_loop(self, task_id: str) -> None:
+        from lilith_tools.orchestration_state import OrchestrationStateStore
+
+        store = OrchestrationStateStore()
+        while self._mission_task_id == task_id:
+            await asyncio.sleep(self._mission_heartbeat_seconds)
+            if self._mission_task_id != task_id:
+                return
+            try:
+                await asyncio.to_thread(
+                    store.renew_lease,
+                    task_id,
+                    self._mission_owner,
+                    lease_seconds=self._mission_lease_seconds,
+                )
+            except (OSError, ValueError, RuntimeError):
+                try:
+                    snapshot = await asyncio.to_thread(store.get)
+                    current = next(
+                        (row for row in snapshot.get("tasks", []) if row.get("id") == task_id),
+                        None,
+                    )
+                except (OSError, ValueError, RuntimeError):
+                    current = None
+                if current and current.get("status") in {"completada", "fallida", "cancelada"}:
+                    self._mission_task_id = None
+                    self._mission_id = None
+                    self._mission_lease_lost = False
+                    return
+                self._mission_lease_lost = True
+                self.cancel()
+                logger.error("Interactive mission lease lost for %s", task_id)
+                return
+
+    async def _adopt_mission_prepare_result(self, result: ToolResult) -> None:
+        if result.content.startswith("Error:"):
+            return
+        try:
+            payload = json.loads(result.content)
+            registration = payload.get("registration") or {}
+            task_id = str(registration.get("task_id") or "").strip()
+            mission_id = str(registration.get("mission_id") or "").strip()
+            status = str(registration.get("status") or "")
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            return
+        if not task_id or status != "delegada":
+            return
+        self._mission_task_id = task_id
+        self._mission_id = mission_id or None
+        self._mission_lease_lost = False
+        existing = self._mission_heartbeat_task
+        if existing is not None and not existing.done():
+            existing.cancel()
+        self._mission_heartbeat_task = asyncio.create_task(
+            self._mission_heartbeat_loop(task_id)
+        )
+
+    async def _refresh_mission_after_complete(self) -> None:
+        if not self._mission_task_id:
+            return
+        from lilith_tools.orchestration_state import OrchestrationStateStore
+        try:
+            snapshot = await asyncio.to_thread(OrchestrationStateStore().get)
+        except (OSError, ValueError, RuntimeError):
+            return
+        current = next(
+            (row for row in snapshot.get("tasks", []) if row.get("id") == self._mission_task_id),
+            None,
+        )
+        if current and current.get("status") in {"completada", "fallida", "cancelada"}:
+            self._mission_task_id = None
+            self._mission_id = None
+            self._mission_lease_lost = False
+            heartbeat = self._mission_heartbeat_task
+            if heartbeat is not None and not heartbeat.done():
+                heartbeat.cancel()
+            self._mission_heartbeat_task = None
 
     # ── Hooks ─────────────────────────────────────────────────────────
 
@@ -380,39 +536,38 @@ class AgentSession:
         return self._memory
 
     def _load_project_instructions(self) -> str:
-        """Load local Lilith instructions, the nearest AGENTS.md, or global defaults.
+        """Reload inherited instructions from broadest to most specific each turn.
 
-        The result is cached on the session so repeated calls are cheap.
+        A nested AGENTS.md supplements its parents. Local Lilith guidance is
+        appended, so it cannot silently hide shared project rules. Reloading also
+        prevents stale guidance after /cd or an instruction edit during a session.
         """
-        if self._project_instructions is not None:
-            return self._project_instructions
 
-        from pathlib import Path
 
         try:
             cwd = Path.cwd()
             local_path = cwd / ".lilith" / "CLAUDE.md"
             global_path = Path.home() / ".lilith" / "CLAUDE.md"
-            agents_path = next(
-                (
-                    candidate
-                    for directory in (cwd, *cwd.parents)
-                    if (candidate := directory / "AGENTS.md").is_file()
-                ),
-                None,
-            )
-
+            paths = [
+                directory / "AGENTS.md"
+                for directory in reversed((cwd, *cwd.parents))
+                if (directory / "AGENTS.md").is_file()
+            ]
             if local_path.is_file():
-                instructions = local_path.read_text(encoding="utf-8")
-            elif agents_path is not None:
-                instructions = agents_path.read_text(encoding="utf-8")
-            elif global_path.is_file():
-                instructions = global_path.read_text(encoding="utf-8")
-            else:
-                instructions = ""
-        except Exception as exc:  # pragma: no cover — defensive
-            logger.warning("No se pudieron cargar instrucciones del proyecto: %s", exc)
-            instructions = ""
+                paths.append(local_path)
+            if not paths and global_path.is_file():
+                paths.append(global_path)
+            sections = [
+                f"--- Instrucciones: {path} ---\n{path.read_text(encoding='utf-8-sig')}"
+                for path in paths
+            ]
+            instructions = "\n\n".join(sections)
+        except (OSError, UnicodeError) as exc:
+            self._project_instructions = None
+            raise RuntimeError(
+                "No se pudieron leer las instrucciones del proyecto; "
+                "corrige el acceso o la codificación antes de continuar."
+            ) from exc
 
         self._project_instructions = instructions
         return instructions
@@ -424,6 +579,8 @@ class AgentSession:
         try:
             # Force registration of all tool classes.
             from lilith_tools import ToolRegistry, filesystem, system  # noqa: F401
+
+            from .mission import tools as mission_tools  # noqa: F401
 
             with contextlib.suppress(ImportError):
                 from lilith_tools import browser, coding, web_search  # noqa: F401
@@ -460,7 +617,17 @@ class AgentSession:
             "system": ["system"],
         }
 
+        from .agent_modes import tool_capability
+        from .qualification import allows_tool
+        calibrated_for_edits = allows_tool(self.config, "file_write")
+        profile_allowed = getattr(self, "_profile_allowed_tools", None)
+        profile_prefixes = getattr(self, "_profile_allowed_prefixes", ())
         for name, description in all_tools.items():
+            if profile_allowed is not None and name not in profile_allowed:
+                if not any(name.startswith(prefix) for prefix in profile_prefixes):
+                    continue
+            if not calibrated_for_edits and tool_capability(name) != "read":
+                continue
             from .agent_modes import get_agent_mode, mode_allows_tool
 
             mode = get_agent_mode(self.agent_mode)
@@ -564,17 +731,96 @@ class AgentSession:
 
         tool_name = tool_call.name
         tool_args = tool_call.arguments
+        from .qualification import allows_tool
+        if not allows_tool(self.config, tool_name):
+            return ToolResult(tool_call.id, tool_name, "Error: este modelo necesita calibración vigente antes de ejecutar acciones mutantes.")
+        if not isinstance(tool_args, dict):
+            return ToolResult(tool_call.id, tool_name, "Error: los argumentos deben ser un objeto JSON.")
+        if getattr(self, "_strict_tool_arguments", False):
+            from jsonschema import ValidationError, validate
+            schema = next((tool["function"]["parameters"] for tool in self.get_openai_tools()
+                           if tool["function"]["name"] == tool_name), None)
+            if schema is None:
+                return ToolResult(tool_call.id, tool_name, "Error: herramienta fuera del perfil activo.")
+            try:
+                validate(tool_args, schema)
+            except ValidationError as exc:
+                return ToolResult(tool_call.id, tool_name, f"Error: argumentos inv\u00e1lidos ({exc.validator}); revisa el esquema de la herramienta.")
+
+        from .agent_modes import tool_capability
+        if getattr(self, "_mission_lease_lost", False) and tool_capability(tool_name) != "read":
+            return ToolResult(
+                tool_call.id,
+                tool_name,
+                "Error: mission lease ownership was lost; mutating tools are blocked until reconciliation.",
+            )
+        if tool_name == "mission_prepare":
+            if getattr(self, "_mission_task_id", None):
+                return ToolResult(
+                    tool_call.id,
+                    tool_name,
+                    f"Error: session already owns active mission {getattr(self, '_mission_task_id', None)}.",
+                )
+            tool_args = dict(
+                tool_args,
+                _lease_owner=self._mission_owner,
+                _lease_seconds=self._mission_lease_seconds,
+            )
+            tool_call.arguments = tool_args
+
+        if tool_name in getattr(self, "_disabled_tools", set()):
+            return ToolResult(tool_call_id=tool_call.id, name=tool_name,
+                              content="Error: herramienta deshabilitada para esta sesión.")
+        allowed_files = getattr(self, "_allowed_file_paths", None)
+        if allowed_files is not None:
+            candidate = Path(str(tool_args.get("path", ""))).expanduser().resolve()
+            if tool_name not in ("file_read", "file_write", "file_edit", "file_append") or candidate not in allowed_files:
+                return ToolResult(tool_call_id=tool_call.id, name=tool_name,
+                                  content="Error: archivo o herramienta fuera del alcance de esta tarea.")
 
         if not self._tools_enabled:
             return ToolResult(
                 tool_call_id=tool_call.id,
                 name=tool_name,
-                content="Error: las herramientas estÃ¡n deshabilitadas por --no-tools.",
+                content="Error: las herramientas están deshabilitadas por --no-tools.",
             )
+        if tool_name in ("vor_delegate", "huginn_delegate"):
+            import uuid
+            bindings = getattr(self, "_delegation_request_ids", None)
+            if bindings is None:
+                bindings = self._delegation_request_ids = {}
+            identity = (tool_name, tool_call.id)
+            requested = tool_args.get("request_id")
+            if requested is not None and (not isinstance(requested, str) or len(requested) != 32 or any(char not in "0123456789abcdef" for char in requested)):
+                return ToolResult(tool_call.id, tool_name, "Error: request_id debe contener 32 hex minúsculas.")
+            previous = bindings.get(identity)
+            if previous is not None and requested is not None and requested != previous:
+                return ToolResult(tool_call.id, tool_name, "Error: la llamada ya está ligada a otra request_id.")
+            from .delegation_keys import automatic_request_id
+            namespace = getattr(self, "_delegation_namespace", None)
+            if namespace is None:
+                namespace = self._delegation_namespace = uuid.uuid4().hex
+            try:
+                request_id = previous or requested or automatic_request_id(namespace, tool_name, tool_args, str(Path.cwd()))
+            except (ValueError, TypeError):
+                return ToolResult(tool_call.id, tool_name, "Error: no se pudo identificar la petición de delegación.")
+            bindings[identity] = request_id
+            tool_args = dict(tool_args, request_id=request_id)
+            tool_call.arguments = tool_args
         signature = json.dumps(
             {"name": tool_name, "arguments": tool_args},
             sort_keys=True, ensure_ascii=False, default=str,
         )
+        import hashlib
+        receipt_key = hashlib.sha256(signature.encode("utf-8")).hexdigest()
+        receipt = getattr(self, "_replay_receipts", {}).get(receipt_key)
+        if receipt is not None:
+            target = Path(receipt["path"])
+            if target.is_file() and hashlib.sha256(target.read_bytes()).hexdigest() == receipt["sha256"]:
+                return ToolResult(tool_call_id=tool_call.id, name=tool_name,
+                                  content=receipt["result"] + " (recuperado: no se repitió la escritura)")
+            return ToolResult(tool_call_id=tool_call.id, name=tool_name,
+                              content="Error: el archivo cambió desde el checkpoint; inspección requerida antes de repetir la escritura.")
         if (
             signature == getattr(self, "_last_failed_tool_signature", None)
             and getattr(self, "_identical_tool_failures", 0) >= 2
@@ -587,6 +833,16 @@ class AgentSession:
                     "o pregunta al usuario"
                 ),
             )
+
+        if tool_name in ("vor_delegate", "huginn_delegate") and getattr(getattr(self.config, "history", None), "save", False):
+            from .repl import _auto_save_conversation
+            try:
+                saved = _auto_save_conversation(self)
+            except (OSError, ValueError, TypeError):
+                saved = None
+            if saved is None:
+                return ToolResult(tool_call.id, tool_name,
+                    "Error: no se pudo guardar la identidad antes de delegar; no se lanzó el colaborador.")
 
         # Pre-tool-call hook
         try:
@@ -602,7 +858,43 @@ class AgentSession:
 
         start = _time.perf_counter()
         result = await self._execute_tool_impl(tool_call)
+        if tool_name == "mission_prepare":
+            await self._adopt_mission_prepare_result(result)
+        elif tool_name == "mission_complete":
+            await self._refresh_mission_after_complete()
         duration = _time.perf_counter() - start
+        result_limit = getattr(self, "_tool_result_char_limit", 0)
+        if result_limit and len(result.content) > result_limit:
+            compact = None
+            if tool_name in ("vor_delegate", "huginn_delegate"):
+                is_error = result.content.startswith("Error: ")
+                try:
+                    payload = json.loads(result.content[7:] if is_error else result.content)
+                    recovery = payload.get("recovery", payload)
+                    fields = {key: recovery[key] for key in (
+                        "status", "reference", "reference_saved", "observation_saved", "job_id",
+                        "effects_unknown", "retry_safe",
+                    ) if key in recovery}
+                    fields["output_omitted"] = True
+                    compact = ("Error: " if is_error else "") + json.dumps(fields, ensure_ascii=True)
+                except (ValueError, TypeError, AttributeError):
+                    pass
+            fallback = ("Error: resultado demasiado grande para el perfil. Consulta jobs recent para delegaciones; no asumas el contenido omitido."
+                        if tool_name in ("vor_delegate", "huginn_delegate") else
+                        "Error: resultado demasiado grande para el perfil. Lee menos líneas con start_line y max_lines; no asumas el contenido omitido.")
+            result = ToolResult(tool_call.id, tool_name, compact if compact and len(compact) <= result_limit else fallback)
+
+        if (getattr(self, "_progress_enabled", False) and
+                tool_name in ("file_write", "file_edit", "file_append") and
+                not result.content.startswith("Error") and
+                (not self.config.confirm_write or tool_args.get("show_diff") is False)):
+            target = Path(str(tool_args.get("path", ""))).resolve()
+            if target.is_file():
+                if not hasattr(self, "_tool_receipts"):
+                    self._tool_receipts = {}
+                self._tool_receipts[receipt_key] = {"path": str(target),
+                    "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+                    "result": result.content[:1000]}
 
         failed = result.content.startswith("Error:")
         last_signature = getattr(self, "_last_failed_tool_signature", None)
@@ -721,6 +1013,8 @@ class AgentSession:
             retry_backoff = getattr(tools_config, "retry_backoff", 1.0) or 1.0
         if not isinstance(retry_count, int) or retry_count < 0:
             retry_count = 2
+        if getattr(tool_cls, "allow_automatic_retry", True) is False:
+            retry_count = 0
         if retry_backoff is None or not isinstance(retry_backoff, (int, float)) or retry_backoff <= 0:
             retry_backoff = 1.0
 
@@ -808,6 +1102,15 @@ class AgentSession:
 
                 # Use the (possibly) rewritten args from the hook
                 tool_args = effective_args
+                if tool_name in ("vor_delegate", "huginn_delegate"):
+                    bound = tool_call.arguments.get("request_id")
+                    if tool_args.get("request_id", bound) != bound:
+                        return ToolResult(tool_call.id, tool_name, "Error: el hook cambió la identidad de la delegación.")
+                    tool_args = dict(tool_args, request_id=bound)
+
+                timeout_policy = getattr(tool_cls, "timeout_for_arguments", None)
+                if callable(timeout_policy):
+                    tool_timeout = timeout_policy(tool_args)
 
                 result = await asyncio.wait_for(
                     asyncio.to_thread(tool_instance.execute, **tool_args),
@@ -822,6 +1125,10 @@ class AgentSession:
                     break
                 else:
                     content = f"Error: {result.error}"
+                    recovery_fields = getattr(tool_cls, "failure_metadata_fields", ())
+                    if recovery_fields and isinstance(result.data, dict):
+                        recovery = {key: result.data[key] for key in recovery_fields if key in result.data}
+                        content = "Error: " + json.dumps({"recovery": recovery, "error": result.error}, ensure_ascii=False)
                     last_error = result.error or ""
                     if not self._is_transient_error(last_error) or attempt == retry_count:
                         break
@@ -836,8 +1143,10 @@ class AgentSession:
                     )
                     await asyncio.sleep(wait)
                     continue
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 content = f"Error: tool '{tool_name}' excedió el timeout de {tool_timeout}s"
+                if getattr(tool_cls, "allow_automatic_retry", True) is False:
+                    content += "; el trabajo puede seguir activo. Consulta cli_jobs_recent y cli_job_reference; no relances sin reconciliar."
                 last_error = content
                 if attempt == retry_count:
                     result = None
@@ -998,7 +1307,14 @@ class AgentSession:
 
     def _build_messages(self) -> list[dict[str, Any]]:
         """Build the full message list to send to the LLM."""
-        messages: list[dict[str, Any]] = [Message.system(self.system_prompt)]
+        # Repair conversations restored from disk before the fix, or content
+        # inserted by integrations that bypass the public message methods.
+        self.history = sanitize_unicode(self.history)
+        messages: list[dict[str, Any]] = [
+            Message.system(
+                f"{self.system_prompt}\n\n{DECISION_SUPPORT_INSTRUCTIONS}"
+            )
+        ]
 
         # /goal metadata lives in history so /save and /resume preserve it,
         # while the model sees it as part of the root system prompt.
@@ -1094,6 +1410,13 @@ class AgentSession:
             )
 
         # Trim history to max_turns. The /goal metadata is persisted in history
+        if getattr(self, "_progress_enabled", False) and self.config.memory.enabled:
+            from pathlib import Path
+
+            from .work_memory import context
+            messages[0]["content"] += context(Path(self._project_root))
+
+        # Trim history to max_turns. The /goal metadata is persisted in history
         # but already merged into the root system prompt above.
         max_turns = self.config.history.max_turns
         visible_history = [
@@ -1105,7 +1428,19 @@ class AgentSession:
                 and str(message.get("content", "")).startswith(_GOAL_MARKER)
             )
         ]
-        history = visible_history[-max_turns * 2 :]  # user+assistant = 2 messages per turn
+        history = visible_history[-max_turns * 2 :]
+        # El corte por cantidad de mensajes no limita el PESO. Con herramientas
+        # un turno son muchos mensajes, asi que 100 entradas pueden ser 200 K
+        # tokens reenviados en cada iteracion. Techo de tamano real:
+        _hcfg = getattr(self.config, "history", None)
+        history = _trim_history_to_budget(
+            history,
+            int(getattr(_hcfg, "max_chars", 0) or _DEFAULT_HISTORY_CHAR_BUDGET),
+            int(
+                getattr(_hcfg, "max_tool_result_chars", 0)
+                or _DEFAULT_TOOL_RESULT_CHAR_CAP
+            ),
+        )
         # El truncamiento por max_turns corta por cantidad de mensajes, sin
         # respetar los grupos assistant(tool_calls)→tool_results: puede dejar un
         # tool result sin su assistant (huérfano) o un assistant con un grupo de
@@ -1114,6 +1449,9 @@ class AgentSession:
         history = _drop_orphan_tool_messages(history)
 
         messages.extend(history)
+        limit = getattr(self, "_context_char_limit", 0)
+        if limit and len(json.dumps(messages, ensure_ascii=False)) > limit:
+            raise ValueError(f"Contexto excede el l\u00edmite de {limit} caracteres del perfil. Reduce el encargo o usa standard; no se descartaron instrucciones silenciosamente.")
         return messages
 
     # ── Main processing loop ────────────────────────────────────────
@@ -1143,6 +1481,7 @@ class AgentSession:
 
         Returns the final text response from the assistant.
         """
+        text = sanitize_text(text)
         self._cancel_event = cancel_event or asyncio.Event()
         self.history.append(Message.user(text))
         self._last_user_message = text
@@ -1255,7 +1594,7 @@ class AgentSession:
                     self._on_tool_call(tc.name, tc.arguments, result.content)
 
                 # Add tool result to history.
-                self.history.append(result.to_openai_message())
+                self.history.append(sanitize_unicode(result.to_openai_message()))
 
             # Rebuild messages for the next iteration.
             messages = self._build_messages()
@@ -1266,7 +1605,7 @@ class AgentSession:
             if _iter_idx >= max_iterations - 1:
                 messages = [*messages, Message.system(
                     "AVISO: última iteración disponible. "
-                    "No llames más herramientas salvo lo imprescindible; "
+                    "No llames m\u00e1s herramientas salvo lo imprescindible; "
                     "cerrá reportando qué completaste y qué quedó pendiente."
                 )]
 
@@ -1304,6 +1643,20 @@ class AgentSession:
         return content or ""
 
     async def process_message_stream(
+        self, text: str, *, cancel_event: asyncio.Event | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        stream = self._process_message_stream_impl(text, cancel_event=cancel_event)
+        if getattr(self, "_progress_enabled", False):
+            from .work_session import track_stream
+            async with contextlib.aclosing(track_stream(self, stream)) as tracked:
+                async for event in tracked:
+                    yield event
+        else:
+            async with contextlib.aclosing(stream):
+                async for event in stream:
+                    yield event
+
+    async def _process_message_stream_impl(
         self,
         text: str,
         *,
@@ -1326,6 +1679,7 @@ class AgentSession:
             If not provided, the session's internal event is used (set by
             :meth:`cancel`).
         """
+        text = sanitize_text(text)
         self._cancel_event = cancel_event or asyncio.Event()
         self.history.append(Message.user(text))
         self._last_user_message = text
@@ -1346,6 +1700,7 @@ class AgentSession:
         max_iterations = getattr(self.config, "max_iterations", 10) or 10
         for iteration in range(max_iterations):
             accumulated_text = ""
+            accumulated_reasoning = ""
             accumulated_tool_calls: list[dict[str, Any]] = []
 
             # Check cancellation before starting a new LLM stream.
@@ -1355,6 +1710,10 @@ class AgentSession:
 
             response_format = {"type": "json_object"} if getattr(self, "_json_mode", False) else None
             async for chunk in self.provider.stream(messages, tools=tools, response_format=response_format):
+                if chunk.get("type") == "usage":
+                    self._track_usage(chunk.get("usage", {}), self.config.model)
+                    yield {"type": "usage", "usage": self._total_usage}
+                    continue
                 # Reasoning chunks (reasoning_content deltas from Kimi,
                 # GLM-family models, etc.) are a separate event type: forward
                 # them as-is so the UI renders a thinking panel instead of
@@ -1362,6 +1721,7 @@ class AgentSession:
                 if chunk.get("type") == "reasoning":
                     reasoning_chunk = chunk.get("content", "")
                     if reasoning_chunk:
+                        accumulated_reasoning += reasoning_chunk
                         yield {"type": "reasoning", "content": reasoning_chunk}
                     continue
 
@@ -1390,11 +1750,13 @@ class AgentSession:
                         )
 
                 if finish_reason == "stop":
-                    break
+                    continue  # Drain the provider stream so its HTTP context closes.
 
             # No tool calls — we're done.
             if not accumulated_tool_calls:
                 self.history.append(Message.assistant(accumulated_text))
+                if accumulated_reasoning:
+                    self.history[-1]["reasoning_content"] = accumulated_reasoning
                 yield {"type": "done", "content": accumulated_text, "usage": self._total_usage}
                 return
 
@@ -1410,14 +1772,14 @@ class AgentSession:
                     try:
                         args = json.loads(raw_args) if raw_args else {}
                     except json.JSONDecodeError:
-                        finish_hint = " El turno terminó por finish_reason='length'." if finish_reason == "length" else ""
+                        finish_hint = " El turno termin\u00f3 por finish_reason='length'." if finish_reason == "length" else ""
                         invalid_tool_results.append(ToolResult(
                             tool_call_id=tc_data["id"],
                             name=tc_data["name"],
                             content=(
-                                f"Los argumentos de {tc_data['name']} no fueron JSON válido "
-                                f"(probable truncamiento por límite de tokens de salida).{finish_hint} "
-                                "Divide el contenido en partes más pequeñas o usa varias llamadas consecutivas."
+                                f"Los argumentos de {tc_data['name']} no fueron JSON v\u00e1lido "
+                                f"(probable truncamiento por l\u00edmite de tokens de salida).{finish_hint} "
+                                "Divide el contenido en partes m\u00e1s peque\u00f1as o usa varias llamadas consecutivas."
                             ),
                         ))
                         continue
@@ -1457,11 +1819,20 @@ class AgentSession:
                 yield {"type": "cancelled"}
                 return
 
-            self.history.append(Message.assistant(accumulated_text, tool_calls=resolved_tool_calls))
+            serial_tools = getattr(self, "_serial_tools", False)
+            self.history.append(Message.assistant(
+                accumulated_text, tool_calls=None if serial_tools else resolved_tool_calls,
+            ))
+            if accumulated_reasoning:
+                self.history[-1]["reasoning_content"] = accumulated_reasoning
 
             for invalid in invalid_tool_results:
-                yield {"type": "tool_result", "name": invalid.name, "content": invalid.content}
-                self.history.append(invalid.to_openai_message())
+                # No executable call was declared for invalid JSON. Keep the
+                # validation feedback as an ordinary message so protocol repair
+                # cannot discard it as an orphan tool result on the next round.
+                self.history.append(Message.user("Error de validación de herramienta: " + invalid.content))
+                yield {"type": "tool_result", "id": invalid.tool_call_id,
+                       "name": invalid.name, "content": invalid.content, "is_error": True}
 
             if not resolved_tool_calls:
                 messages = self._build_messages()
@@ -1472,14 +1843,31 @@ class AgentSession:
             # so the REPL still renders them in the model's intended flow.
             import asyncio as _asyncio
 
-            # Yield the tool_call notifications first (deterministic order).
-            for tc in resolved_tool_calls:
-                yield {"type": "tool_call", "name": tc.name, "arguments": tc.arguments}
-
-            gathered = await _asyncio.gather(
-                *(self.execute_tool(tc) for tc in resolved_tool_calls),
-                return_exceptions=True,
-            )
+            if serial_tools:
+                for tc in resolved_tool_calls:
+                    if self._cancel_event is not None and self._cancel_event.is_set():
+                        yield {"type": "cancelled"}
+                        return
+                    # Declare only the call about to start. A checkpoint/pause
+                    # after its result must retain a complete protocol group,
+                    # without marking later, unstarted calls as unknown effects.
+                    self.history.append(Message.assistant("", tool_calls=[tc]))
+                    yield {"type": "tool_call", "id": tc.id, "name": tc.name, "arguments": tc.arguments}
+                    try:
+                        result = await self.execute_tool(tc)
+                    except Exception as exc:
+                        result = ToolResult(tc.id, tc.name, f"Error ejecutando {tc.name}: {exc}")
+                    self.history.append(sanitize_unicode(result.to_openai_message()))
+                    yield {"type": "tool_result", "id": tc.id, "name": tc.name, "content": result.content,
+                           "is_error": result.content.startswith(("Error:", "Error ejecutando"))}
+                gathered = []
+            else:
+                for tc in resolved_tool_calls:
+                    yield {"type": "tool_call", "id": tc.id, "name": tc.name, "arguments": tc.arguments}
+                gathered = await _asyncio.gather(
+                    *(self.execute_tool(tc) for tc in resolved_tool_calls),
+                    return_exceptions=True,
+                )
 
             for tc, result in zip(resolved_tool_calls, gathered):
                 if isinstance(result, Exception):
@@ -1488,8 +1876,9 @@ class AgentSession:
                         name=tc.name,
                         content=f"Error ejecutando {tc.name}: {result}",
                     )
-                yield {"type": "tool_result", "name": tc.name, "content": result.content}
-                self.history.append(result.to_openai_message())
+                self.history.append(sanitize_unicode(result.to_openai_message()))
+                yield {"type": "tool_result", "id": tc.id, "name": tc.name, "content": result.content,
+                       "is_error": result.content.startswith(("Error:", "Error ejecutando"))}
 
             # Rebuild messages for next iteration.
             messages = self._build_messages()
@@ -1499,7 +1888,7 @@ class AgentSession:
             if iteration >= max_iterations - 1:
                 messages = [*messages, Message.system(
                     "AVISO: última iteración disponible. "
-                    "No llames más herramientas salvo lo imprescindible; "
+                    "No llames m\u00e1s herramientas salvo lo imprescindible; "
                     "cerrá reportando qué completaste y qué quedó pendiente."
                 )]
 
@@ -1557,32 +1946,24 @@ class AgentSession:
     # ── Convenience ──────────────────────────────────────────────────
 
     def get_plan_progress_str(self) -> str:
-        """Return a one-line summary of the active plan's progress.
-
-        Example::
-
-            [Plan: 2/5] Read file - Edit config - Run tests - Format - Commit
-
-        Completed steps are prefixed with a checkmark, and the current
-        pending step is shown in bold. When no plan exists, returns an
-        empty string.
-        """
+        """Return a one-line summary of the active plan's progress."""
         plan = getattr(self, "current_plan", None)
         if plan is None or not plan.steps:
             return ""
 
-        done = sum(1 for s in plan.steps if s.done)
+        done = sum(1 for step in plan.steps if step.done)
         total = len(plan.steps)
         next_step = plan.next_pending()
         parts: list[str] = []
         for step in plan.steps:
             if step.done:
-                parts.append(f"✓ {step.description}")
+                parts.append(f"\u2713 {step.description}")
             elif step is next_step:
-                parts.append(f"▶ {step.description}")
+                parts.append(f"\u25b6 {step.description}")
             else:
-                parts.append(f"· {step.description}")
-        return f"[Plan: {done}/{total}] {' — '.join(parts)}"
+                parts.append(f"\u00b7 {step.description}")
+        separator = " ? "
+        return f"[Plan: {done}/{total}] {separator.join(parts)}"
 
     @property
     def total_usage(self) -> dict[str, int]:
@@ -1638,9 +2019,12 @@ class AgentSession:
         self._per_model_usage[model]["prompt_tokens"] += prompt_tokens
         self._per_model_usage[model]["completion_tokens"] += completion_tokens
         self._per_model_usage[model]["total_tokens"] += total_tokens
-        self._per_model_usage[model]["cost"] += estimate_cost(
-            model, prompt_tokens, completion_tokens
-        )
+        actual_cost = usage.get("cost_usd")
+        if isinstance(actual_cost, (int, float)) and not isinstance(actual_cost, bool):
+            call_cost = float(actual_cost)
+        else:
+            call_cost = estimate_cost(model, prompt_tokens, completion_tokens)
+        self._per_model_usage[model]["cost"] += call_cost
 
     @property
     def last_user_message(self) -> str:
@@ -1669,7 +2053,7 @@ class AgentSession:
                 if re.search(pattern, payload):
                     return True
             except re.error:
-                logger.warning("Patrón de auto-approve inválido: %s", pattern)
+                logger.warning("Patrón de auto-approve inv\u00e1lido: %s", pattern)
         return False
 
     def _format_duration(self, seconds: float) -> str:

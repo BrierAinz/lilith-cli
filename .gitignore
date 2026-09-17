@@ -27,3 +27,6 @@ Thumbs.db
 *.log
 .env
 .env.*
+
+# Runtime Yggdrasil context written by the CLI/tests; never commit it.
+.ygg/

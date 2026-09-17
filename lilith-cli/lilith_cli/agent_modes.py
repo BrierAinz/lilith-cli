@@ -11,11 +11,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-
 READ_ONLY_TOOL_NAMES = frozenset(
     {
         "bg_log",
         "bg_status",
+        "cli_job_inspect",
+        "cli_jobs_recent",
+        "cli_job_reference",
         "directory_list",
         "env_get",
         "env_list",
@@ -25,6 +27,14 @@ READ_ONLY_TOOL_NAMES = frozenset(
         "forja_design_batch_status",
         "grep_files",
         "memory_recall",
+        "mission_authority",
+        "mission_compute",
+        "mission_court",
+        "mission_learning",
+        "mission_desktop_observe",
+        "mission_status",
+        "skill_catalog",
+        "skill_read",
         "snippet_get",
         "snippet_list",
         "sys_info",
@@ -48,7 +58,7 @@ def tool_capability(tool_name: str) -> str:
     return "read" if tool_name in READ_ONLY_TOOL_NAMES else "mutate"
 
 
-def mode_allows_tool(mode: "AgentMode", tool_name: str) -> bool:
+def mode_allows_tool(mode: AgentMode, tool_name: str) -> bool:
     """Return whether *mode* grants the tool's declared capability."""
     return mode.allow_writes or tool_capability(tool_name) == "read"
 
@@ -162,11 +172,11 @@ def apply_agent_mode(session: Any, mode: AgentMode) -> None:
     - The mode name is stored as ``agent_mode`` on the session.
     """
     session.config.confirm_write = mode.confirm_write
-    session._agent_allow_writes = mode.allow_writes  # noqa: SLF001
-    session._agent_plan_first = mode.plan_first  # noqa: SLF001
+    session._agent_allow_writes = mode.allow_writes
+    session._agent_plan_first = mode.plan_first
     session.agent_mode = mode.name
     if hasattr(session, "_tools_cache"):
-        session._tools_cache = None  # noqa: SLF001
+        session._tools_cache = None
 
 
 def get_current_agent_mode(session: Any) -> str:

@@ -83,9 +83,9 @@ async def test_file_with_directory_reports_error(fake_session, tmp_path: Path, c
 
 
 @pytest.mark.asyncio
-async def test_file_list_renders_attached_paths(fake_session, tmp_path: Path, capsys):
+async def test_file_list_renders_attached_paths(fake_session, tmp_path: Path, capsys, monkeypatch):
     """/file --list (alias for list/ls) must print every attached path."""
-    from lilith_cli.extra_commands import run_file_command
+    from lilith_cli.extra_commands import console, run_file_command
 
     a = tmp_path / "alpha_one.py"
     b = tmp_path / "beta_two.py"
@@ -93,11 +93,12 @@ async def test_file_list_renders_attached_paths(fake_session, tmp_path: Path, ca
     b.write_text("# b\n", encoding="utf-8")
     fake_session._user_files = [str(a), str(b)]
 
+    # Keep content assertions independent of the host terminal width: Rich can
+    # wrap a Windows basename halfway through when a temporary path is long.
+    monkeypatch.setattr(console, "width", max(120, len(str(a)) + 4))
     await run_file_command(fake_session, "--list")
 
     captured = capsys.readouterr()
     combined = captured.out + captured.err
-    # Rich abbreviates long Windows paths with an ellipsis in the middle, so
-    # assert on basenames which are always rendered verbatim.
     assert "alpha_one.py" in combined
     assert "beta_two.py" in combined

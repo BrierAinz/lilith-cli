@@ -23,6 +23,11 @@ members = ["lilith-cli", "lilith-core", "lilith-skills", "lilith-orchestrator", 
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[dependency-groups]
+dev = [
+    "ruff>=0.16.6",
+]
+
 [tool.hatch.build.targets.wheel]
 bypass-selection = true
 

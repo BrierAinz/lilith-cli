@@ -26,14 +26,16 @@ def test_help_default_shows_all_categories(fake_session, capsys):
     assert "/quit" in out
 
 
-def test_help_renders_as_table(fake_session, capsys):
-    """/help uses Rich Table (box-drawing characters)."""
+def test_help_fits_one_screen(fake_session, capsys):
+    """Bare /help teaches discovery without dumping the full catalog."""
     from lilith_cli.extra_commands import run_help_command
 
     _run(run_help_command(fake_session, ""))
 
     out = capsys.readouterr().out
-    assert "\u250c" in out or "\u2502" in out
+    assert len(out.splitlines()) <= 24
+    assert "/commands" in out
+    assert "/help <familia>" in out
 
 
 def test_help_filter_by_category(fake_session, capsys):
@@ -75,11 +77,11 @@ def test_help_unknown_category_shows_error(fake_session, capsys):
 
 def test_help_aliases_work(fake_session, capsys):
     """Both 'h' and '?' are registered as aliases for /help."""
-    from lilith_cli.repl import run_repl
-
     # We just verify the aliases are in the dispatcher (can't easily test REPL)
     # Read the source
     import inspect
+
+    from lilith_cli.repl import run_repl
     src = inspect.getsource(run_repl)
     assert 'cmd_name in ("help", "h", "?")' in src
 
@@ -88,10 +90,10 @@ def test_help_includes_recent_commands(fake_session, capsys):
     """/help catalogs recent additions like /doctor, /env, /compact."""
     from lilith_cli.extra_commands import run_help_command
 
-    _run(run_help_command(fake_session, ""))
+    _run(run_help_command(fake_session, "all"))
 
     out = capsys.readouterr().out
-    # Recent additions should be present
+    # Recent additions should be present in the complete catalog.
     assert "/doctor" in out
     assert "/env" in out
     assert "/compact" in out
@@ -99,11 +101,11 @@ def test_help_includes_recent_commands(fake_session, capsys):
     assert "/hash" in out
 
 
-def test_help_table_caption_shows_counts(fake_session, capsys):
-    """/help table shows count of commands and categories."""
+def test_help_all_shows_counts(fake_session, capsys):
+    """/help all reports command and category counts."""
     from lilith_cli.extra_commands import run_help_command
 
-    _run(run_help_command(fake_session, ""))
+    _run(run_help_command(fake_session, "all"))
 
     out = capsys.readouterr().out
     assert "comandos en" in out

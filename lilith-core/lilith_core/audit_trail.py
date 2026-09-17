@@ -74,6 +74,7 @@ import json
 import logging
 import os
 import threading
+import uuid
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -86,6 +87,7 @@ from lilith_core.policy_engine import (
     PolicyEngine,
     PolicyResult,
 )
+
 
 logger = logging.getLogger("lilith.audit")
 
@@ -168,9 +170,16 @@ class PolicyAuditTrail:
         self._lock = threading.Lock()
         self._buffer: list[AuditEntry] = []
         self._total_recorded: int = 0
+        self._active_entries: int = 0
+        self._corrupt_lines: int = 0
 
         # Open + create parent dirs eagerly so the first write never fails
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        existing = list(self.iter_file())
+        self._total_recorded = len(existing)
+        self._buffer = existing[-max(1, self.max_entries or 1000) :]
+        self._active_entries = self._count_lines(self.path)
+        self._corrupt_lines = self._count_corrupt_lines()
 
     # ── Recording ─────────────────────────────────────────────────────
 
@@ -180,7 +189,9 @@ class PolicyAuditTrail:
         with self._lock:
             self._append_locked(line)
             self._buffer.append(entry)
+            del self._buffer[:-max(1, self.max_entries or 1000)]
             self._total_recorded += 1
+            self._active_entries += 1
             self._maybe_rotate_locked()
 
         if self._on_record is not None:
@@ -244,9 +255,11 @@ class PolicyAuditTrail:
     # ── Querying ──────────────────────────────────────────────────────
 
     def tail(self, n: int = 20) -> list[AuditEntry]:
-        """Return the most recent ``n`` entries (in-memory cache)."""
+        """Return the most recent ``n`` durable entries."""
+        if n <= 0:
+            return []
         with self._lock:
-            return list(self._buffer[-n:])
+            return list(self.iter_file())[-n:]
 
     def filter(
         self,
@@ -257,9 +270,9 @@ class PolicyAuditTrail:
         tool: str | None = None,
         limit: int = 100,
     ) -> list[AuditEntry]:
-        """Filter the in-memory cache by field matches."""
+        """Filter durable active and rotated entries by field matches."""
         with self._lock:
-            buf = list(self._buffer)
+            buf = list(self.iter_file())
 
         out: list[AuditEntry] = []
         for entry in reversed(buf):
@@ -277,25 +290,27 @@ class PolicyAuditTrail:
         return list(reversed(out))
 
     def iter_file(self) -> Iterable[AuditEntry]:
-        """Yield entries from disk (slow, but unbounded)."""
-        if not self.path.exists():
-            return
-        with self.path.open("r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    payload = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                yield AuditEntry(**payload)
+        """Yield rotated archives followed by the active file."""
+        archives = sorted(self.path.parent.glob(f"{self.path.name}.*.rotated"))
+        for source in [*archives, self.path]:
+            if not source.exists() or not source.is_file():
+                continue
+            with source.open("r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        payload = json.loads(line)
+                        yield AuditEntry(**payload)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
 
     def stats(self) -> dict[str, Any]:
-        """Return aggregate counts (in-memory cache)."""
+        """Return aggregate counts reconstructed from durable files."""
         with self._lock:
-            buf = list(self._buffer)
-            total = self._total_recorded
+            buf = list(self.iter_file())
+            total = len(buf)
             path = str(self.path)
             max_entries = self.max_entries
 
@@ -306,9 +321,10 @@ class PolicyAuditTrail:
 
         return {
             "total_recorded": total,
-            "buffered": len(buf),
+            "buffered": len(self._buffer),
             "path": path,
             "max_entries": max_entries,
+            "corrupt_lines": self._count_corrupt_lines(),
             "by_action": dict(by_action),
             "by_agent_top10": dict(by_agent.most_common(10)),
             "by_policy_top10": dict(by_policy.most_common(10)),
@@ -323,21 +339,8 @@ class PolicyAuditTrail:
 
     def rotate(self) -> int:
         """Force a rotation by renaming the current file. Returns # of bytes archived."""
-        if not self.path.exists():
-            return 0
-        size = self.path.stat().st_size
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-        archive = self.path.with_suffix(self.path.suffix + f".{stamp}.rotated")
-        archive.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            os.replace(self.path, archive)
-        except OSError as exc:
-            logger.warning("Audit rotation failed: %s", exc)
-            return 0
         with self._lock:
-            self._buffer.clear()
-        logger.info("Audit rotated to %s", archive.name)
-        return size
+            return self._rotate_locked()
 
     def clear(self) -> int:
         """Drop the in-memory buffer; optionally truncate the file too.
@@ -352,22 +355,59 @@ class PolicyAuditTrail:
                     self.path.unlink()
                 except OSError:
                     pass
+            self._active_entries = self._count_lines(self.path)
         return count
 
     # ── Internals ─────────────────────────────────────────────────────
 
     def _append_locked(self, line: str) -> None:
         """Append a single JSONL line to the trail file (caller must hold _lock)."""
-        try:
-            with self.path.open("a", encoding="utf-8") as fh:
-                fh.write(line + "\n")
-        except OSError as exc:
-            logger.error("Could not write audit entry: %s", exc)
+        with self.path.open("a", encoding="utf-8", newline="\n") as fh:
+            fh.write(line + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+
+    @staticmethod
+    def _count_lines(path: Path) -> int:
+        if not path.exists() or not path.is_file():
+            return 0
+        with path.open("r", encoding="utf-8") as handle:
+            return sum(1 for line in handle if line.strip())
+
+    def _count_corrupt_lines(self) -> int:
+        corrupt = 0
+        archives = sorted(self.path.parent.glob(f"{self.path.name}.*.rotated"))
+        for source in [*archives, self.path]:
+            if not source.exists() or not source.is_file():
+                continue
+            with source.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    try:
+                        payload = json.loads(line)
+                        AuditEntry(**payload)
+                    except (json.JSONDecodeError, TypeError):
+                        corrupt += 1
+        return corrupt
+
+    def _rotate_locked(self) -> int:
+        if not self.path.exists():
+            return 0
+        size = self.path.stat().st_size
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%f")
+        archive = self.path.with_suffix(
+            self.path.suffix + f".{stamp}.{uuid.uuid4().hex}.rotated"
+        )
+        self.path.replace(archive)
+        self._active_entries = 0
+        logger.info("Audit rotated to %s", archive.name)
+        return size
 
     def _maybe_rotate_locked(self) -> None:
         """Rotate if we've hit max_entries or max_bytes (caller holds _lock)."""
         rotate = False
-        if self.max_entries and len(self._buffer) >= self.max_entries:
+        if self.max_entries and self._active_entries >= self.max_entries:
             rotate = True
         if (
             self.max_bytes
@@ -377,21 +417,9 @@ class PolicyAuditTrail:
             rotate = True
         if not rotate:
             return
-        # Don't rotate from inside the lock — reentrant could deadlock.
-        # Drop the buffer immediately to free memory; async rotate via os.replace.
+        # The caller already holds the lock; the helper must not acquire it again.
         try:
-            size = self.path.stat().st_size if self.path.exists() else 0
-            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-            archive = self.path.with_suffix(
-                self.path.suffix + f".{stamp}.rotated"
-            )
-            archive.parent.mkdir(parents=True, exist_ok=True)
-            if self.path.exists():
-                os.replace(self.path, archive)
-            self._buffer.clear()
-            logger.info(
-                "Audit trail rotated (was %d bytes) → %s", size, archive.name
-            )
+            self._rotate_locked()
         except OSError as exc:
             logger.warning("Rotation failed: %s", exc)
 

@@ -1,7 +1,6 @@
 """Tests for the /commands slash command."""
 import pytest
-
-from lilith_cli.commands import CommandsCommand, CommandRegistry
+from lilith_cli.commands import CommandRegistry, CommandsCommand
 
 
 class DummyConfig:
@@ -48,9 +47,9 @@ async def test_commands_command_lists_grouped(registry, capsys):
     assert cmd.name == "commands"
     await cmd.execute("")
     captured = capsys.readouterr()
-    assert "Comandos de Yggdrasil" in captured.out
+    assert "Comandos de Lilith" in captured.out
     # Check a few representative categories/commands show up.
-    assert "Sesión" in captured.out
+    assert "Session" in captured.out
     assert "Info" in captured.out
     assert "/tools" in captured.out
     assert "/plan" in captured.out
@@ -62,7 +61,7 @@ async def test_commands_command_filters(registry, capsys):
     cmd = registry.get("commands")
     await cmd.execute("plan")
     captured = capsys.readouterr()
-    assert "Comandos de Yggdrasil" in captured.out
+    assert "Comandos de Lilith" in captured.out
     assert "/plan" in captured.out
     # Filtered output should not include unrelated commands.
     assert "/model" not in captured.out

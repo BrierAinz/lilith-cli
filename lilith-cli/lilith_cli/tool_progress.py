@@ -11,7 +11,25 @@ from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.text import Text
 
-from .render import console
+from .render import console, get_theme
+
+# ── Visibilidad de los paneles en vivo ────────────────────────────────
+# Este modulo NO importa config a proposito: seria un ciclo
+# (config -> render -> tool_progress). El REPL llama a set_tool_panels()
+# una vez al montar la sesion, y las dos compuertas de abajo lo consultan.
+# Nace apagado porque es lo que el operador pidio ver por omision.
+_PANELS_ENABLED = False
+
+
+def set_tool_panels(enabled: bool) -> None:
+    """Enciende o apaga los paneles en vivo para todo el proceso."""
+    global _PANELS_ENABLED
+    _PANELS_ENABLED = bool(enabled)
+
+
+def tool_panels_enabled() -> bool:
+    """Estado actual del interruptor; existe para que los tests no lean la global."""
+    return _PANELS_ENABLED
 
 
 def _format_duration(elapsed: float) -> str:
@@ -57,7 +75,7 @@ def _build_tool_progress_renderable(
             f"Ejecutando {len(running)} herramienta(s) en paralelo", style="bold cyan"
         )
         header_text.append(f": {', '.join(running)}", style="italic")
-        lines.append(Group(Spinner("dots", style="cyan"), header_text))
+        lines.append(Group(Spinner(get_theme().spinner_name, style="cyan"), header_text))
     else:
         done = len(completed) + len(failed)
         header_text.append(f"{done} herramienta(s) ejecutada(s)", style="bold cyan")
@@ -189,6 +207,10 @@ class ToolProgressTracker:
 
     def _ensure_live(self) -> None:
         """Create and start the Live panel on first use."""
+        if not _PANELS_ENABLED:
+            # Sin panel no hay Live que crear. Es seguro salir sin crearlo:
+            # cada uso de self._live comprueba "is not None" antes de tocarlo.
+            return
         if self._live is None:
             self._live = Live(
                 _build_tool_progress_renderable(
@@ -381,6 +403,8 @@ class DelegationLive:
 
     @staticmethod
     def _should_enable() -> bool:
+        if not _PANELS_ENABLED:
+            return False
         try:
             import sys
 
@@ -419,7 +443,7 @@ class DelegationLive:
             header_text.append(f"  ({snap['model']})", style="dim")
             if snap["agentic"]:
                 header_text.append("  agentic", style="italic dim")
-            header = Group(Spinner("dots", style="cyan"), header_text)
+            header = Group(Spinner(get_theme().spinner_name, style="cyan"), header_text)
         lines.append(header)
 
         # Body: tail of streamed lines (skip if empty + finished).

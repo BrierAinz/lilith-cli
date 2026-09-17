@@ -4,11 +4,6 @@ Uses httpx directly for OpenAI-compatible endpoints (fast, lightweight),
 with optional litellm fallback for non-OpenAI providers (Anthropic, etc.).
 Streaming, tool-calling, and exponential-backoff retry included.
 
-Sakana Fugu supports both its Responses API at ``/v1/responses`` and an
-OpenAI-compatible ``/v1/chat/completions`` endpoint. Newly generated
-configuration uses Responses; setting
-``providers.sakana.use_responses: false`` explicitly keeps Chat
-Completions available for existing profiles.
 """
 
 from __future__ import annotations
@@ -16,16 +11,18 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import random
 import time
+import uuid
 from typing import TYPE_CHECKING, Any
-
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 import httpx
 
+from .unicode_safety import sanitize_unicode
 
 if TYPE_CHECKING:
     from .config import YggdrasilConfig
@@ -37,7 +34,11 @@ logger = logging.getLogger(__name__)
 
 _MAX_RETRIES = 3
 _BASE_DELAY = 1.0  # seconds
-_REQUEST_TIMEOUT = 180.0  # seconds (Fugu Ultra reasoning can take >60s)
+# El cliente espera MAS que el adaptador del Fabric (300s) a proposito. Si
+# cediera antes, el error que veria el operador seria un timeout opaco del
+# cliente en vez del diagnostico del adaptador, que si dice por que fallo el
+# proveedor. Quien esta mas cerca del fallo debe ser quien lo reporte.
+_REQUEST_TIMEOUT = 330.0  # seconds; adaptador del Fabric = 300s
 
 
 # ── Pricing (v4.3.1) ────────────────────────────────────────────────
@@ -46,9 +47,6 @@ _REQUEST_TIMEOUT = 180.0  # seconds (Fugu Ultra reasoning can take >60s)
 # fall back to 0.0 (cost hidden).
 # Sources: published provider pricing pages, last refreshed 2026-07-09.
 _MODEL_PRICING: dict[str, tuple[float, float]] = {
-    # Sakana
-    "fugu-ultra":            (3.0, 9.0),
-    "fugu-ultra-20260615":   (3.0, 9.0),
     # Anthropic (in case litellm is used)
     "claude-sonnet-4":        (3.0, 15.0),
     "claude-opus-4":          (15.0, 75.0),
@@ -77,9 +75,6 @@ _MODEL_PRICING: dict[str, tuple[float, float]] = {
 # Approximate context-window sizes in tokens. Used for the /context
 # progress bar. Unknown models fall back to 128K (common default).
 _MODEL_CONTEXTS: dict[str, int] = {
-    # Sakana
-    "fugu-ultra": 262_144,
-    "fugu-ultra-20260615": 262_144,
     # Anthropic (in case litellm is used)
     "claude-sonnet-4": 200_000,
     "claude-opus-4": 200_000,
@@ -124,8 +119,6 @@ def estimate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> flo
 # /context command to show a progress bar of how much of the model's
 # context is in use. Defaults to 32k when a model is unknown.
 _MODEL_CONTEXTS: dict[str, int] = {
-    "fugu-ultra": 128_000,
-    "fugu-ultra-20260615": 128_000,
     "claude-sonnet-4": 200_000,
     "claude-opus-4": 200_000,
     "claude-opus-5": 1_000_000,
@@ -289,21 +282,6 @@ class LLMProviderWrapper:
         base = self._resolve_base_url() or ""
         return "/anthropic" in base.lower()
 
-    def _is_sakana_responses(self) -> bool:
-        """True when the active provider uses Sakana's Responses API
-        (/v1/responses with input=str instead of messages=[...]).
-
-        Sakana exposes BOTH an OpenAI-compatible Chat Completions
-        endpoint at ``/v1/chat/completions`` AND a Responses API at
-        ``/v1/responses``. The bundled config template enables Responses
-        for new installations. Existing profiles can keep Chat Completions
-        by setting ``providers.sakana.use_responses: false`` in the YAML.
-        """
-        if "sakana.ai" not in (self._resolve_base_url() or "").lower():
-            return False
-        profile = self.config.providers.get(self.config.provider.lower())
-        return bool(profile and profile.use_responses)
-
     # ── Public helpers ──────────────────────────────────────────────
 
     def _resolve_base_url(self) -> str | None:
@@ -353,7 +331,16 @@ class LLMProviderWrapper:
         when present. Non-transient failures (4xx other than 429) are
         surfaced immediately without burning retries.
         """
+        messages = sanitize_unicode(messages)
+        tools = sanitize_unicode(tools)
         bypass_circuit = bool(kwargs.pop("bypass_circuit", False))
+        if self.config.provider.lower() == "fabric":
+            return await self._fabric_complete(
+                messages,
+                tools=tools,
+                response_format=kwargs.get("response_format"),
+                preferred_model=model,
+            )
         model = model or self._resolve_model()
 
         async def _attempt() -> dict[str, Any]:
@@ -362,6 +349,116 @@ class LLMProviderWrapper:
         return await self._run_with_retry(
             _attempt, op_label="LLM call", bypass_circuit=bypass_circuit
         )
+
+    async def _fabric_complete(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None,
+        response_format: dict[str, Any] | None,
+        preferred_model: str | None = None,
+    ) -> dict[str, Any]:
+        """Route one structured agent turn through the local Fabric.
+
+        The Fabric owns failover, so this boundary deliberately performs one
+        HTTP request and never retries. Tool execution remains inside Lilith.
+        """
+        token_env = self.config.fabric_token_env
+        token = os.environ.get(token_env)
+        if not token:
+            raise RuntimeError(f"Fabric requiere la variable de entorno {token_env}")
+        from .provider_health import ProviderCircuitOpenError
+
+        if not self._health.allow("fabric"):
+            state = self._health.get("fabric")
+            raise ProviderCircuitOpenError(
+                "Fabric circuit open until " + str(state.get("opened_until") or "unknown")
+            )
+        headers = {"Content-Type": "application/json", "x-yggdrasil-token": token}
+        payload = {
+            "client": "lilith",
+            "capability": self.config.fabric_capability,
+            "request_id": str(uuid.uuid4()),
+            "payload": {
+                "input": "",
+                "messages": messages,
+                "tools": tools,
+                "response_format": response_format,
+            },
+            "estimated_tokens": max(0, sum(len(str(m.get("content", ""))) for m in messages) // 4),
+            "tags": ["interactive-agent", "structured-tools"],
+        }
+        requested_model = preferred_model
+        if requested_model is None:
+            profile = self._profile()
+            if profile is not None and profile.model:
+                requested_model = profile.model
+            elif "model" in self.config.model_fields_set:
+                requested_model = self.config.model
+        if requested_model and requested_model.strip().lower() != "router":
+            payload["preferred_model"] = requested_model.strip()
+        payload["payload"] = {k: v for k, v in payload["payload"].items() if v is not None}
+        started = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(_REQUEST_TIMEOUT)) as client:
+                response = await client.post(
+                    f"{self.config.fabric_url.rstrip('/')}/v1/inference",
+                    headers=headers,
+                    json=payload,
+                )
+            response.raise_for_status()
+        except (httpx.HTTPError, OSError) as exc:
+            self._health.record_failure("fabric", exc)
+            raise
+        latency_ms = max(0, int((time.perf_counter() - started) * 1000))
+        body = response.json()
+        turn = body.get("response")
+        if not isinstance(turn, dict):
+            raise RuntimeError("Fabric devolvió una respuesta sin turno estructurado")
+        parsed_calls: list[ToolCall] = []
+        for raw in turn.get("tool_calls") or []:
+            if not isinstance(raw, dict) or not isinstance(raw.get("function"), dict):
+                continue
+            function = raw["function"]
+            arguments = function.get("arguments", {})
+            if isinstance(arguments, str):
+                try:
+                    arguments = json.loads(arguments)
+                except json.JSONDecodeError as exc:
+                    raise RuntimeError("Fabric devolvió argumentos de herramienta inválidos") from exc
+            if not isinstance(arguments, dict):
+                raise RuntimeError("Fabric devolvió argumentos de herramienta no estructurados")
+            parsed_calls.append(ToolCall(str(raw.get("id") or uuid.uuid4()), str(function.get("name", "")), arguments))
+        usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
+        total = int(usage.get("tokens_used", 0) or 0)
+        try:
+            actual_cost = float(usage.get("cost_usd", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            actual_cost = 0.0
+        route_model = body.get("model")
+        route_provider = str(body.get("provider") or "unknown")
+        account_id = str(body.get("account_id") or "").strip()
+        self._health.record_success("fabric", latency_ms=latency_ms)
+        if account_id:
+            self._health.record_success(
+                f"fabric-account:{route_provider}:{account_id}", latency_ms=latency_ms
+            )
+        return {
+            "content": str(turn.get("text", "")),
+            "reasoning_content": turn.get("reasoning_content"),
+            "tool_calls": parsed_calls,
+            "usage": {
+                "prompt_tokens": 0, "completion_tokens": total,
+                "total_tokens": total, "cost_usd": actual_cost,
+            },
+            "finish_reason": turn.get("finish_reason") or ("tool_calls" if parsed_calls else "stop"),
+            "model": str(route_model) if route_model is not None else "fabric-routed",
+            "route": {
+                "provider": body.get("provider"), "account_id": body.get("account_id"),
+                "runtime": body.get("runtime"), "attempts": usage.get("attempts"),
+                "fallback_used": body.get("fallback_used"),
+            },
+        }
 
     async def _run_with_retry(
         self,
@@ -549,8 +646,7 @@ class LLMProviderWrapper:
 
         # Exponential back-off: base * 2 ** (attempt - 1).
         delay = base * (2 ** max(0, attempt - 1))
-        if delay > backoff_max:
-            delay = backoff_max
+        delay = min(delay, backoff_max)
         # Multiplicative jitter in [1 - j, 1 + j].
         if jitter > 0:
             spread = 1.0 + (random.uniform(-jitter, jitter))
@@ -572,23 +668,45 @@ class LLMProviderWrapper:
         Yields dicts with keys:
           content (str), finish_reason (str|None), tool_calls (list|None)
         """
+        messages = sanitize_unicode(messages)
+        tools = sanitize_unicode(tools)
         bypass_circuit = bool(kwargs.pop("bypass_circuit", False))
+        if self.config.provider.lower() == "fabric":
+            result = await self._fabric_complete(
+                messages,
+                tools=tools,
+                response_format=kwargs.get("response_format"),
+                preferred_model=model,
+            )
+            stream_calls = [
+                {"id": call.id, "name": call.name, "arguments": call.arguments}
+                for call in result["tool_calls"]
+            ]
+            yield {
+                "content": result["content"],
+                "reasoning": result.get("reasoning_content"),
+                "tool_calls": stream_calls,
+                "usage": result["usage"],
+                "finish_reason": result["finish_reason"],
+                "model": result["model"],
+            }
+            return
         model = model or self._resolve_model()
 
-        # ── Anthropic-compat / Sakana-Responses profiles don't speak the
+        # ── Anthropic-compatible profiles don't speak the
         # OpenAI SSE protocol this method implements; fall back to the
         # non-streaming path and emit the result as a single chunk.
         # The fallback is wrapped in _run_with_retry so a transient 5xx
-        # from Sakana/Anthropic also gets the same backoff that the
+        # from Anthropic also gets the same backoff that the
         # OpenAI SSE path below enjoys; non-transient errors bubble up.
-        if self._is_anthropic() or self._is_sakana_responses():
+        if self._is_anthropic():
 
             async def _fallback_attempt() -> dict[str, Any]:
                 return await self._do_complete(model, messages, tools=tools, **kwargs)
 
             result = await self._run_with_retry(
                 _fallback_attempt,
-                op_label="stream() (Anthropic/Sakana fallback)",
+                op_label="stream() (Anthropic fallback)",
                 bypass_circuit=bypass_circuit,
             )
             reasoning = result.get("reasoning_content")
@@ -637,9 +755,14 @@ class LLMProviderWrapper:
             payload["max_tokens"] = max_tokens
         if tools:
             payload["tools"] = tools
+        profile = self._profile()
+        thinking = getattr(profile, "thinking_enabled", None)
+        if thinking is not None and "deepseek" in (self._resolve_base_url() or "").lower():
+            payload["thinking"] = {"type": "enabled" if thinking else "disabled"}
         response_format = kwargs.get("response_format")
         if response_format:
             payload["response_format"] = response_format
+        payload = sanitize_unicode(payload)
 
         # Local attempt counter so retries don't leak across stream()
         # calls (and across concurrent calls) via shared state. The
@@ -803,6 +926,8 @@ class LLMProviderWrapper:
                     continue
 
                 choices = chunk.get("choices", [])
+                if isinstance(chunk.get("usage"), dict):
+                    yield {"type": "usage", "usage": chunk["usage"], "content": ""}
                 if not choices:
                     continue
 
@@ -857,7 +982,7 @@ class LLMProviderWrapper:
                         "tool_calls": tcs,
                     }
                     tc_accumulator.clear()
-                    return
+                    continue
 
                 yield {
                     "content": content,
@@ -958,44 +1083,6 @@ class LLMProviderWrapper:
             response.raise_for_status()
             return self._normalise_anthropic_response(response.json())
 
-        if self._is_sakana_responses():
-            # Concatenate messages into a single string with role prefixes.
-            parts: list[str] = []
-            for m in messages:
-                role = m.get("role", "user")
-                content = m.get("content", "")
-                if role == "system":
-                    parts.append(f"System: {content}")
-                elif role == "assistant":
-                    parts.append(f"Assistant: {content}")
-                else:
-                    parts.append(f"User: {content}")
-
-            # ── base_url may already include /v1 (chat completions) or not.
-            # Sakana's Responses API lives at /v1/responses; we strip any
-            # trailing /v1 from the configured base_url and append the path
-            # explicitly so we never end up with /v1/v1/responses.
-            base = self._resolve_base_url() or ""
-            base_clean = base.rstrip("/")
-            if base_clean.endswith("/v1"):
-                base_clean = base_clean[:-3]
-            responses_path = f"{base_clean}/v1/responses"
-
-            # ── Floor 256 / cap 4096: fugu-ultra burns ~50-120 reasoning
-            # tokens before producing any visible text, so a tight cap
-            # silently returns status=incomplete with content="". Lift the
-            # floor to keep one-shot prompts viable; cap at 4096 to avoid
-            # runaway cost when the global max_tokens is configured high.
-            sakana_max = max(min(max_tokens, 4096), 256)
-            sakana_payload: dict[str, Any] = {
-                "model": model,
-                "input": "\n".join(parts),
-                "max_output_tokens": sakana_max,
-            }
-            response = await client.post(responses_path, json=sakana_payload)
-            response.raise_for_status()
-            return self._normalise_sakana_response(response.json())
-
         # ── Kimi quirk: temperature=1 is the only value this model accepts ──
         # Doc 2026-07 says model `kimi-for-coding` rejects any other temperature.
         base = self._resolve_base_url() or ""
@@ -1017,6 +1104,9 @@ class LLMProviderWrapper:
         if response_format:
             payload["response_format"] = response_format
 
+        thinking = getattr(self._profile(), "thinking_enabled", None)
+        if thinking is not None and "deepseek" in (self._resolve_base_url() or "").lower():
+            payload["thinking"] = {"type": "enabled" if thinking else "disabled"}
         response = await client.post("/chat/completions", json=payload)
         response.raise_for_status()
 
@@ -1080,127 +1170,6 @@ class LLMProviderWrapper:
         }
 
     @staticmethod
-    def _normalise_sakana_response(data: dict[str, Any]) -> dict[str, Any]:
-        """Convert a Sakana Responses API payload into the standard dict.
-
-        Verified against live calls to ``https://api.sakana.ai/v1/responses``
-        (model ``fugu-ultra``, 2026-07-16). The wire format observed is:
-
-          {
-            "id": "resp-...",
-            "object": "response",
-            "status": "completed" | "incomplete",
-            "incomplete_details": {"reason": "max_output_tokens" | ...},
-            "output": [
-              {"type": "reasoning",
-               "id": "rs_...",
-               "summary": [{"type": "summary_text", "text": "..."}]},
-              {"type": "message",
-               "content": [{"type": "output_text", "text": "..."}]},
-            ],
-            "usage": {"input_tokens": N,
-                      "output_tokens": M,
-                      "total_tokens": T,
-                      "output_tokens_details": {"reasoning_tokens": R}}
-          }
-
-        The assistant text lives at
-        ``output[*].content[*].text`` where ``type == "output_text"``
-        (Sakana mirrors the OpenAI Responses API shape; ``text`` is also
-        accepted for forward-compat). Reasoning summaries live at
-        ``output[*].summary[*].text`` where ``type == "summary_text"``
-        — note this is ``summary``, NOT ``content`` (a common pitfall:
-        Sakana's reasoning blocks carry a list of summary chunks, not
-        OpenAI-style content chunks).
-
-        We also tolerate the legacy Chat Completions shape (``choices``)
-        in case Sakana falls back, and we surface an explicit ``error``
-        key when ``status == "incomplete"`` so callers don't mistake an
-        empty ``content`` for a successful zero-token reply.
-        """
-        # Chat Completions-style responses also flow through here when Sakana
-        # decides to return them; detect via presence of "choices".
-        if "choices" in data:
-            return LLMProviderWrapper._normalise_response(data)
-
-        out: list[Any] = data.get("output", []) or data.get("outputs", [])
-        text_parts: list[str] = []
-        reasoning_parts: list[str] = []
-        tool_calls: list[ToolCall] = []
-        for block in out:
-            kind = block.get("type", "")
-            if kind == "message":
-                # Sakana Responses API: block.content[*].type is "output_text".
-                # OpenAI standard: same field would be "text". Accept both.
-                for c in block.get("content", []) or []:
-                    ctype = c.get("type", "")
-                    if ctype in ("output_text", "text"):
-                        text_parts.append(c.get("text", ""))
-                    elif ctype == "reasoning":
-                        reasoning_parts.append(c.get("text", ""))
-            elif kind == "reasoning":
-                # Reasoning summaries live at ``summary[*].text`` — NOT
-                # ``content`` (Sakana diverges from the OpenAI Responses
-                # shape here). Accept ``content`` too for safety.
-                summary_items = block.get("summary") or block.get("content") or []
-                for c in summary_items:
-                    ctype = c.get("type", "")
-                    if ctype in ("summary_text", "reasoning_text", "text"):
-                        reasoning_parts.append(c.get("text", ""))
-            elif kind == "tool_use" or kind == "function_call":
-                tool_calls.append(
-                    ToolCall(
-                        id=block.get("id", ""),
-                        name=block.get("name", ""),
-                        arguments=block.get("input") or block.get("arguments") or {},
-                    )
-                )
-
-        # ── Map Sakana's status to a finish_reason the rest of Lilith ──
-        # already understands, plus surface a structured error when the
-        # response was cut short (otherwise callers see content="" and
-        # have no idea why).
-        raw_status = data.get("status", "completed")
-        incomplete_reason = (
-            (data.get("incomplete_details") or {}).get("reason")
-            if raw_status == "incomplete"
-            else None
-        )
-        if raw_status == "incomplete":
-            finish_reason = "length"
-        else:
-            finish_reason = "stop"
-
-        usage = data.get("usage", {}) or {}
-        prompt_tokens = usage.get("input_tokens", 0)
-        completion_tokens = usage.get("output_tokens", 0)
-        total_tokens = usage.get(
-            "total_tokens", prompt_tokens + completion_tokens
-        )
-
-        result: dict[str, Any] = {
-            "content": "\n".join(p for p in text_parts if p),
-            "reasoning_content": "\n".join(p for p in reasoning_parts if p),
-            "tool_calls": tool_calls,
-            "usage": {
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": total_tokens,
-            },
-            "finish_reason": finish_reason,
-            "model": data.get("model", ""),
-        }
-        # Surface the truncation cause so callers (REPL, doctor, etc.)
-        # can show "Sakana: respuesta truncada por max_output_tokens"
-        # instead of "respondió en N ms pero sin contenido".
-        if raw_status == "incomplete":
-            result["error"] = (
-                f"Sakana Responses API returned status=incomplete "
-                f"(reason={incomplete_reason or 'unknown'})"
-            )
-        return result
-
-    @staticmethod
     def _normalise_response(data: dict[str, Any]) -> dict[str, Any]:
         """Normalise an OpenAI-format JSON response into our standard dict."""
         choices = data.get("choices", [])
@@ -1261,7 +1230,7 @@ class LLMProviderWrapper:
 
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(self._client.aclose())  # noqa: RUF006
+                loop.create_task(self._client.aclose())
             except RuntimeError:
                 pass
         self._client = None

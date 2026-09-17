@@ -46,8 +46,8 @@ from . import __version__  # single-source-of-truth
 # ── Cyclopts app ────────────────────────────────────────────────────
 
 app = App(
-    name="yggdrasil",
-    help=f"Yggdrasil CLI v{__version__} — Where Ancient Meets Digital",
+    name="lilith",
+    help=f"Lilith v{__version__} — tu taller de proyectos, memoria y herramientas",
     version=__version__,
 )
 
@@ -79,6 +79,30 @@ app.command(_do_app)
 # avoid two surfaces competing for the same state.
 app.command(_goals_app)
 app.command(_policy_app)
+
+from .hearth import home, persona, setup, start
+
+app.command(home)
+app.command(setup)
+app.command(start)
+app.command(persona)
+from .work_session import task
+app.command(task)
+from .work_memory import remember_app
+app.command(remember_app)
+from .installations import install_app
+app.command(install_app)
+from .robust_kit import kit_app
+app.command(kit_app)
+from .calibration import calibration_app
+from . import qualification as _qualification  # noqa: F401 - registers calibration apply
+app.command(calibration_app)
+from .collaborator_jobs import jobs_app
+app.command(jobs_app)
+from .campaign_cli import campaign_app
+app.command(campaign_app)
+from .web_console.serve import web
+app.command(web)
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
@@ -133,12 +157,8 @@ def _apply_overrides(
         cfg.provider = "local"
         if cfg.base_url is None:
             cfg.base_url = "http://localhost:1234/v1"
-        # If the user hasn't explicitly picked a model, fall back to
-        # the local default. This used to check for ``gpt-4o-mini``
-        # (the old OpenAI default); now it also recognises the
-        # Sakana Fugu default so ``--local`` works out of the box
-        # whether the active provider is OpenAI or Sakana.
-        if cfg.model in ("gpt-4o-mini", "fugu-ultra"):
+        # If the old OpenAI default is still selected, use the local default.
+        if cfg.model == "gpt-4o-mini":
             cfg.model = "local-model"
     if no_tools:
         cfg.tools_enabled = False
@@ -275,6 +295,9 @@ def prompt(
     from .session_runtime import create_session
 
     session = create_session(cfg)
+    from .agent_console import prepare_agent_runtime
+
+    prepare_agent_runtime(session, Path.cwd())
 
     # ── Machine mode (quiet / json) ─────────────────────────────────
     # Reuses the same SessionRuntime + process_message_stream loop as the
@@ -386,7 +409,7 @@ def _load_subagent_presets(config_path: Path | str | None = None) -> dict[str, A
 def delegate(
     target: Annotated[
         str,
-        Parameter(help="Provider profile name (sakana, kimi, minimax, ...) OR Hlidskjalf preset name when --preset is used"),
+        Parameter(help="Provider profile name (experiential, grok, minimax, ...) OR Hlidskjalf preset name when --preset is used"),
     ],
     text: Annotated[str, Parameter(help="Prompt to send")],
     model: Annotated[str | None, Parameter(name=["--model", "-m"])] = None,
@@ -400,7 +423,7 @@ def delegate(
     """Shortcut: send a one-shot prompt to a specific provider profile.
 
     Example:
-        lilith delegate sakana "summarise the Asgard realm"
+        lilith delegate experiential "summarise the project"
         lilith delegate kimi "refactor this loop" --model kimi-k2
         lilith delegate ejecutor-kimi "write tests" --preset ejecutor-kimi --agentic --max-turns 5
 
@@ -1058,25 +1081,38 @@ def run_doctor_checks(
         })
         return rows
 
-    rows.extend(_check_provider_keys(cfg))
-
-    # Pings are async; the sync ``run_doctor_checks`` runs them in a
-    # fresh event loop. Tests that need finer control can call
-    # ``_run_provider_pings`` directly.
-    if network:
-        try:
-            ping_rows = asyncio.run(
-                _run_provider_pings(cfg, force=force_network)
-            )
-        except Exception as exc:
-            ping_rows = [{
-                "check": "ping",
-                "status": "error",
-                "message": f"asyncio fallo: {exc}",
-            }]
-        rows.extend(ping_rows)
+    active_provider = str(getattr(cfg, "provider", "")).lower()
+    fabric_mode = active_provider == "fabric"
+    if fabric_mode:
+        # Fabric is the account/provider boundary. Re-validating every direct
+        # provider here duplicates Router responsibility and forces Lilith to
+        # inherit credentials it does not need for normal operation.
+        rows.append(_check_fabric_health(cfg, network=network))
+        rows.append({
+            "check": "providers",
+            "status": "ok",
+            "message": "cuentas, credenciales y pings directos delegados a Fabric/Router",
+        })
     else:
-        rows.extend(_check_provider_health_cache(cfg))
+        rows.extend(_check_provider_keys(cfg))
+
+        # Pings are async; the sync ``run_doctor_checks`` runs them in a
+        # fresh event loop. Tests that need finer control can call
+        # ``_run_provider_pings`` directly.
+        if network:
+            try:
+                ping_rows = asyncio.run(
+                    _run_provider_pings(cfg, force=force_network)
+                )
+            except Exception as exc:
+                ping_rows = [{
+                    "check": "ping",
+                    "status": "error",
+                    "message": f"asyncio fallo: {exc}",
+                }]
+            rows.extend(ping_rows)
+        else:
+            rows.extend(_check_provider_health_cache(cfg))
 
     if start_mcp:
         rows.extend(_check_mcp_servers(cfg))
@@ -1084,6 +1120,27 @@ def run_doctor_checks(
     rows.append(_check_orchestration_state())
     rows.extend(_check_package_versions())
     return rows
+
+
+def _check_fabric_health(cfg: Any, *, network: bool) -> dict[str, str]:
+    token_env = str(getattr(cfg, "fabric_token_env", "YGGDRASIL_FABRIC_TOKEN"))
+    if not os.environ.get(token_env):
+        return {"check": "fabric", "status": "error", "message": f"token ausente en env {token_env}"}
+    if not network:
+        return {"check": "fabric", "status": "ok", "message": "configurado; usa --network para probar señal"}
+    import urllib.request
+
+    url = f"{str(getattr(cfg, 'fabric_url', 'http://127.0.0.1:8788')).rstrip('/')}/healthz"
+    request = urllib.request.Request(url, headers={"x-yggdrasil-token": os.environ[token_env]})
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            healthy = response.status == 200
+    except Exception as exc:
+        return {"check": "fabric", "status": "error", "message": f"sin señal: {type(exc).__name__}"}
+    return {
+        "check": "fabric", "status": "ok" if healthy else "error",
+        "message": "señal HTTP activa en loopback" if healthy else "respuesta de salud inesperada",
+    }
 
 
 @app.command
@@ -1245,7 +1302,7 @@ def timeline(
 def subagent(
     preset: Annotated[
         str,
-        Parameter(help="Hlidskjalf preset name (ejecutor-kimi, investigador-minimax, orquestador-fugu)"),
+        Parameter(help="Court/legacy preset name (demiurge, cocytus, aura, ...)"),
     ],
     text: Annotated[str, Parameter(help="Prompt to send via the preset")],
     config_path: Annotated[str | None, Parameter(name="--config")] = None,
@@ -1328,7 +1385,15 @@ def default_command(
         asyncio.run(run_oneshot(session, prompt_text))
         return
 
-    # No args → interactive REPL.
+    # Natural conversation is the front door; home and bounded task forms remain explicit.
+    if not any((model, provider, local, no_tools, verbose)):
+        if config_path:
+            start(config=config_path, profile="agent")
+        else:
+            start(profile="agent")
+        return
+
+    # Explicit legacy overrides retain the existing REPL path.
     chat(
         model=model,
         provider=provider,
@@ -1344,7 +1409,7 @@ def default_command(
 def _reconfigure_stdio() -> None:
     """Force UTF-8 on stdout/stderr to survive cp1252 consoles.
 
-    Windows consoles default to cp1252, which cannot encode the ▸,
+    Windows consoles default to cp1252, which cannot encode the â–¸,
     ─, é, and other glyphs that render.py / commands.py /
     Rich panels emit.  Without this reconfigure, ``lilith.exe`` crashes with
     ``UnicodeEncodeError: 'charmap' codec can't encode character '\u25b8'``

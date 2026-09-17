@@ -95,10 +95,14 @@ async def test_truncated_args_skips_tool_and_returns_explanatory_message():
     # finish_reason=length is surfaced.
     assert "length" in msg
 
-    # And the explanatory message is also appended to history as a tool role.
-    last_tool_msgs = [m for m in session.history if m.get("role") == "tool"]
-    assert last_tool_msgs, "history must contain the explanatory tool message"
-    assert "todo_add" in last_tool_msgs[-1]["content"]
+    # And the explanatory message is appended to history as a user role.
+    user_msgs = [m for m in session.history if m.get("role") == "user"]
+    explanatory_msgs = [m for m in user_msgs if "todo_add" in m.get("content", "")]
+    assert explanatory_msgs, "history must contain the explanatory user message"
+    hist_msg = explanatory_msgs[-1]["content"]
+    assert "todo_add" in hist_msg
+    assert "JSON" in hist_msg or "truncado" in hist_msg
+    assert "length" in hist_msg
 
 
 # ── (b) max_tokens precedence ───────────────────────────────────────

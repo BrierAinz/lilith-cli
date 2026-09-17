@@ -52,7 +52,7 @@ jobs:
           cache-dependency-glob: uv.lock
 
       - name: Install workspace
-        run: uv sync --all-packages --all-extras --locked
+        run: uv sync --all-packages --locked --extra dev --extra web
 
       - name: Smoke test CLI
         run: uv run lilith --help

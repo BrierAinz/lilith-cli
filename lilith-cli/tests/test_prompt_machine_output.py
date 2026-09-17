@@ -251,6 +251,15 @@ def _patch_prompt_cli(monkeypatch, captured, events=None, exc=None):
         agent_mod, "AgentSession", lambda cfg: _FakeSession(events=events, exc=exc)
     )
 
+    console_mod = __import__("lilith_cli.agent_console", fromlist=["x"])
+    monkeypatch.setattr(
+        console_mod,
+        "prepare_agent_runtime",
+        lambda session, root: captured.update(
+            agent_profile=True, agent_root=str(root)
+        ),
+    )
+
     repl_mod = __import__("lilith_cli.repl", fromlist=["x"])
 
     async def _rich_oneshot(*a, **kw):
@@ -275,6 +284,7 @@ def test_default_prompt_still_uses_rich_path(monkeypatch, capsys):
     code = _invoke(["prompt", "hola"])
     assert code == 0
     assert captured.get("rich_path") is True
+    assert captured.get("agent_profile") is True
 
 
 def test_quiet_text_flag_routes_to_machine_mode(monkeypatch, capsys):

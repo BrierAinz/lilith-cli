@@ -33,6 +33,25 @@ from lilith_cli import __version__
 # ── Theme system ───────────────────────────────────────────────────
 
 
+def register_spinner(name: str, frames: list[str], interval: int = 120) -> str:
+    """Registra una animacion de spinner en el registro global de Rich.
+
+    ``Spinner`` lanza ``KeyError`` con un nombre desconocido, asi que la clave se
+    deriva del nombre del tema en vez de escribirse a mano. Registrar dos veces
+    los mismos fotogramas no hace nada; cambiarlos sobreescribe el anterior.
+    Ningun tema registra nada hasta que se lee su ``spinner_name``.
+
+    Returns:
+        La clave que hay que pasar a ``Spinner`` o a ``Status(spinner=...)``.
+    """
+    from rich.spinner import SPINNERS
+
+    key = f"lilith-{name}"
+    if SPINNERS.get(key, {}).get("frames") != list(frames):
+        SPINNERS[key] = {"interval": interval, "frames": list(frames)}
+    return key
+
+
 class CLITheme:
     """A complete CLI theme definition.
 
@@ -49,6 +68,8 @@ class CLITheme:
         prompt_prefix: Unicode rune used as prompt prefix (᛭ by default).
         thinking_label: Label for thinking/reasoning panels.
         spinner_label: Label for the pre-stream spinner.
+        spinner_frames: Custom spinner frames; ``None`` uses Rich's ``dots``.
+        spinner_interval: Milliseconds between spinner frames.
         pt_style: prompt_toolkit style dict (for the input prompt).
 
     """
@@ -67,6 +88,8 @@ class CLITheme:
         prompt_prefix: str = "᛭",
         thinking_label: str = "💭 Pensando...",
         spinner_label: str = "Pensando",
+        spinner_frames: list[str] | None = None,
+        spinner_interval: int = 120,
         pt_style: dict[str, str] | None = None,
     ) -> None:
         self.name = name
@@ -81,6 +104,8 @@ class CLITheme:
         self.prompt_prefix = prompt_prefix
         self.thinking_label = thinking_label
         self.spinner_label = spinner_label
+        self.spinner_frames = list(spinner_frames) if spinner_frames else None
+        self.spinner_interval = spinner_interval
         self.pt_style = pt_style or {
             "": "#e0e0e0",
             "prompt": "#ffd700 bold",
@@ -89,6 +114,17 @@ class CLITheme:
             "completion-menu.completion.current": "bg:#0f3460 #ffd700",
             "auto-suggestion": "#555555 italic",
         }
+
+    @property
+    def spinner_name(self) -> str:
+        """Clave de spinner de Rich para este tema.
+
+        Los temas sin fotogramas propios caen en el ``dots`` de Rich, asi que un
+        tema que no declare nada se comporta exactamente como antes.
+        """
+        if not self.spinner_frames:
+            return "dots"
+        return register_spinner(self.name, self.spinner_frames, self.spinner_interval)
 
 
 # ── Banner art ────────────────────────────────────────────────────
@@ -105,14 +141,9 @@ _NORSE_BANNER = f"""
 """
 
 _CYBERPUNK_BANNER = f"""
-  ╔═════════════════════════════════╗
-  ║     ⟐  Y G G D R A S I L  ⟐     ║
-  ║{f'C L I · v{__version__}':^33}║
-  ║   Signals From The Edge Nodes   ║
-  ╚═════════════════════════════════╝
-          ╠══╦══╦══╦══╦══╣
-          ║▓▓║▒▒║░░║▒▒║▓▓║
-          ╚══╩══╩══╩══╩══╝
+  ᛚ  L I L I T H   //   F A B R I C
+  {f'coding agent · v{__version__}':<31}
+  route · reason · act · verify
 """
 
 _MINIMAL_BANNER = f"""
@@ -121,10 +152,16 @@ yggdrasil cli · v{__version__}
 """
 
 _LILITH_BANNER = f"""
-             ☾  ✦  ☽
-     L I L I T H  ·  C L I
-             v{__version__}
-  Demon of Information terminal
+              ᛚ
+        L I L I T H
+    Taller de sagas · v{__version__}
+       Memoria · Criterio · Obra
+"""
+
+_OBSIDIANA_BANNER = f"""
+  ᛏ  L I L I T H
+  v{__version__} · obsidiana · quien habla decide el color
+  Oro es agencia · Hielo es hecho
 """
 
 
@@ -165,6 +202,8 @@ THEMES: dict[str, CLITheme] = {
         prompt_prefix="᛭",
         thinking_label="[dim]💭 Pensando...[/]",
         spinner_label="Pensando",
+        spinner_frames=["ᚠ", "ᚢ", "ᚦ", "ᚨ", "ᚱ", "ᚲ", "ᚷ", "ᚹ"],
+        spinner_interval=140,
         pt_style={
             "": "#e0e0e0",
             "prompt": "#ffd700 bold",
@@ -201,13 +240,14 @@ THEMES: dict[str, CLITheme] = {
             "duration": "dim italic",
         },
         banner=_CYBERPUNK_BANNER,
-        banner_title="[bold bright_magenta]⟐ Yggdrasil  CLI ⟐[/]",
-        banner_subtitle="[dim bright_cyan]Signals From The Edge Nodes[/]",
+        banner_title="[bold bright_magenta]ᛚ Lilith[/]",
+        banner_subtitle="[dim bright_cyan]Yggdrasil Fabric online[/]",
         border_style="bright_magenta",
         rule_chars="═",
         prompt_prefix="⟐",
         thinking_label="[dim bright_magenta]⚡ Procesando...[/]",
         spinner_label="Procesando",
+        spinner_frames=["░", "▒", "▓", "█", "▓", "▒"],
         pt_style={
             "": "#00ff9f",
             "prompt": "#ff00ff bold",
@@ -263,23 +303,23 @@ THEMES: dict[str, CLITheme] = {
     "lilith": CLITheme(
         name="lilith",
         label="Lilith",
-        description="Lilith CLI theme — Demon of Information assistant terminal",
+        description="Obsidian, ice blue and aged gold — a Nordic personal workspace",
         theme={
-            "realm": "bright_magenta",
-            "frost": "deep_sky_blue3",
+            "realm": "#D5B96D",
+            "frost": "#8FD8E8",
             "grove": "chartreuse3",
             "bark": "tan",
-            "rune": "bright_magenta",
+            "rune": "#D5B96D",
             "error": "bold red",
             "success": "green",
             "warning": "yellow",
             "info": "bright_cyan",
-            "tool.name": "bold bright_magenta",
+            "tool.name": "bold #8FD8E8",
             "tool.arg": "dim cyan",
             "tool.result": "green",
             "thinking": "dim italic magenta",
             "usage": "dim",
-            "model": "bold bright_magenta",
+            "model": "bold #D5B96D",
             "status.ok": "green",
             "status.fail": "red",
             "status.warn": "yellow",
@@ -287,20 +327,70 @@ THEMES: dict[str, CLITheme] = {
             "duration": "dim italic",
         },
         banner=_LILITH_BANNER,
-        banner_title="[bold bright_magenta]᛭ Lilith CLI ᛭[/]",
-        banner_subtitle="[dim italic]Demon of Information — assistant terminal[/]",
-        border_style="bright_magenta",
+        banner_title="[bold #8FD8E8]Lilith[/]",
+        banner_subtitle="[dim]Tu trabajo permanece. Retoma la saga.[/]",
+        border_style="#D5B96D",
         rule_chars="─",
         prompt_prefix="᛭",
-        thinking_label="[dim bright_magenta]✨ Manifesting...[/]",
-        spinner_label="Manifesting",
+        thinking_label="[dim #8FD8E8]Pensando…[/]",
+        spinner_label="Pensando",
+        spinner_frames=["◇", "◈", "◆", "◈"],
         pt_style={
-            "": "#ff00ff",
-            "prompt": "#ff66ff bold",
-            "prompt.dots": "#660066",
-            "completion-menu": "bg:#1a002e #ff66ff",
-            "completion-menu.completion.current": "bg:#ff00ff #000000",
-            "auto-suggestion": "#666666 italic",
+            "": "#dce3e8",
+            "prompt": "#8fd8e8 bold",
+            "prompt.dots": "#d5b96d",
+            "completion-menu": "bg:#111820 #dce3e8",
+            "completion-menu.completion.current": "bg:#263440 #8fd8e8",
+            "auto-suggestion": "#85939d italic",
+        },
+    ),
+    "obsidiana": CLITheme(
+        name="obsidiana",
+        label="Obsidiana",
+        description="Obsidian, aged gold & ice — who speaks decides the color",
+        theme={
+            # ── Oro envejecido: agencia del operador ──────────
+            "realm": "#D5B96D",       # identidad / encabezado → operador decide qué realm
+            "rune": "#D5B96D",        # marca de turno → agencia humana
+            "model": "bold #D5B96D",  # qué modelo eligió el operador → oro
+            "turn": "#D5B96D",        # separador de turno → agencia
+            # ── Azul hielo: hecho observado por la máquina ────
+            "frost": "#8FD8E8",       # dato concreto → hecho
+            "info": "#8FD8E8",        # información objetiva → hielo
+            "tool.name": "bold #8FD8E8",   # qué herramienta usó la máquina
+            "tool.arg": "#8FD8E8 dim",     # qué recibió la herramienta → hecho
+            "tool.result": "#8FD8E8",      # qué devolvió la herramienta → hecho
+            "thinking": "dim italic #8FD8E8",  # razonamiento de la máquina
+            "usage": "dim #8FD8E8",   # recuento de tokens → dato medido
+            "duration": "dim italic #8FD8E8",  # tiempo transcurrido → dato medido
+            "status.ok": "#7FA858",   # la máquina confirma éxito → verde salvia
+            # ── Rojo / ámbar: fallo y advertencia EXCLUSIVAMENTE
+            "error": "bold #E05252",       # fallo → rojo apagado, legible sobre obsidiana
+            "status.fail": "#E05252",      # fallo → rojo
+            "warning": "#D4A84B",          # advertencia → ámbar (no oro, más cálido)
+            "status.warn": "#D4A84B",      # advertencia → ámbar
+            # ── Derivados: contraste sobre obsidiana ──────────
+            "success": "#7FA858",     # verde salvia: victoria silenciosa
+            "grove": "#7FA858",       # la arboleda → verde salvia
+            "bark": "#8B8178",        # piedra/corteza → gris cálido
+        },
+        banner=_OBSIDIANA_BANNER,
+        banner_title="[bold #D5B96D]ᛏ Lilith[/]",
+        banner_subtitle="[dim #8FD8E8]Agencia · Hecho · Silencio[/]",
+        border_style="#D5B96D",
+        rule_chars="·",
+        prompt_prefix="ᛏ",
+        thinking_label="[dim #8FD8E8]Pensando…[/]",
+        spinner_label="Pensando",
+        spinner_frames=["ᚠ᛫", "᛫ᚢ", "ᚦ᛫", "᛫ᚨ", "ᚱ᛫", "᛫ᚲ"],
+        spinner_interval=160,
+        pt_style={
+            "": "#c8c8c0",
+            "prompt": "#D5B96D bold",
+            "prompt.dots": "#8B8178",
+            "completion-menu": "bg:#0D0D0F #c8c8c0",
+            "completion-menu.completion.current": "bg:#1a1a24 #D5B96D",
+            "auto-suggestion": "#555555 italic",
         },
     ),
 }
@@ -558,31 +648,23 @@ def render_error(text: str) -> None:
 # ── Thinking / reasoning ────────────────────────────────────────────
 
 
-def build_thinking_panel(text: str, *, tail_lines: int | None = None) -> Panel:
-    """Build the thinking/reasoning panel renderable for the active theme.
+def build_thinking_panel(text: str, *, tail_lines: int | None = None) -> Text:
+    """Build the thinking/reasoning text renderable for the active theme.
 
     With *tail_lines*, only the last N lines are shown — used by the live
     streaming view so a long reasoning block doesn't fill the screen.
     """
-    theme = get_theme()
-    # Truncate very long thinking blocks.
-    display = text if len(text) <= 1000 else text[:1000] + "…"
+    display = text
     if tail_lines is not None:
         lines = display.splitlines()
         if len(lines) > tail_lines:
             display = "…\n" + "\n".join(lines[-tail_lines:])
-    return Panel(
-        Text(display, style="thinking"),
-        title=theme.thinking_label,
-        border_style=theme.border_style,
-        expand=False,
-        padding=(0, 1),
-    )
+    return Text(display, style="thinking")
 
 
 def render_thinking(text: str) -> None:
-    """Show a thinking / reasoning panel using the active theme."""
-    console.print(build_thinking_panel(text))
+    """Show a thinking / reasoning text using the active theme."""
+    console.print(Text(text, style="thinking"))
 
 
 # ── Tool call cards ─────────────────────────────────────────────────
@@ -615,8 +697,315 @@ def render_tool_call(name: str, args: dict[str, Any], result: str | None = None)
 
     renderable = Group(*body_parts) if body_parts else Text(args_text, style="tool.arg")
     console.print(
-        Panel(renderable, title=header, border_style="cyan", expand=False, padding=(0, 1)),
+        Panel(renderable, title=header, border_style="tool.name", expand=False, padding=(0, 1)),
     )
+
+
+# ── Diff Renderer ───────────────────────────────────────────────────
+
+
+def render_diff(diff_text: str, path: str | None = None) -> Any:
+    """Render a unified diff with a Nordic frame."""
+    import re
+    from rich.text import Text
+    from rich.console import Group
+
+    try:
+        diff_text = str(diff_text) if diff_text is not None else ""
+        if "@@" not in diff_text and "---" not in diff_text:
+            return escape(diff_text)
+
+        lines = diff_text.splitlines()
+        adds = sum(1 for line in lines if line.startswith("+") and not line.startswith("+++"))
+        subs = sum(1 for line in lines if line.startswith("-") and not line.startswith("---"))
+
+        hunks = []
+        current_hunk = None
+        for line in lines:
+            if line.startswith("---") or line.startswith("+++") or line == "\\ No newline at end of file":
+                continue
+            if line.startswith("@@"):
+                if current_hunk is not None:
+                    hunks.append(current_hunk)
+                current_hunk = []
+            if current_hunk is not None:
+                current_hunk.append(line)
+        if current_hunk is not None:
+            hunks.append(current_hunk)
+
+        omitted_lines = 0
+        if len(hunks) > 4:
+            middle_hunks = hunks[2:-2]
+            omitted_lines = sum(len(h) for h in middle_hunks)
+            hunks = hunks[:2] + hunks[-2:]
+
+        theme = get_theme()
+        border_style = theme.border_style
+
+        parts = []
+        
+        header = Text()
+        header.append("╭── ", style=border_style)
+        if path:
+            header.append(path, style="tool.name")
+            header.append(" ── ", style=border_style)
+        header.append(f"+{adds}", style="success")
+        header.append(" ", style=border_style)
+        # El signo menos va pegado al numero. Antes aqui habia un separador
+        # "───" entre las dos cifras y ningun signo, asi que la cabecera salia
+        # "+4 ───1": el recuento de borrados quedaba sin signo y el separador se
+        # leia como parte del numero. Un recuento sin signo no es un recuento.
+        header.append(f"−{subs}", style="error")
+        parts.append(header)
+
+        for h_idx, hunk in enumerate(hunks):
+            if omitted_lines > 0 and h_idx == 2:
+                t = Text()
+                t.append("│  ", style=border_style)
+                t.append(f"... {omitted_lines} líneas omitidas ...", style="dim")
+                parts.append(t)
+                
+            old_ln = 0
+            new_ln = 0
+            for line in hunk:
+                if line.startswith("@@"):
+                    m = re.search(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@", line)
+                    if m:
+                        old_ln = int(m.group(1))
+                        new_ln = int(m.group(2))
+                    
+                    t = Text()
+                    t.append("│ ", style=border_style)
+                    t.append(" " * 11)
+                    t.append(line, style="turn")
+                    parts.append(t)
+                else:
+                    # Dos columnas: viejo y nuevo. Antes se mostraba una sola y
+                    # las lineas borradas ponian ahi su numero del fichero
+                    # VIEJO, asi que la numeracion saltaba hacia atras (33 +,
+                    # luego 32 -) y el ojo tropezaba en cada borrado. Con las
+                    # dos columnas cada numero dice de que fichero habla, y la
+                    # que no aplica queda en blanco: una linea anadida no existe
+                    # en el viejo y una borrada no existe en el nuevo.
+                    if line.startswith("+"):
+                        col_vieja, col_nueva = "", str(new_ln)
+                        new_ln += 1
+                        sign = "+"
+                        code = line[1:]
+                        style = "success"
+                    elif line.startswith("-"):
+                        col_vieja, col_nueva = str(old_ln), ""
+                        old_ln += 1
+                        sign = "-"
+                        code = line[1:]
+                        style = "error"
+                    else:
+                        col_vieja, col_nueva = str(old_ln), str(new_ln)
+                        old_ln += 1
+                        new_ln += 1
+                        sign = " "
+                        code = line[1:] if line else ""
+                        style = "default"
+
+                    t = Text()
+                    t.append("│ ", style=border_style)
+                    t.append(f"{col_vieja:>4} ", style="dim")
+                    t.append(f"{col_nueva:>4} ", style="dim")
+                    t.append(f"{sign} ", style=style)
+                    t.append(code, style=style)
+                    parts.append(t)
+                    
+        return Group(*parts)
+    except Exception:
+        return escape(str(diff_text)) if diff_text is not None else ""
+
+
+def _grep_matches(data: Any) -> tuple[list[Any], str | None]:
+    """Normaliza el resultado de grep_files y devuelve (coincidencias, aviso).
+
+    Historia, porque el cambio de forma es una trampa: hasta el 2026-09-15
+    `grep_files` devolvia la lista pelada de coincidencias. Desde entonces
+    devuelve un dict, porque un recorrido truncado necesita un sitio donde
+    DECIRLO y una lista no lo tiene.
+
+    Se aceptan las dos formas a proposito. Un consumidor que solo entendiera el
+    dict dejaria de pintar la tabla sin lanzar ninguna excepcion, y un fallo que
+    no grita es el que tarda semanas en verse.
+    """
+    if isinstance(data, dict):
+        matches = data.get("matches")
+        aviso = data.get("warning")
+        return (matches if isinstance(matches, list) else []), (aviso if isinstance(aviso, str) else None)
+    if isinstance(data, list):
+        return data, None
+    return [], None
+
+
+def summarize_tool_result(name: str, content: str, args: dict[str, Any] | None = None) -> str:
+    """Devuelve un resumen de una línea del resultado de una herramienta."""
+    args = args or {}
+    content = str(content) if content is not None else ""
+    data = _extract_data(content)
+    try:
+        if name == "file_read":
+            from pathlib import Path
+            path_str = args.get("path", "")
+            filename = Path(path_str).name if path_str else "archivo"
+            lines = content.splitlines()
+            num_lines = len(lines)
+            if content.startswith("Líneas ") or content.startswith("Lineas "):
+                first = lines[0].rstrip(":")
+                return f"{filename} — {first.lower()}"
+            return f"{filename} — {num_lines} líneas de {num_lines}"
+        elif name == "grep_files":
+            matches, aviso = _grep_matches(data)
+            if matches or isinstance(data, (list, dict)):
+                n_matches = len(matches)
+                n_files = len(set(m.get("file") for m in matches if isinstance(m, dict)))
+                if n_files <= 1:
+                    resumen = f"{n_matches} coincidencia{'s' if n_matches != 1 else ''}"
+                else:
+                    resumen = f"{n_matches} coincidencias en {n_files} ficheros"
+                # Un cero truncado NO se resume como un cero. Ese silencio es lo
+                # que hizo concluir que algo no existia cuando si existia.
+                return f"{resumen} (INCOMPLETA)" if aviso else resumen
+        elif name == "directory_list":
+            if isinstance(data, list):
+                n = len(data)
+                return f"{n} entrada{'s' if n != 1 else ''}"
+        elif name == "batch_edit":
+            if isinstance(data, dict):
+                edits = data.get("edits", [])
+                if edits:
+                    n_edits = len(edits)
+                    n_files = len(set(e.get("path") for e in edits if isinstance(e, dict)))
+                    return f"{n_edits} {'edición' if n_edits == 1 else 'ediciones'}, {n_files} {'fichero' if n_files == 1 else 'ficheros'}"
+                else:
+                    return "batch_edit completado"
+        elif name == "file_write" or name == "file_edit":
+            if isinstance(data, dict):
+                from pathlib import Path
+                path_str = data.get("path", "")
+                filename = Path(path_str).name if path_str else "archivo"
+                return f"{name} en {filename}"
+        elif name == "coding":
+            if isinstance(data, dict) and "returncode" in data:
+                return f"exit {data['returncode']}"
+        elif name == "todo_list":
+            if isinstance(data, dict) and "todos" in data:
+                todos = data["todos"]
+                if isinstance(todos, list):
+                    total = len(todos)
+                    if total == 0:
+                        return "0 tareas"
+                    done = sum(1 for t in todos if isinstance(t, dict) and t.get("done"))
+                    pend = total - done
+                    return (f"{total} tarea{'s' if total != 1 else ''} "
+                            f"({pend} pendiente{'s' if pend != 1 else ''})")
+        elif name == "bg_status":
+            if isinstance(data, dict):
+                if "processes" in data and isinstance(data["processes"], list):
+                    procs = data["processes"]
+                    total = len(procs)
+                    alive = sum(1 for p in procs if isinstance(p, dict) and p.get("alive"))
+                    # Concordancia, igual que en todo_list: "1 procesos vivos"
+                    # se lee mal, y estas lineas las mira el operador en cada turno.
+                    plural = alive != 1
+                    return (f"{alive} proceso{'s' if plural else ''} "
+                            f"viv{'os' if plural else 'o'} de {total}")
+                elif "name" in data and "status" in data:
+                    alive_str = "vivo" if data.get("alive") else "muerto"
+                    return f"proceso {data['name']}: {alive_str}"
+        elif name == "cli_jobs_recent":
+            if isinstance(data, dict) and "references" in data:
+                refs = data["references"]
+                if isinstance(refs, list):
+                    n = len(refs)
+                    return f"{n} delegacion{'es' if n != 1 else 'ón'} reciente{'s' if n != 1 else ''}"
+        elif name == "watch_status":
+            if isinstance(data, dict) and "watches" in data:
+                watches = data["watches"]
+                if isinstance(watches, list):
+                    total = len(watches)
+                    if total == 0:
+                        return "0 watchers"
+                    events = sum(w.get("event_count", 0) for w in watches if isinstance(w, dict))
+                    return f"{total} watchers activos ({events} eventos)"
+        elif name in ("cli_job_reference", "cli_job_inspect"):
+            if isinstance(data, dict):
+                status = data.get("status", "unknown")
+                if status == "unresolved_reference":
+                    return "referencia no resuelta"
+                agent = data.get("agent", "?")
+                job_id = data.get("job_id", "?")
+                if data.get("job_returncode") is not None:
+                    return f"{agent} {job_id} — completado con {data['job_returncode']}"
+                return f"{agent} {job_id} — {status}"
+
+        # Generic structured fallback: prefer the field that proves the result
+        # contains something useful, rather than displaying JSON's opening.
+        if isinstance(data, dict) and data:
+            for key in ("processes", "todos", "references", "watches", "results", "edits", "events"):
+                value = data.get(key)
+                if isinstance(value, list):
+                    return f"{len(value)} {key}"
+            for key in ("count", "total"):
+                if key in data and isinstance(data[key], (int, float)) and not isinstance(data[key], bool):
+                    return f"{key}: {data[key]}"
+            if "status" in data and not any(isinstance(value, list) for value in data.values()):
+                return f"status: {data['status']}"
+            lists = {key: value for key, value in data.items() if isinstance(value, list)}
+            if lists:
+                key, value = max(lists.items(), key=lambda item: len(item[1]))
+                return f"{len(value)} {key}"
+            n_keys = len(data)
+            return f"objeto con {n_keys} clave{'s' if n_keys != 1 else ''}"
+        if isinstance(data, list):
+            return f"lista de {len(data)} elemento{'s' if len(data) != 1 else ''}"
+        if data is None:
+            return "(sin salida)"
+        if data is not content:
+            return f"valor estructurado: {data}"
+    except Exception:
+        # Rendering is best-effort: malformed or surprising tool output must
+        # never take down the turn that is trying to display it.
+        pass
+
+    try:
+        for line in content.splitlines():
+            line = line.strip()
+            if line:
+                return line[:60] + ("…" if len(line) > 60 else "")
+    except Exception:
+        pass
+    return "(sin salida)"
+
+
+def render_tool_line(name: str, summary: str, duration: float | None = None) -> None:
+    """Renderiza una línea de resumen de herramienta en columnas."""
+    from rich.text import Text
+    theme = get_theme()
+    
+    t = Text()
+    t.append(f"{theme.prompt_prefix} ", style="rune")
+    
+    # Columna de nombre (alineada)
+    t.append(f"{name:<14} ", style="tool.name")
+    
+    # Columna de resumen
+    t.append(f"{summary:<40} ", style="tool.arg")
+    
+    if duration is not None:
+        if duration < 1:
+            dur_str = f"{duration * 1000:.0f}ms"
+        elif duration < 60:
+            dur_str = f"{duration:.1f}s"
+        else:
+            mins, secs = divmod(int(duration), 60)
+            dur_str = f"{mins}m {secs}s"
+        t.append(f"{dur_str:>8}", style="duration")
+        
+    console.print(t)
 
 
 # ── Tool result rendering helpers ─────────────────────────────────────
@@ -628,6 +1017,14 @@ def _extract_data(content: str) -> Any:
         return json.loads(content)
     except Exception:
         return content
+
+
+# Rich NO acepta un modificador junto a un estilo NOMBRADO del tema:
+# "bold tool.name" lo parsea como `bold` + color `tool.name`, y revienta con
+# MissingStyle en cuanto se pinta la tabla. Paso el 2026-09-15 y tumbaba
+# directory_list y grep_files, o sea casi cada turno. El nombre va SOLO; si hace
+# falta negrita, se mete en la definicion del estilo dentro del tema (tool.name
+# ya es "bold #8FD8E8" en obsidiana, asi que la negrita ya estaba).
 
 
 def render_tool_result(name: str, content: str) -> Any:
@@ -648,8 +1045,8 @@ def render_tool_result(name: str, content: str) -> Any:
         data = _extract_data(content)
         table = Table(
             show_header=True,
-            header_style="bold cyan",
-            border_style="cyan",
+            header_style="tool.name",
+            border_style="tool.name",
             expand=False,
         )
         table.add_column("Nombre", style="tool.name")
@@ -667,25 +1064,29 @@ def render_tool_result(name: str, content: str) -> Any:
                     )
         return table
 
-    if name == "grep_files" and content.lstrip().startswith("["):
+    if name == "grep_files" and content.lstrip()[:1] in ("[", "{"):
         data = _extract_data(content)
+        matches, aviso = _grep_matches(data)
         table = Table(
             show_header=True,
-            header_style="bold cyan",
-            border_style="cyan",
+            header_style="tool.name",
+            border_style="tool.name",
             expand=False,
         )
         table.add_column("Archivo", style="tool.name")
         table.add_column("Línea", justify="right", style="tool.arg")
         table.add_column("Coincidencia", style="tool.result")
-        if isinstance(data, list):
-            for item in data:
-                if isinstance(item, dict):
-                    table.add_row(
-                        str(item.get("file", "-")),
-                        str(item.get("line_number", "-")),
-                        item.get("line_text", "-"),
-                    )
+        for item in matches:
+            if isinstance(item, dict):
+                table.add_row(
+                    str(item.get("file", "-")),
+                    str(item.get("line_number", "-")),
+                    item.get("line_text", "-"),
+                )
+        if aviso:
+            # El aviso va pegado a la tabla, no en otra linea que se pueda perder.
+            table.caption = aviso
+            table.caption_style = "error"
         return table
 
     if name == "coding":
@@ -781,7 +1182,7 @@ def render_cost(
             title="[bold realm]Desglose por modelo[/]",
             show_header=True,
             header_style="bold",
-            border_style="dim",
+            border_style="usage",
             expand=False,
         )
         table.add_column("Modelo", style="model")
@@ -997,7 +1398,7 @@ def make_thinking_spinner() -> dict[str, Any]:
 
     status = Status(
         label,
-        spinner="dots",
+        spinner=theme.spinner_name,
         console=console,
         speed=0.8,
     )
@@ -1042,7 +1443,7 @@ def render_git_status(status_dict: dict) -> None:
         title=f"[bold]⚔ Git status — branch {branch} ⚔[/]",
         show_header=True,
         header_style="bold yellow",
-        border_style="dim cyan",
+        border_style="turn",
     )
     table.add_column("File", style="frost", overflow="fold")
     table.add_column("Status", width=10, justify="center")
@@ -1137,7 +1538,7 @@ def render_review(review: dict[str, Any]) -> None:
             Panel(
                 "[success]✓ No se encontraron issues.[/]",
                 title=title,
-                border_style="green",
+                border_style="success",
                 expand=False,
                 padding=(0, 2),
             )
@@ -1162,8 +1563,8 @@ def render_review(review: dict[str, Any]) -> None:
 
     table = Table(
         show_header=True,
-        header_style="bold cyan",
-        border_style="cyan",
+        header_style="tool.result",
+        border_style="tool.result",
         expand=False,
     )
     table.add_column("Sev", width=6)

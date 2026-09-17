@@ -12,6 +12,7 @@ if _PKG_DIR not in sys.path:
     sys.path.insert(0, _PKG_DIR)
 
 from textual.widgets import Input
+from lilith_cli.ui_widgets import MessageInput
 
 from lilith_cli.ide import (
     CommandPaletteScreen,
@@ -74,7 +75,7 @@ class TestIDEApp:
     def test_app_importable(self, fake_session):
         """The IDE module should expose the app and entry point."""
         app = LilithIDEApp(fake_session, root=Path.cwd())
-        assert app._title == "Lilith IDE — Hlidskjalf Console"
+        assert app._title == "Lilith IDE · Queen Orchestrator"
         assert app.session is fake_session
 
     def test_run_ide_entry_point_exists(self):
@@ -95,7 +96,7 @@ class TestIDEApp:
             assert app.query_one("#status-bar")
 
             # Typing into the input updates its value.
-            input_widget = app.query_one("#chat-input", Input)
+            input_widget = app.query_one("#chat-input", MessageInput)
             input_widget.value = "hello"
             assert input_widget.value == "hello"
 
@@ -448,19 +449,19 @@ class TestRuneDirectoryTree:
     """Tests for the Norse-themed file tree."""
 
     def test_rune_for_python_file(self, tmp_path):
-        tree = RuneDirectoryTree(tmp_path)
+        tree = RuneDirectoryTree
         assert tree.rune_for_path(tmp_path / "main.py") == "ᛈ"
 
     def test_rune_for_rust_file(self, tmp_path):
-        tree = RuneDirectoryTree(tmp_path)
+        tree = RuneDirectoryTree
         assert tree.rune_for_path(tmp_path / "lib.rs") == "ᚱ"
 
     def test_rune_for_directory(self, tmp_path):
-        tree = RuneDirectoryTree(tmp_path)
+        tree = RuneDirectoryTree
         assert tree.rune_for_path(tmp_path) == tree.ICON_NODE
 
     def test_default_rune_for_unknown_extension(self, tmp_path):
-        tree = RuneDirectoryTree(tmp_path)
+        tree = RuneDirectoryTree
         assert tree.rune_for_path(tmp_path / "data.xyz") == "ᚠ"
 
 
@@ -470,7 +471,7 @@ class TestSplashScreen:
     def test_splash_screen_constructible(self):
         screen = SplashScreen()
         assert screen is not None
-        assert "LILITH" in SplashScreen._YGGDRASIL_ART
+        assert "QUEEN ORCHESTRATOR" in SplashScreen._YGGDRASIL_ART
 
 
 class TestDebuggerIntegration:

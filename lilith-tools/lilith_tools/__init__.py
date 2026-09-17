@@ -30,6 +30,7 @@ for _mod in (
     "snippets",
     "delegate",
     "cli_delegate",
+    "cli_job_inspect",
     "conclave",
     "memory",
     "orchestration_state",
@@ -37,6 +38,7 @@ for _mod in (
     "blender",
     "forja_tools",
     "crawl_tools",
+    "ask_operator",
 ):
     try:
         _il.import_module(f".{_mod}", package=__name__)

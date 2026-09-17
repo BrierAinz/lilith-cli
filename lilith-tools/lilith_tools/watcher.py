@@ -17,6 +17,7 @@ from typing import Any
 
 from .base import BaseTool, ToolResult
 from .registry import ToolRegistry
+from .file_walk import walk_all_files
 
 
 @dataclass
@@ -256,13 +257,20 @@ class _PollingObserver:
             root = Path(p)
             if not root.exists():
                 continue
-            for item in root.rglob("*"):
-                if item.is_file():
-                    try:
-                        stat = item.stat()
-                        snap[str(item.resolve())] = (stat.st_mtime, stat.st_size)
-                    except OSError:
-                        continue
+            # _run() reconstruye este snapshot CADA SEGUNDO. Con rglob eso
+            # significaba stat() sobre todo el arbol, node_modules y .venv
+            # incluidos: en este taller son 160.000 ficheros por segundo si
+            # alguien vigila la raíz del workspace. La poda no es una optimizacion, es
+            # lo que hace viable el intervalo.
+            #
+            # Aqui se usa walk_all_files y NO walk_text_files a proposito: un
+            # vigilante tiene que notar que un .png o un .zip cambiaron.
+            for item in walk_all_files(root):
+                try:
+                    stat = item.stat()
+                    snap[str(item.resolve())] = (stat.st_mtime, stat.st_size)
+                except OSError:
+                    continue
         return snap
 
     def _run(self) -> None:

@@ -15,7 +15,12 @@ import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
+
+from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.table import Table
+
 from .config import CONFIG_DIR, CONFIG_FILE, find_project_config, load_config
 from .render import (
     console,
@@ -25,11 +30,6 @@ from .render import (
     render_status,
     set_theme,
 )
-
-from rich.markdown import Markdown
-from rich.panel import Panel
-from rich.table import Table
-
 
 # ── Feedback storage helpers ─────────────────────────────────────────
 
@@ -60,6 +60,7 @@ def _save_feedback(entries: list[dict[str, Any]]) -> None:
 
 
 if TYPE_CHECKING:
+    from .providers import LLMProviderWrapper
     from .session_runtime import SessionRuntime
 
 
@@ -121,17 +122,10 @@ class HelpCommand(BaseCommand):
     description = "Mostrar comandos disponibles"
     aliases = ["h", "?"]
 
-    async def execute(self, _args: str) -> None:
-        from .commands import CommandRegistry
+    async def execute(self, args: str) -> None:
+        from .extra_commands import run_help_command
 
-        registry = CommandRegistry(self.session)
-        registry.discover()
-
-        console.print("\n[bold realm]᛭ Comandos de Yggdrasil[/]\n")
-        for cmd in sorted(registry._commands.values(), key=lambda c: c.name):
-            aliases = f" ({', '.join(f'/{a}' for a in cmd.aliases)})" if cmd.aliases else ""
-            console.print(f"  [bold cyan]/{cmd.name}[/]{aliases}  [dim]— {cmd.description}[/]")
-        console.print()
+        await run_help_command(self.session, args)
 
 
 class QuickstartCommand(BaseCommand):
@@ -179,7 +173,7 @@ class QuickstartCommand(BaseCommand):
         sections.append("  [bold cyan]/costs[/]     — telemetría acumulada de delegaciones por preset")
         sections.append("  [bold cyan]/conclave[/]  — fan-out paralelo a 2-4 presets (--presets a,b,c)")
         sections.append("  [bold cyan]/learn[/]     — minar post-mortems en skills sugeridas (save N)")
-        sections.append("  [bold cyan]/subagents test[/] — healthcheck de un preset (latencia, modelo, límite)")
+        sections.append("  [dim]/subagents test — compatibilidad legacy de presets Hlidskjalf[/]")
         sections.append("  [bold cyan]/mcp list[/]  — servidores MCP montados en el REPL")
         sections.append("  [bold cyan]lilith doctor[/] — diagnóstico de config, providers, MCP, memoria")
         sections.append("  [bold cyan]lilith delegate --preset/--agentic/--structured/--max-tokens/--max-turns[/]")
@@ -314,113 +308,16 @@ class QuickstartCommand(BaseCommand):
 
 
 class CommandsCommand(BaseCommand):
-    """List all slash commands in a compact, grouped format.
-
-    ``/commands`` shows every available command grouped by category.
-    ``/commands <patrón>`` filters commands by name, alias, or description.
-    """
+    """List the complete slash-command discovery surface."""
 
     name = "commands"
     description = "Listar comandos disponibles agrupados por categoría"
     aliases = ["cmds"]
 
-    # Category mapping for the built-in command set. Any command not listed
-    # here falls back to "Otros" so the list stays complete even if new
-    # commands are added and not yet categorized.
-    _CATEGORIES: dict[str, set[str]] = {
-        "Sesión": {
-            "clear",
-            "save",
-            "history",
-            "compact",
-            "resume",
-            "redo",
-            "retry",
-            "continue",
-            "copy",
-            "export",
-            "replay",
-            "macro",
-        },
-        "Herramientas": {"tools"},
-        "Seguridad": {"confirm", "diff", "undo", "agent"},
-        "Plan": {"plan"},
-        "Memoria": {"memory"},
-        "Info": {
-            "help",
-            "quickstart",
-            "commands",
-            "status",
-            "model",
-            "provider",
-            "cost",
-            "tokens",
-            "usage",
-            "metrics",
-            "bifrost",
-            "config",
-            "theme",
-            "agent",
-        },
-        "Memoria": {"memory"},
-        "Sistema": {"init", "file", "ygg", "quit"},
-        "Otros": {"diff-config"},
-    }
-
-    def _category_for(self, cmd_name: str) -> str:
-        for category, names in self._CATEGORIES.items():
-            if cmd_name in names:
-                return category
-        return "Otros"
-
     async def execute(self, args: str) -> None:
-        from .commands import CommandRegistry
+        from .extra_commands import run_help_command
 
-        registry = CommandRegistry(self.session)
-        registry.discover()
-
-        pattern = args.strip().lower()
-        all_commands = sorted(registry._commands.values(), key=lambda c: c.name)
-
-        if pattern:
-            filtered = [
-                cmd
-                for cmd in all_commands
-                if pattern in cmd.name.lower()
-                or pattern in cmd.description.lower()
-                or any(pattern in a.lower() for a in cmd.aliases)
-            ]
-            if not filtered:
-                console.print(f"[dim]Ningún comando coincide con '{args.strip()}'.[/]")
-                return
-            all_commands = filtered
-
-        # Group by category while preserving category order.
-        groups: dict[str, list[BaseCommand]] = {}
-        for cmd in all_commands:
-            cat = self._category_for(cmd.name)
-            groups.setdefault(cat, []).append(cmd)
-
-        category_order = [
-            "Sesión",
-            "Herramientas",
-            "Seguridad",
-            "Plan",
-            "Memoria",
-            "Info",
-            "Sistema",
-            "Otros",
-        ]
-
-        console.print("\n[bold realm]᛭ Comandos de Yggdrasil[/]\n")
-        for cat in category_order:
-            if cat not in groups:
-                continue
-            console.print(f"[bold]{cat}[/]")
-            for cmd in groups[cat]:
-                aliases = f" ({', '.join(f'/{a}' for a in cmd.aliases)})" if cmd.aliases else ""
-                console.print(f"  [bold cyan]/{cmd.name}[/][dim]{aliases}[/] — {cmd.description}")
-            console.print()
+        await run_help_command(self.session, args.strip() or "all")
 
 
 class ToolsCommand(BaseCommand):
@@ -1090,7 +987,6 @@ class DiffConfigCommand(BaseCommand):
     aliases = ["diffconfig", "dcfg"]
 
     async def execute(self, args: str) -> None:
-        from .config import CONFIG_FILE, find_project_config, load_config
 
         global_path = getattr(self.session, "config_path", None) or CONFIG_FILE
         project_path = find_project_config()
@@ -1243,8 +1139,8 @@ class RedoCommand(BaseCommand):
             f"[dim]⟳ Reenviando: [model]{last_msg[:80]}{'…' if len(last_msg) > 80 else ''}[/][/]",
         )
         # Import here to avoid circular imports.
-        from .repl import _process_with_streaming
         from .render import render_turn_start
+        from .repl import _process_with_streaming
 
         render_turn_start(999)  # We don't track turn number in commands — use placeholder
         await _process_with_streaming(self.session, last_msg)
@@ -1285,8 +1181,8 @@ class RetryCommand(BaseCommand):
             f"[dim]⟳ Reenviando: [model]{text[:80]}{'…' if len(text) > 80 else ''}[/][/]",
         )
         # Import here to avoid circular imports.
-        from .repl import _process_with_streaming
         from .render import render_turn_start
+        from .repl import _process_with_streaming
 
         render_turn_start(999)  # We don't track turn number in commands — use placeholder
         await _process_with_streaming(self.session, text)
@@ -1306,8 +1202,8 @@ class ContinueCommand(BaseCommand):
 
         console.print("[dim]⟳ Pidiendo continuación...[/]")
         # Import here to avoid circular imports.
-        from .repl import _process_with_streaming
         from .render import render_turn_start
+        from .repl import _process_with_streaming
 
         render_turn_start(999)
         await _process_with_streaming(self.session, prompt)
@@ -1527,7 +1423,7 @@ class TemplateCommand(BaseCommand):
         # The provider may not be available in stub sessions; catch that gracefully.
         try:
             self.session.history.append({"role": "user", "content": prompt})
-            self.session._last_user_message = prompt  # noqa: SLF001
+            self.session._last_user_message = prompt
         except Exception as exc:
             render_error(f"No se pudo cargar la plantilla: {exc}")
             return
@@ -1919,21 +1815,30 @@ class ResumeCommand(BaseCommand):
             render_error("La conversación seleccionada está vacía.")
             return
 
+        from .delegation_keys import decode_keys, validate_namespace
+        from .snapshot_usage import merged_usage
+        try:
+            if not isinstance(messages, list) or not all(isinstance(message, dict) for message in messages):
+                raise ValueError("Historial inválido.")
+            progress = data.get("progress") or {}
+            if not isinstance(progress, dict) or progress.get("pending"):
+                raise ValueError("Hay resultados desconocidos; revisa sus efectos antes de reanudar.")
+            delegation_requests = decode_keys(data.get("delegation_requests", {"version": 1, "entries": []}))
+            delegation_namespace = validate_namespace(data.get("delegation_namespace"))
+            total_usage, per_model_usage = merged_usage(
+                getattr(self.session, "_total_usage", {}), getattr(self.session, "_per_model_usage", {}),
+                data.get("usage", {}), data.get("per_model_usage", {}))
+        except ValueError as exc:
+            render_error(str(exc))
+            return
+
         # Preserve current system prompt, restore history.
         old_count = len(self.session.history)
         self.session.history = messages
-
-        # Merge usage if available.
-        loaded_usage = data.get("usage", {})
-        if loaded_usage:
-            for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
-                if key in loaded_usage:
-                    self.session._total_usage[key] += loaded_usage.get(key, 0)
-        for model, model_usage in data.get("per_model_usage", {}).items():
-            self.session._ensure_per_model_entry(model)
-            for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
-                self.session._per_model_usage[model][key] += model_usage.get(key, 0)
-            self.session._per_model_usage[model]["cost"] += model_usage.get("cost", 0.0)
+        self.session._delegation_request_ids = delegation_requests
+        self.session._delegation_namespace = delegation_namespace
+        self.session._total_usage = total_usage
+        self.session._per_model_usage = per_model_usage
 
         console.print()
         console.print(
@@ -2085,7 +1990,6 @@ class AutoCommand(BaseCommand):
 
 # We need a late import for render in ConfigCommand's Panel.
 
-from rich.panel import Panel
 from rich.syntax import Syntax
 
 
@@ -2197,6 +2101,10 @@ _THEME_DISPLAYS: dict[str, str] = {
         "⟐ Neon cian y magenta sobre fondo negro\n   Señales digitales desde los nodos periféricos"
     ),
     "minimal": ("› Líneas limpias y silencio\n   Máxima legibilidad, cero decoración"),
+    "obsidiana": (
+        "ᛏ Oro envejecido y azul hielo sobre obsidiana\n"
+        "   Quien habla decide el color — agencia y hecho"
+    ),
 }
 
 
@@ -2240,7 +2148,6 @@ class DiffCommand(BaseCommand):
     aliases = ["preview"]
 
     async def execute(self, args: str) -> None:
-        from lilith_tools import ToolRegistry
         from lilith_tools.filesystem import FileEditTool, FileWriteTool
 
         parts = args.strip().split(None, 1)
@@ -2318,7 +2225,6 @@ class WhereCommand(BaseCommand):
     aliases = ["configpath"]
 
     async def execute(self, _args: str) -> None:
-        from .config import CONFIG_FILE, find_project_config, load_config
         from rich.panel import Panel
 
         cfg = self.session.config
@@ -2669,7 +2575,6 @@ class YggContextCommand(BaseCommand):
 
     async def execute(self, args: str) -> None:
         from lilith_cli.ygg_context import (
-            YggContext,
             append_log,
             create_ygg_context,
             find_ygg_dir,
@@ -2710,7 +2615,7 @@ class YggContextCommand(BaseCommand):
                 console.print("[dim]  Usa /ygg init para crear uno.[/]")
                 return
             ctx = load_ygg_context(ygg_path)
-            console.print(f"\n[bold realm]᛭ Contexto .ygg/[/]\n")
+            console.print("\n[bold realm]᛭ Contexto .ygg/[/]\n")
             console.print(f"  [cyan]Proyecto:[/] {ctx.config.name or '(sin nombre)'}")
             if ctx.config.description:
                 console.print(f"  [cyan]Descripción:[/] {ctx.config.description}")
@@ -2748,7 +2653,7 @@ class YggContextCommand(BaseCommand):
                 return
             ctx = load_ygg_context(ygg_path)
             if ctx.tasks:
-                console.print(f"\n[bold realm]᛭ Tareas Pendientes[/]\n")
+                console.print("\n[bold realm]᛭ Tareas Pendientes[/]\n")
                 console.print(ctx.tasks)
             else:
                 console.print("[dim]No hay tareas pendientes.[/]")
@@ -2854,8 +2759,7 @@ class BookmarkCommand(BaseCommand):
     async def _add_bookmark(self, bookmarks: list[dict[str, Any]], name: str) -> None:
         history = self.session.history
         index = len(history) - 1 if history else 0
-        if index < 0:
-            index = 0
+        index = max(index, 0)
         if not name:
             name = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
         bookmark = {
@@ -3837,10 +3741,11 @@ class StateCommand(BaseCommand):
 
 class SkillsCommand(BaseCommand):
     name = "skills"
-    description = "Listar, mostrar, guardar o borrar skills de delegación"
+    description = "Listar, versionar, validar o revertir skills de delegación"
 
     async def execute(self, args: str) -> None:
         import shlex
+
         from lilith_skills.delegation_skills import (
             DelegationSkill,
             DelegationSkillRegistry,
@@ -3911,8 +3816,64 @@ class SkillsCommand(BaseCommand):
                 structured=bool(call.get("structured", False)),
                 max_tokens=call.get("max_tokens"),
             )
-            registry.save(skill)
-            console.print(f"[success]✓ Skill '{skill.name}' guardada.[/]")
+            version = registry.save_versioned(skill, source="operator:/skills save latest")
+            console.print(
+                f"[success]✓ Skill '{skill.name}' guardada · {version.version_id}.[/]"
+            )
+            return
+        if action == "history" and len(parts) == 2:
+            rows = registry.versions(parts[1])
+            if not rows:
+                console.print("[dim]Sin versiones registradas.[/]")
+                return
+            console.print(f"[bold]Versiones de {parts[1]}[/]")
+            for row in rows:
+                marker = "*" if row.active else "-"
+                console.print(
+                    f"{marker} {row.version_id} · {row.source} · {row.created_at}"
+                )
+            return
+        if action == "bench" and len(parts) == 2:
+            from .mission.skill_bench import SkillBench
+            skill = registry.get(parts[1])
+            if skill is None:
+                render_error(f"Skill '{parts[1]}' no existe")
+                return
+            result = SkillBench().run(skill)
+            console.print(Panel(json.dumps(result.as_dict(), ensure_ascii=False, indent=2), title=f"BENCH · {skill.name}"))
+            return
+        if action == "metrics" and len(parts) == 2:
+            from .mission.learning import LearningEngine
+            rows = LearningEngine(skills_root=registry.root).skill_metrics(parts[1])
+            if not rows:
+                console.print("[dim]Sin métricas versionadas para esa skill.[/]")
+                return
+            console.print(f"[bold]Métricas de {parts[1]}[/]")
+            for row in rows:
+                marker = "*" if row.active else "-"
+                delta = "-" if row.success_delta is None else f"{row.success_delta:+.2f}"
+                regression = "REGRESSION" if row.regression else "ok"
+                console.print(
+                    f"{marker} {row.version_id} · runs={row.attempts} · "
+                    f"success={row.success_rate:.0%} · latency={row.avg_latency_ms:.0f}ms · "
+                    f"tokens={row.total_tokens} · cost=${row.total_cost_usd:.4f} · "
+                    f"rollbacks={row.rollback_count} · delta={delta} · {regression}"
+                )
+            return
+        if action == "rollback" and len(parts) >= 3:
+            if len(parts) < 4 or parts[3] != "CONFIRMAR":
+                console.print(
+                    f"[warning]Confirma con: /skills rollback {parts[1]} {parts[2]} CONFIRMAR[/]"
+                )
+                return
+            try:
+                version = registry.rollback(parts[1], parts[2])
+            except ValueError as exc:
+                render_error(str(exc))
+                return
+            console.print(
+                f"[success]✓ Rollback '{parts[1]}' · {version.version_id}.[/]"
+            )
             return
         if action == "delete" and len(parts) >= 2:
             if len(parts) < 3 or parts[2] != "CONFIRMAR":
@@ -3923,7 +3884,7 @@ class SkillsCommand(BaseCommand):
                 return
             console.print(f"[success]✓ Skill '{parts[1]}' eliminada.[/]")
             return
-        render_error("Uso: /skills list|show <name>|save latest --name <name>|delete <name> CONFIRMAR")
+        render_error("Uso: /skills list|show <name>|history <name>|bench <name>|metrics <name>|rollback <name> <version> CONFIRMAR|save latest --name <name>|delete <name> CONFIRMAR")
 
 
 class MCPCommand(BaseCommand):
@@ -4030,7 +3991,7 @@ class SubagentsCommand(BaseCommand):
     """
 
     name = "subagents"
-    description = "Listar y probar presets de Hlidskjalf (sub-agentes)"
+    description = "Compatibilidad legacy: listar/probar presets Hlidskjalf; usa /court"
     aliases = ["sa"]
 
     # Per-preset timeout for /subagents test. Independent of the
@@ -4108,7 +4069,6 @@ class SubagentsCommand(BaseCommand):
     # ── test ──────────────────────────────────────────────────────
 
     async def _test(self, target: str | None) -> None:
-        from .config import load_config
         from .main import _load_subagent_presets
         from .providers import LLMProviderWrapper
 
@@ -4127,7 +4087,9 @@ class SubagentsCommand(BaseCommand):
             return
 
         try:
-            cfg = load_config()
+            from .config import load_config as _load_config
+
+            cfg = _load_config()
         except Exception as exc:
             render_error(f"No pude cargar config: {exc}")
             return
@@ -4290,7 +4252,7 @@ class SubagentsCommand(BaseCommand):
         self._render_test_table(rows)
 
     async def _probe_max_tokens(
-        self, wrapper: LLMProviderWrapper, preset_name: str
+        self, wrapper: "LLMProviderWrapper", preset_name: str
     ) -> dict[str, Any]:
         """Best-effort probe of the real ``max_tokens`` ceiling.
 
@@ -4442,7 +4404,7 @@ class CommandRegistry:
             return False
 
         parts = text[1:].split(maxsplit=1)
-        cmd_name = parts[0].lower()
+        cmd_name = parts[0].lower() if parts else "help"
         cmd_args = parts[1] if len(parts) > 1 else ""
 
         # Record command usage for /metrics telemetry.
@@ -4457,9 +4419,9 @@ class CommandRegistry:
 
         cmd = self.get(cmd_name)
         if cmd is None:
-            render_error(
-                f"Comando desconocido: /{cmd_name}  — escribe /help para ver los disponibles",
-            )
+            from .command_surface import unknown_command
+
+            render_error(unknown_command(cmd_name))
             return True
 
         await cmd.execute(cmd_args)

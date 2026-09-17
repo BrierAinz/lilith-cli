@@ -24,6 +24,178 @@ if _PKG_ROOT not in sys.path:
 # ── Minimal config + tool stubs ───────────────────────────────────────
 
 
+@pytest.mark.asyncio
+async def test_delegation_failure_is_not_retried_and_keeps_reference():
+    import json
+    from lilith_tools.cli_delegate import VorDelegateTool
+
+    class FailedDelegation(VorDelegateTool):
+        calls = 0
+
+        def execute(self, **kwargs):
+            type(self).calls += 1
+            return _StubResult(False, {"status": "timeout", "reference": "a" * 32,
+                                      "effects_unknown": True, "output": "private output"},
+                               "timeout observing worker")
+
+    session, _ = _make_session()
+    _StubRegistry.register("vor_delegate", FailedDelegation)
+    result = await session.execute_tool(_ToolCall("delegate", "vor_delegate", {"task": "review", "timeout": 5}))
+    assert FailedDelegation.calls == 1
+    payload = json.loads(result.content.removeprefix("Error: "))
+    assert payload["recovery"]["reference"] == "a" * 32
+    assert payload["recovery"]["effects_unknown"]
+    assert "private output" not in result.content
+
+
+@pytest.mark.asyncio
+async def test_delegation_outer_timeout_never_retries(monkeypatch):
+    import asyncio
+    from lilith_tools.cli_delegate import VorDelegateTool
+
+    observed = []
+    async def expire(awaitable, timeout):
+        observed.append(timeout)
+        awaitable.close()
+        raise asyncio.TimeoutError
+
+    session, _ = _make_session()
+    _StubRegistry.register("vor_delegate", VorDelegateTool)
+    monkeypatch.setattr(asyncio, "wait_for", expire)
+    result = await session.execute_tool(_ToolCall("delegate", "vor_delegate", {"task": "review", "timeout": 5}))
+    assert observed == [35]
+    assert "puede seguir activo" in result.content
+
+
+def test_both_delegate_tools_disable_retries():
+    from lilith_tools.cli_delegate import HuginnDelegateTool, VorDelegateTool
+    for cls in (HuginnDelegateTool, VorDelegateTool):
+        assert cls.allow_automatic_retry is False
+        assert cls.timeout_for_arguments({"timeout": 60}) == 90
+
+
+@pytest.mark.asyncio
+async def test_session_assigns_stable_request_key_to_same_call():
+    from lilith_tools.cli_delegate import VorDelegateTool
+    seen = []
+    class Capture(VorDelegateTool):
+        def execute(self, **kwargs):
+            seen.append(kwargs["request_id"])
+            return _StubResult(True, {"status": "ok"})
+    session, _ = _make_session()
+    _StubRegistry.register("vor_delegate", Capture)
+    first = _ToolCall("same", "vor_delegate", {"task": "review"})
+    await session.execute_tool(first)
+    await session.execute_tool(_ToolCall("same", "vor_delegate", {"task": "review"}))
+    assert seen[0] == seen[1] == first.arguments["request_id"]
+    other, _ = _make_session()
+    await other.execute_tool(_ToolCall("same", "vor_delegate", {"task": "review"}))
+    assert seen[2] != seen[0]
+
+
+@pytest.mark.asyncio
+async def test_compact_delegate_result_keeps_reference_without_false_failure():
+    import json
+    from lilith_tools.cli_delegate import VorDelegateTool
+    class Large(VorDelegateTool):
+        def execute(self, **kwargs):
+            return _StubResult(True, {"status": "ok", "reference": "d" * 32, "output": "x" * 5000})
+    session, _ = _make_session()
+    session._tool_result_char_limit = 2000
+    _StubRegistry.register("vor_delegate", Large)
+    result = await session.execute_tool(_ToolCall("large", "vor_delegate", {"task": "review"}))
+    payload = json.loads(result.content)
+    assert payload["reference"] == "d" * 32
+    assert payload["output_omitted"]
+    assert payload["status"] == "ok"
+    assert len(result.content) <= 2000
+
+
+@pytest.mark.asyncio
+async def test_restored_session_reuses_journal_reservation(tmp_path, monkeypatch):
+    import json
+    import types
+    import lilith_tools.cli_delegate as delegate
+    from lilith_cli import repl
+    from lilith_cli.work_session import restore_session
+
+    monkeypatch.setattr(repl, "_CONVERSATIONS_DIR", tmp_path / "conversations")
+    monkeypatch.setattr(delegate, "VOR_WRAPPER", tmp_path / "vor.ps1")
+    original_exists = delegate.Path.exists
+    monkeypatch.setattr(delegate.Path, "exists", lambda path: True if path == delegate.VOR_WRAPPER else original_exists(path))
+    launches = []
+    def fake_powershell(args, timeout):
+        launches.append(args)
+        return types.SimpleNamespace(stdout="--- Vor finished (exit 0) ---", stderr="", returncode=0)
+    monkeypatch.setattr(delegate, "_powershell", fake_powershell)
+    _StubRegistry.register("vor_delegate", delegate.VorDelegateTool)
+    first, _ = _make_session()
+    first.config.history = types.SimpleNamespace(save=True)
+    first._project_root = str(tmp_path)
+    first._per_model_usage = {}
+    first.history = [{"role": "user", "content": "synthetic review"}]
+    initial = await first.execute_tool(_ToolCall("saved-call", "vor_delegate", {"task": "synthetic review"}))
+    reference = json.loads(initial.content)["reference"]
+    path = repl._auto_save_conversation(first)
+    assert path is not None
+    restored, _ = _make_session()
+    restore_session(restored, repl._load_conversation(path), tmp_path)
+    replay = await restored.execute_tool(_ToolCall("saved-call", "vor_delegate", {"task": "synthetic review"}))
+    payload = json.loads(replay.content.removeprefix("Error: "))
+    assert payload["recovery"]["status"] == "existing_attempt"
+    assert payload["recovery"]["reference"] == reference
+    assert len(launches) == 1
+    rephrased_call = await restored.execute_tool(_ToolCall("new-call-id", "vor_delegate", {"task": "synthetic review"}))
+    second_payload = json.loads(rephrased_call.content.removeprefix("Error: "))
+    assert second_payload["recovery"]["reference"] == reference
+    assert len(launches) == 1
+
+
+@pytest.mark.asyncio
+async def test_delegation_identity_is_on_disk_before_execute(tmp_path, monkeypatch):
+    import json
+    from lilith_cli import repl
+    from lilith_tools.cli_delegate import VorDelegateTool
+    monkeypatch.setattr(repl, "_CONVERSATIONS_DIR", tmp_path / "conversations")
+    seen = []
+    class VerifyCheckpoint(VorDelegateTool):
+        def execute(self, **kwargs):
+            snapshots = list((tmp_path / "conversations").glob("conv_*.json"))
+            assert len(snapshots) == 1
+            data = json.loads(snapshots[0].read_text(encoding="utf-8"))
+            assert data["delegation_requests"]["entries"][0]["request_id"] == kwargs["request_id"]
+            assert len(data["delegation_namespace"]) == 32
+            seen.append(True)
+            return _StubResult(True, {"status": "ok"})
+    current, _ = _make_session()
+    current.config.history = types.SimpleNamespace(save=True)
+    current._project_root = str(tmp_path)
+    current._per_model_usage = {}
+    current.history = [{"role": "user", "content": "synthetic"}]
+    _StubRegistry.register("vor_delegate", VerifyCheckpoint)
+    result = await current.execute_tool(_ToolCall("checkpoint", "vor_delegate", {"task": "synthetic"}))
+    assert not result.content.startswith("Error")
+    assert seen == [True]
+
+
+@pytest.mark.asyncio
+async def test_failed_identity_checkpoint_prevents_delegation(monkeypatch):
+    from lilith_cli import repl
+    from lilith_tools.cli_delegate import VorDelegateTool
+    class Forbidden(VorDelegateTool):
+        calls = 0
+        def execute(self, **kwargs):
+            type(self).calls += 1
+            return _StubResult(True, {})
+    current, _ = _make_session()
+    current.config.history = types.SimpleNamespace(save=True)
+    monkeypatch.setattr(repl, "_auto_save_conversation", lambda session: None)
+    _StubRegistry.register("vor_delegate", Forbidden)
+    result = await current.execute_tool(_ToolCall("blocked", "vor_delegate", {"task": "synthetic"}))
+    assert "no se lanz" in result.content
+    assert Forbidden.calls == 0
+
+
 class _StubConfig:
     """Minimal stand-in for YggdrasilConfig."""
 

@@ -7,8 +7,8 @@ first run.
 
 from __future__ import annotations
 
-import os
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -49,6 +49,21 @@ class HistoryConfig(BaseModel):
     save: bool = True
 
 
+class CampaignBudgetConfig(BaseModel):
+    """Aggregate autonomy limits. ``None`` means unlimited."""
+
+    enabled: bool = True
+    daily_max_calls: int | None = Field(default=None, ge=1)
+    daily_max_tokens: int | None = Field(default=None, ge=1)
+    daily_max_usd: float | None = Field(default=0.0, ge=0)
+    campaign_max_calls: int | None = Field(default=None, ge=1)
+    campaign_max_tokens: int | None = Field(default=None, ge=1)
+    campaign_max_usd: float | None = Field(default=0.0, ge=0)
+    provider_daily_max_calls: dict[str, int] = Field(default_factory=dict)
+    provider_daily_max_tokens: dict[str, int] = Field(default_factory=dict)
+    provider_daily_max_usd: dict[str, float] = Field(default_factory=dict)
+
+
 class ProviderProfile(BaseModel):
     """Optional per-provider profile overrides."""
 
@@ -62,10 +77,7 @@ class ProviderProfile(BaseModel):
     doctor_timeout: float = Field(default=5.0, gt=0, le=60)
     circuit_breaker_failures: int = Field(default=2, ge=1, le=20)
     circuit_breaker_cooldown: float = Field(default=60.0, ge=1, le=86400)
-    # Provider-specific toggles. ``use_responses`` is honored by Sakana:
-    # when True, the wrapper POSTs to ``/v1/responses``. New generated
-    # configs set it to True; an explicit False keeps Chat Completions.
-    use_responses: bool | None = None
+    thinking_enabled: bool | None = None
 
 
 class MCPServerConfig(BaseModel):
@@ -94,62 +106,38 @@ class MCPServerConfig(BaseModel):
 
 
 class YggdrasilConfig(BaseModel):
-    """Root configuration model for the Yggdrasil CLI agent.
+    """Compatibility-named root config for the canonical Lilith CLI."""
 
-    The default provider is **Sakana Fugu Ultra** (OpenAI-compatible
-    endpoint at ``https://api.sakana.ai/v1``) because Lilith is built
-    to act as an orchestrator that spawns and synthesises the work of
-    at least five sub-agents. Fugu Ultra's deep reasoning makes it
-    well suited for that synthesis role; the sub-agents themselves
-    run on lighter, cheaper models (MiniMax-M3, GLM-5.2, …) declared
-    in the ``providers:`` block below.
-    """
-
-    provider: str = "sakana"
-    model: str = "fugu-ultra"
+    provider: str = "fabric"
+    model: str = "router"
     api_key: str | None = None
     base_url: str | None = None
-    system_prompt: str = (
-            "You are Lilith, the orchestrator of the Yggdrasil ecosystem. "
-            "You spawn, coordinate, and synthesise the work of at least five "
-            "sub-agents (Hela, Mimir, Skadi, …); you do not perform every task "
-            "yourself. Delegate, gather, and decide. You are wise, precise, and "
-            "concise. You think step-by-step and use tools when appropriate. "
-            "Where Ancient Meets Digital.\n"
-            "\n"
-            "## v8 Verified Orchestration — use it proactively\n"
-            "\n"
-            "1. At session start, call `orchestration_state get` to resume any "
-            "pending plan, then call `resume_expired` before starting new work.\n"
-            "2. Register tasks with explicit `success_criteria`, `budget`, and "
-            "`idempotency_key` via `orchestration_state add_task` / `update_task` "
-            "BEFORE delegating.\n"
-            "3. Delegate with `delegate_subagent` — pick the preset and knobs: "
-            "`agentic=true` for work that writes files (mini-loop, sandboxed), "
-            "`structured=true` for reports (validated schema), "
-            "`max_tokens` to override the preset limit.\n"
-            "4. For recurring workflows, use `skill_run` (or `/skills`) instead of "
-            "re-deriving prompts; list the catalog first.\n"
-            "5. Before execution, `claim` the task; write `checkpoint` records, "
-            "renew long leases, and `release` or `cancel` every claimed task.\n"
-            "6. Choose routes from task shape plus `post_mortems`; record why. "
-            "Use `memory_save` with fact_type, namespace, source and provenance "
-            "for stable knowledge, and `memory_evidence` when facts change.\n"
-            "7. Safeguards: respect provider circuit breakers and task budgets. "
-            "If the same tool fails twice in a row, change "
-            "strategy or escalate; do not retry a third time the same way.\n"
-            "8. For large files, write the head with `file_write` and append "
-            "chunks with `file_append` — never try to inline huge blobs.\n"
-            "9. Verify every success criterion with tests or artifact evidence "
-            "before completion; inspect `events`/`timeline` by correlation ID "
-            "and report verified results, not intent."
-        )
+    system_prompt: str = """You are Lilith, Queen / Prime Orchestrator beside Ainz / Overlord.
+Own each mission end-to-end: inspect, choose a route, execute, verify, learn, and report.
+
+## Mission operating contract
+1. Inspect the real workspace and evidence before planning changes.
+2. Ask the operator only when a material choice changes scope, risk, cost, canon, or irreversible outcome; present 2-4 options with one recommendation.
+3. Register durable work with mission_prepare, explicit success_criteria, budget, verification, and recovery.
+4. Assemble the Court with mission_court and mission_compute; delegate via mission_delegate or mission_conclave. Court identities are independent from providers.
+5. Reuse verified skills through mission_skill_run and MCP tools instead of re-deriving routine workflows.
+6. Treat reversible work on D: and governed admin work on C: as autonomous; use mission_authority. External publication, money, credentials, or truly irreversible actions require the Overlord gate.
+7. For long work, use longrun, leases, heartbeat, checkpoint, and resume semantics. Never duplicate an effect whose outcome is unknown.
+8. If an action fails, diagnose the cause, change strategy, repair, and retry within budget instead of asking about ordinary failures.
+9. Learn from post_mortems and memory_evidence; respect circuit breakers, compute health, aggregate budgets, and rollback evidence.
+10. Use file_write/file_edit/file_append carefully, preserve exact bytes when required, and keep changes inside mission scope.
+11. Call mission_complete only after verify or deterministic artifact/test evidence. Campaign Mode may queue related descendant missions within the same authority and budget.
+
+Visible Court: Demiurge, Pandora's Actor, Sebas, Cocytus, Shalltear, Aura, and Mare.
+Legacy adapter names are implementation details, not agent identities.
+"""
     temperature: float = 0.7
     max_tokens: int = 4096
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     history: HistoryConfig = Field(default_factory=HistoryConfig)
     providers: dict[str, ProviderProfile] = Field(default_factory=dict)
+    campaign_budgets: CampaignBudgetConfig = Field(default_factory=CampaignBudgetConfig)
     # MCP servers whose tools should be mounted into the global
     # ``ToolRegistry`` at REPL boot. See ``MCPServerConfig`` for the
     # stdio-only contract. Disabled servers stay in the config but are
@@ -180,6 +168,18 @@ class YggdrasilConfig(BaseModel):
     tools_enabled: bool = True
     # Agent operating mode (default, plan-first, review-only, auto-edit).
     agent_mode: str = "default"
+    execution_profile: str = "standard"
+    # Paneles en vivo de herramientas y delegacion. Apagados por omision:
+    # el operador pidio el 2026-09-15 "solo su pensamiento y lo que dice al
+    # final", y esos paneles son el proceso. Ponlo en true para verlos.
+    show_tool_panels: bool = False
+    require_calibration_for_edits: bool = False
+    calibration_report: str | None = None
+    # Local Yggdrasil Fabric transport. The shared token is referenced by name
+    # and never persisted in this model or printed by diagnostics.
+    fabric_url: str = "http://127.0.0.1:8788"
+    fabric_token_env: str = "YGGDRASIL_FABRIC_TOKEN"
+    fabric_capability: str = "code.read"
 
     # ── HTTP retry policy for the LLM wrapper ────────────────────────
     # The wrapper re-issues transient HTTP failures (429, 5xx, connection
@@ -261,37 +261,31 @@ def _interpolate_env(value: Any) -> Any:
 # ── Default config YAML ─────────────────────────────────────────────
 
 _DEFAULT_CONFIG_YAML = """\
-# Yggdrasil CLI v6.0 configuration
-# See https://github.com/BrierAinz/Yggdrasil for docs
-#
-# Lilith acts as the orchestrator: it spawns, coordinates and
-# synthesises the work of at least five sub-agents. The default
-# provider is therefore **Sakana Fugu Ultra** (OpenAI-compatible
-# endpoint at https://api.sakana.ai/v1). Sub-agents keep their own
-# cheaper providers under the ``providers:`` block below.
+# Lilith CLI canonical configuration
+# Queen / Mission / Court architecture. Yggdrasil is not the current control plane.
 
-provider: sakana
-model: fugu-ultra
-api_key: ${FUGU_API_KEY}
-base_url: https://api.sakana.ai/v1
+provider: fabric
+model: router
 
-system_prompt: >
-  You are Lilith, the orchestrator of the Yggdrasil ecosystem.
-  You spawn, coordinate, and synthesise the work of at least five
-  sub-agents (Hela, Mimir, Skadi, …); you do not perform every task
-  yourself. Delegate, gather, and decide. You are wise, precise, and
-  concise. You think step-by-step and use tools when appropriate.
-  Where Ancient Meets Digital.
-  ## v8 Verified Orchestration — use it proactively
-  1. At session start, call `orchestration_state get` to resume any pending plan, then call `resume_expired` before starting new work.
-  2. Register tasks with explicit `success_criteria`, `budget`, and `idempotency_key` via `orchestration_state add_task` / `update_task` BEFORE delegating.
-  3. Delegate with `delegate_subagent` — pick the preset and knobs: `agentic=true` for work that writes files (mini-loop, sandboxed), `structured=true` for reports (validated schema), `max_tokens` to override the preset limit.
-  4. For recurring workflows, use `skill_run` (or `/skills`) instead of re-deriving prompts; list the catalog first.
-  5. Before execution, `claim` the task; write `checkpoint` records, renew long leases, and `release` or `cancel` every claimed task.
-  6. Choose routes from task shape plus `post_mortems`; record why. Use `memory_save` with fact_type, namespace, source and provenance for stable knowledge, and `memory_evidence` when facts change.
-  7. Safeguards: respect provider circuit breakers and task budgets. If the same tool fails twice in a row, change strategy or escalate; do not retry a third time the same way.
-  8. For large files, write the head with `file_write` and append chunks with `file_append` — never try to inline huge blobs.
-  9. Verify every success criterion with tests or artifact evidence before completion; inspect `events`/`timeline` by correlation ID and report verified results, not intent.
+system_prompt: |
+  You are Lilith, Queen / Prime Orchestrator beside Ainz / Overlord.
+  Own each mission end-to-end: inspect, choose a route, execute, verify, learn, and report.
+
+  ## Mission operating contract
+  1. Inspect the real workspace and evidence before planning changes.
+  2. Ask only for material choices; present 2-4 options with one recommendation.
+  3. Register durable work with mission_prepare, success_criteria, budget, verification, and recovery.
+  4. Assemble Court with mission_court and mission_compute; use mission_delegate or mission_conclave.
+  5. Reuse verified skills with mission_skill_run and MCP tools.
+  6. Reversible D: and governed C: admin work is autonomous; use mission_authority. External publication, money, credentials, and irreversible actions keep the Overlord gate.
+  7. Long work uses longrun, leases, heartbeat, checkpoint, and resume semantics.
+  8. On ordinary failure, diagnose, change strategy, repair, and retry within budget.
+  9. Learn from post_mortems and memory_evidence; respect circuit breakers, compute health, aggregate budgets, and rollback evidence.
+  10. Use file_write, file_edit, and file_append carefully and preserve exact bytes when required.
+  11. mission_complete requires verify or deterministic evidence; Campaign Mode may queue bounded descendants.
+
+  Visible Court: Demiurge, Pandora's Actor, Sebas, Cocytus, Shalltear, Aura, and Mare.
+  Legacy adapter names are implementation details, not agent identities.
 
 temperature: 0.7
 max_tokens: 4096
@@ -317,6 +311,20 @@ history:
 # Safety: require diff preview before destructive file_write/file_edit.
 confirm_write: true
 
+# Aggregate Campaign Runtime budgets. Null means unlimited.
+# USD defaults to zero aggregate paid spend; free/subscription routes remain usable.
+campaign_budgets:
+  enabled: true
+  daily_max_calls: null
+  daily_max_tokens: null
+  daily_max_usd: 0.0
+  campaign_max_calls: null
+  campaign_max_tokens: null
+  campaign_max_usd: 0.0
+  provider_daily_max_calls: {}
+  provider_daily_max_tokens: {}
+  provider_daily_max_usd: {}
+
 # Maximum tool-calling loop iterations per user message (>=1).
 max_iterations: 10
 
@@ -336,23 +344,9 @@ retry_jitter: 0.25
 # ── Provider profiles ──────────────────────────────────────────
 # Each profile maps a short name (used by `--provider <name>` or by
 # the sub-agent system) to its own base_url / api_key / model.
-# Lilith's main session uses the top-level ``provider`` above
-# (Sakana Fugu Ultra); sub-agents pick one of the profiles below.
-#
-# Sakana exposes BOTH an OpenAI-compatible Chat Completions API and a
-# Responses API at /v1/responses. New configs use Responses by default;
-# set ``sakana.use_responses: false`` explicitly to use Chat Completions.
+# Lilith's main session uses the top-level ``provider`` above.
+# Court compute is routed independently from these compatibility profiles.
 providers:
-
-  # ── Sakana Fugu (the Lilith session) ──
-  # Responses API endpoint by default. Verified models:
-  # fugu, fugu-ultra, fugu-ultra-20260615.
-  sakana:
-    api_key: ${FUGU_API_KEY}
-    base_url: https://api.sakana.ai/v1
-    model: fugu-ultra
-    # Set false explicitly to use OpenAI-compatible Chat Completions.
-    use_responses: true
 
   # ── Sub-agent profile: MiniMax (Anthropic-compatible) ──
   # Used by sub-agents that need a strong general model. Verified
@@ -512,6 +506,9 @@ def load_config(config_path: Path | str | None = None) -> YggdrasilConfig:
             except Exception as exc:  # pragma: no cover — defensive
                 logger.warning("Could not load project config %s: %s", project_path, exc)
 
+    override = os.environ.get("LILITH_PROVIDER_OVERRIDE", "").strip().lower()
+    if override:
+        raw_yaml["provider"] = override
     return YggdrasilConfig(**raw_yaml)
 
 

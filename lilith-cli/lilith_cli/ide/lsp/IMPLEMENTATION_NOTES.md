@@ -173,7 +173,7 @@ client error path stays honest.
 ### Running the suite
 
 ```bash
-# From D:\Proyectos\Yggdrasil\Asgard\lilith-stack
+# From <workspace>\lilith-stack
 uv run --directory lilith-cli python -m pytest
 ```
 

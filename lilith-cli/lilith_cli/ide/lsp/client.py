@@ -102,6 +102,7 @@ class LSPClient:
         self._on_show_message = on_show_message
         self.request_timeout = request_timeout
         self.shutdown_timeout = shutdown_timeout
+        self._stopping = False
 
     # ── Lifecycle ──────────────────────────────────────────────────
 
@@ -125,6 +126,7 @@ class LSPClient:
         method returns ``False`` — callers should not assume a started
         client is a healthy one.
         """
+        self._stopping = False
         try:
             # ``CREATE_NO_WINDOW`` keeps a stray language server from
             # popping up a console window on Windows.
@@ -140,6 +142,9 @@ class LSPClient:
             self._proc = await asyncio.create_subprocess_exec(
                 *self.command, **kwargs
             )
+            if self._stopping:
+                await self.stop()
+                return False
         except (FileNotFoundError, PermissionError, OSError) as exc:
             LOG.debug("LSP start: failed to spawn %s: %s", self.command, exc)
             self._proc = None
@@ -160,6 +165,8 @@ class LSPClient:
 
     async def stop(self) -> None:
         """Best-effort shutdown of the language server subprocess."""
+        self._stopping = True
+        tasks = [task for task in (self._reader_task, getattr(self, "_stderr_task", None)) if task is not None]
         if self._proc is None:
             self._cancel_tasks()
             return
@@ -186,10 +193,23 @@ class LSPClient:
                         proc.kill()
                     except ProcessLookupError:
                         pass
+                    await asyncio.wait_for(proc.wait(), timeout=2.0)
         except ProcessLookupError:
             pass
         finally:
             self._cancel_tasks()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            if proc.stdin is not None:
+                proc.stdin.close()
+                try:
+                    await proc.stdin.wait_closed()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+            transport = getattr(proc, "_transport", None)
+            if transport is not None:
+                transport.close()
+                await asyncio.sleep(0)
             self._proc = None
             self._initialized = False
             self._fail_pending(LSPError({"code": -1, "message": "client stopped"}))
@@ -362,6 +382,7 @@ class LSPClient:
                 # Read failed — assume pipe is dead and bail.
                 return
             if headers is None:
+                self._fail_pending(LSPError({"code": -1, "message": "language server closed stdout"}))
                 return
             length = headers.get("content-length")
             if not length:

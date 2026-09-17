@@ -83,6 +83,7 @@ class LSPManager:
         if not command:
             return None
         client = self._build_client(command)
+        self._clients[language] = client
         try:
             started = await client.start()
         except Exception as exc:
@@ -92,6 +93,7 @@ class LSPManager:
             self._clients[language] = client
             return client
         # Don't remember failed clients — caller may install pyright later.
+        self._clients.pop(language, None)
         return None
 
     async def stop_all(self) -> None:

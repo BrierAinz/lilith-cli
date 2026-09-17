@@ -339,10 +339,10 @@ def run_work_once(
     the CLI handler builds one from the live registry every call.
 
     Note: the *channel* default is ``minimax`` (a sub-agent profile),
-    not ``sakana`` — the orchestrator (Lilith) is already running on
-    Sakana Fugu Ultra in the main session; the queue worker just
+    not ``fabric`` — the orchestrator (Lilith) is already running on
+    fabric retired-model Ultra in the main session; the queue worker just
     forwards tasks to spawned sub-agents, so it picks one of the
-    sub-agent channels by default. Pass ``channel="sakana"`` to push
+    sub-agent channels by default. Pass ``channel="fabric"`` to push
     a task onto the orchestrator's own model.
     """
     if console is None:
@@ -574,7 +574,7 @@ def work(
         str,
         Parameter(
             name=["--as", "-a"],
-            help="Claimer name (e.g. 'skadi', 'sakana')",
+            help="Claimer name (e.g. 'skadi', 'fabric')",
         ),
     ],
     role: Annotated[

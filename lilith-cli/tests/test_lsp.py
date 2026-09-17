@@ -79,6 +79,20 @@ class TestLSPManager:
         await mgr.stop_all()  # should not raise
 
 
+class TestLSPAppLifecycle:
+    """IDE shutdown must reap language-server processes."""
+
+    @pytest.mark.asyncio
+    async def test_app_unmount_stops_lsp_manager(self, fake_session, tmp_path):
+        app = LilithIDEApp(fake_session, root=tmp_path, show_splash=False)
+        stop_all = AsyncMock()
+        app.lsp_manager.stop_all = stop_all
+
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+
+        stop_all.assert_awaited_once_with()
+
 class TestLSPClientDiagnostics:
     """Unit tests for LSP diagnostic storage."""
 
@@ -128,6 +142,7 @@ class TestEditorMixinLSPIntegration:
     def _mock_lsp_manager(self, app):
         """Replace the app's LSPManager with a stub to avoid real servers."""
         app.lsp_manager = MagicMock()
+        app.lsp_manager.stop_all = AsyncMock()
         app.lsp_manager.did_open = AsyncMock()
         app.lsp_manager.did_change = AsyncMock()
         app.lsp_manager.did_save = AsyncMock()
@@ -141,6 +156,7 @@ class TestEditorMixinLSPIntegration:
         app = LilithIDEApp(fake_session, root=tmp_path, show_splash=False)
         file = tmp_path / "main.py"
         file.write_text("x = 1\n", encoding="utf-8")
+        self._mock_lsp_manager(app)
         async with app.run_test(size=(120, 40)) as pilot:
             self._mock_lsp_manager(app)
             app._open_file(file)
@@ -165,6 +181,7 @@ class TestEditorMixinLSPIntegration:
         app = LilithIDEApp(fake_session, root=tmp_path, show_splash=False)
         file = tmp_path / "main.py"
         file.write_text("pri\n", encoding="utf-8")
+        self._mock_lsp_manager(app)
         async with app.run_test(size=(120, 40)) as pilot:
             self._mock_lsp_manager(app)
             app._open_file(file)
@@ -186,6 +203,7 @@ class TestEditorMixinLSPIntegration:
         source.write_text("x = 1\n", encoding="utf-8")
         target = tmp_path / "lib.py"
         target.write_text("def foo():\n    pass\n", encoding="utf-8")
+        self._mock_lsp_manager(app)
         async with app.run_test(size=(120, 40)) as pilot:
             self._mock_lsp_manager(app)
             app._open_file(source)

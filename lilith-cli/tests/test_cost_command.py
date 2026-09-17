@@ -4,8 +4,8 @@ import pytest
 from lilith_cli.agent import AgentSession
 from lilith_cli.commands import CostCommand
 from lilith_cli.config import YggdrasilConfig
-from lilith_cli.render import render_cost
 from lilith_cli.providers import estimate_cost
+from lilith_cli.render import render_cost
 
 
 def _make_session(model: str = "gpt-4o") -> AgentSession:
@@ -101,3 +101,17 @@ def test_render_cost_unknown_model_shows_no_estimate(capsys):
     )
     captured = capsys.readouterr().out
     assert "no disponible para este modelo" in captured
+
+
+def test_track_usage_prefers_actual_provider_cost() -> None:
+    session = _make_session("unknown-routed-model")
+    session._track_usage(
+        {
+            "prompt_tokens": 0,
+            "completion_tokens": 42,
+            "total_tokens": 42,
+            "cost_usd": 0.123456,
+        },
+        "unknown-routed-model",
+    )
+    assert session.per_model_usage["unknown-routed-model"]["cost"] == 0.123456

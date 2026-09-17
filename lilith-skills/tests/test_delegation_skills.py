@@ -11,10 +11,10 @@ def test_registry_seeds_three_real_preset_skills(tmp_path: Path) -> None:
     registry = DelegationSkillRegistry(tmp_path)
     names = registry.names()
     assert names == ["batch-docs", "implementar-feature", "recon-repo"]
-    assert registry.get("recon-repo").preset == "investigador-minimax"
+    assert registry.get("recon-repo").preset == "grok-research"
     assert registry.get("recon-repo").structured is True
-    assert registry.get("batch-docs").preset == "investigador-minimax"
-    assert registry.get("implementar-feature").preset == "ejecutor-kimi"
+    assert registry.get("batch-docs").preset == "batch-deepseek"
+    assert registry.get("implementar-feature").preset == "batch-deepseek"
     assert registry.get("implementar-feature").agentic is True
     assert (tmp_path / "recon-repo.yaml").exists()
 

@@ -1,0 +1,121 @@
+/* Nordic Frost Theme Enhancements */
+
+:root {
+  --bg-deep: #1a1b2e;
+  --bg-surface: #232540;
+  --bg-elevated: #2a2d4a;
+  --frost: #7eb8c4;
+  --amethyst: #8b6cc7;
+  --snow: #c8d0e0;
+  --steel: #3d4162;
+  --ember: #c94f4f;
+  --pine: #5b8a72;
+  --gold: #c9a55a;
+}
+
+/* Glassmorphism Effect */
+.glass {
+  background-color: rgba(35, 37, 64, 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--steel);
+  border-radius: 8px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+}
+
+.glass:hover {
+  box-shadow: 0 6px 12px rgba(126, 184, 196, 0.5);
+}
+
+/* Custom Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 12px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--steel);
+  border-radius: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-deep);
+}
+
+/* Code Block Styling */
+pre {
+  background-color: var(--bg-elevated);
+  color: var(--snow);
+  border: 1px solid var(--steel);
+  border-radius: 8px;
+  padding: 12px;
+  overflow-x: auto;
+}
+
+/* Input Field Styling */
+input:focus, textarea:focus {
+  border-color: var(--frost);
+  box-shadow: 0 0 8px rgba(126, 184, 196, 0.5);
+  outline: none;
+}
+
+/* Button Hover Effects */
+button:hover {
+  background-color: var(--frost);
+  color: var(--bg-deep);
+  transition: all 0.2s ease;
+}
+
+/* Panel Border Styling */
+.panel {
+  border: 1px solid var(--steel);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+/* Tab Styling for Editor Tabs */
+.tab {
+  background-color: var(--bg-surface);
+  color: var(--snow);
+  border-bottom: 2px solid var(--steel);
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tab.active {
+  background-color: var(--bg-elevated);
+  border-bottom-color: var(--frost);
+}
+
+/* Message Bubbles */
+.message.user {
+  background-color: var(--bg-elevated);
+  color: var(--snow);
+  border-radius: 12px 12px 0 12px;
+  padding: 12px;
+  max-width: 70%;
+  align-self: flex-start;
+}
+
+.message.assistant {
+  background-color: var(--amethyst);
+  color: var(--bg-deep);
+  border-radius: 12px 12px 12px 0;
+  padding: 12px;
+  max-width: 70%;
+  align-self: flex-end;
+}
+
+/* Tool Call Expandable Cards */
+.tool-call {
+  background-color: var(--bg-elevated);
+  border-left: 4px solid var(--amethyst);
+  padding: 12px;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.tool-call:hover {
+  background-color: var(--bg-surface);
+  box-shadow: 0 4px 8px rgba(139, 108, 199, 0.5);
+}

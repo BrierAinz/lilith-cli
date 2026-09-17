@@ -6,8 +6,15 @@ from pathlib import Path
 from typing import Any
 
 from .base import BaseTool, ToolResult
+from .file_walk import WalkReport, walk_text_files
 from .registry import ToolRegistry
 from .undo import UndoManager
+
+
+def _write_text_exact(path: Path, content: str) -> None:
+    """Write UTF-8 text without platform newline translation."""
+    with path.open(mode="w", encoding="utf-8", newline="") as fh:
+        fh.write(content)
 
 
 @ToolRegistry.register
@@ -18,6 +25,8 @@ class FileReadTool(BaseTool):
     description = "Lee contenido de un archivo"
     parameters = {
         "path": {"type": "string", "required": True},
+        "start_line": {"type": "integer", "minimum": 1, "description": "Primera línea (1-based)"},
+        "max_lines": {"type": "integer", "minimum": 1, "maximum": 2000, "description": "Número máximo de líneas"},
     }
 
     def execute(self, **kwargs: Any) -> ToolResult:
@@ -27,6 +36,12 @@ class FileReadTool(BaseTool):
             return ToolResult(success=False, data=None, error=f"Archivo no encontrado: {path}")
         try:
             content = path.read_text(encoding="utf-8", errors="ignore")
+            if "start_line" in kwargs or "max_lines" in kwargs:
+                start, count = kwargs.get("start_line", 1), kwargs.get("max_lines", 200)
+                if type(start) is not int or type(count) is not int or start < 1 or not 1 <= count <= 2000:
+                    return ToolResult(success=False, data=None, error="Rango de líneas inválido")
+                lines = content.splitlines(keepends=True)
+                content = f"Líneas {start}-{min(start+count-1, len(lines))} de {len(lines)}:\n" + "".join(lines[start-1:start-1+count])
             return ToolResult(success=True, data=content)
         except Exception as e:
             return ToolResult(success=False, data=None, error=str(e))
@@ -86,7 +101,7 @@ class FileWriteTool(BaseTool):
             if existed:
                 UndoManager().backup(p, tool="file_write")
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(content, encoding="utf-8")
+            _write_text_exact(p, content)
             data = {"path": str(p.resolve()), "bytes": len(content.encode("utf-8"))}
             return ToolResult(success=True, data=data)
         except Exception as e:
@@ -226,7 +241,7 @@ class FileEditTool(BaseTool):
 
             # Back up the original file before editing it.
             UndoManager().backup(p, tool="file_edit")
-            p.write_text(new_content, encoding="utf-8")
+            _write_text_exact(p, new_content)
 
             diff_lines = [
                 f"--- {p}",
@@ -310,6 +325,11 @@ class BatchEditTool(BaseTool):
             return ToolResult(success=False, data=None, error="edits no puede estar vacio")
 
         edit_results: list[dict[str, Any]] = []
+        # Contenido acumulado por archivo. Varias ediciones al mismo archivo se
+        # encadenan sobre este buffer en vez de partir cada una del disco: sin
+        # esto, la ultima escritura pisaba todas las anteriores y el tool
+        # devolvia applied=True para ediciones que se habian perdido.
+        working: dict[Path, str] = {}
         for i, edit in enumerate(edits):
             path = edit.get("path", "")
             old_string = edit.get("old_string", "")
@@ -343,14 +363,27 @@ class BatchEditTool(BaseTool):
                     error=f"edit[{i}]: archivo no encontrado: {p}",
                 )
 
-            try:
-                original = p.read_text(encoding="utf-8", errors="ignore")
-            except Exception as e:
-                return ToolResult(
-                    success=False,
-                    data=None,
-                    error=f"edit[{i}]: error leyendo {p}: {e}",
-                )
+            key = p.resolve()
+            if key in working:
+                original = working[key]
+            else:
+                try:
+                    original = p.read_text(encoding="utf-8")
+                except UnicodeDecodeError as e:
+                    return ToolResult(
+                        success=False,
+                        data=None,
+                        error=(
+                            f"edit[{i}]: {p} no es UTF-8 valido ({e}). Se aborta: "
+                            "reescribirlo perderia los bytes no decodificables."
+                        ),
+                    )
+                except Exception as e:
+                    return ToolResult(
+                        success=False,
+                        data=None,
+                        error=f"edit[{i}]: error leyendo {p}: {e}",
+                    )
 
             count = original.count(old_string)
             if count == 0:
@@ -368,6 +401,8 @@ class BatchEditTool(BaseTool):
                 new_content = original.replace(old_string, new_string)
             else:
                 new_content = original.replace(old_string, new_string, 1)
+
+            working[key] = new_content
 
             diff = _unified_diff(original, new_content, p)
             edit_results.append(
@@ -404,25 +439,36 @@ class BatchEditTool(BaseTool):
             )
 
         applied_files: list[Path] = []
-        for i, edit in enumerate(edits):
-            r = edit_results[i]
-            p = Path(r["path"])
+        backup_count = 0
+        # Una sola escritura por archivo, con el contenido final acumulado y en
+        # orden de primer contacto. Escribir una vez por edicion hacia que la
+        # ultima pisara a las demas.
+        for p, final_content in working.items():
             try:
-                UndoManager().backup(p, tool="batch_edit")
-                p.write_text(r["new_content"], encoding="utf-8")
+                backup = UndoManager().backup(p, tool="batch_edit")
+                if backup is not None:
+                    backup_count += 1
+                _write_text_exact(p, final_content)
                 applied_files.append(p)
             except Exception as e:
-                for _ in range(len(applied_files)):
+                # The failed file may already have been backed up, so unwind
+                # every backup created by this batch, not only successful
+                # writes. Otherwise the top pop restores the failed file and
+                # leaves the preceding file modified.
+                for _ in range(backup_count):
                     try:
                         UndoManager().pop()
                     except Exception:
                         pass
+                failed_index = next(
+                    (r["index"] for r in edit_results if r["path"] == str(p)), None
+                )
                 return ToolResult(
                     success=False,
                     data={
                         "preview": False,
-                        "failed_index": i,
-                        "path": str(p.resolve()),
+                        "failed_index": failed_index,
+                        "path": str(p),
                         "edits": [
                             {
                                 "path": er["path"],
@@ -432,7 +478,7 @@ class BatchEditTool(BaseTool):
                             for er in edit_results
                         ],
                     },
-                    error=f"edit[{i}]: error aplicando {p}: {e}",
+                    error=f"error aplicando {p}: {e}",
                 )
 
         return ToolResult(
@@ -469,6 +515,18 @@ class GrepFilesTool(BaseTool):
             "default": 50,
             "description": "Maximo de coincidencias a devolver",
         },
+        "apply_exclusions": {
+            "type": "boolean",
+            "required": False,
+            "default": True,
+            "description": "Poda node_modules/.venv/.git y salta binarios. false para buscar DENTRO de esos arboles",
+        },
+        "time_budget": {
+            "type": "number",
+            "required": False,
+            "default": 25.0,
+            "description": "Segundos de recorrido. Al agotarse se marca truncated:true en vez de fingir un cero",
+        },
     }
 
     def execute(
@@ -477,6 +535,8 @@ class GrepFilesTool(BaseTool):
         pattern: str = "",
         file_glob: str = "",
         max_results: int = 50,
+        apply_exclusions: bool = True,
+        time_budget: float = 25.0,
         **_: Any,
     ) -> ToolResult:
         """Busca un patron regex en archivos de un directorio."""
@@ -495,16 +555,32 @@ class GrepFilesTool(BaseTool):
         if not directory.is_dir():
             return ToolResult(success=False, data=None, error=f"No es un directorio: {directory}")
 
-        glob = file_glob.strip() if file_glob else ""
+        glob = file_glob.strip() if file_glob else "*"
         results: list[dict[str, Any]] = []
+        report = WalkReport()
+
+        def _resultado() -> ToolResult:
+            # OJO, cambio de contrato (2026-09-15): antes `data` era la lista
+            # pelada de coincidencias. Ahora es un dict, porque un resultado
+            # truncado tiene que poder DECIRLO y una lista no tiene donde.
+            # Los dos consumidores de render.py aceptan ambas formas.
+            return ToolResult(
+                success=True,
+                data={"matches": results, "count": len(results), **report.as_dict()},
+            )
+
         try:
-            files = directory.rglob(glob) if glob else directory.rglob("*")
-            for file_path in files:
-                if not file_path.is_file():
-                    continue
+            for file_path in walk_text_files(
+                directory,
+                glob,
+                report=report,
+                apply_exclusions=apply_exclusions,
+                time_budget=time_budget,
+            ):
                 try:
                     text = file_path.read_text(encoding="utf-8", errors="ignore")
                 except Exception:
+                    report.unreadable += 1
                     continue
                 for line_number, line_text in enumerate(text.splitlines(), start=1):
                     if compiled.search(line_text):
@@ -517,8 +593,11 @@ class GrepFilesTool(BaseTool):
                             }
                         )
                         if len(results) >= max_results:
-                            return ToolResult(success=True, data=results)
-            return ToolResult(success=True, data=results)
+                            report.mark_truncated(
+                                f"se alcanzo el tope de {max_results} coincidencias"
+                            )
+                            return _resultado()
+            return _resultado()
         except Exception as e:
             return ToolResult(success=False, data=None, error=str(e))
 

@@ -1,6 +1,6 @@
 """Lilith IDE package.
 
-Structured Textual IDE for the Yggdrasil agent framework. This package exposes
+Structured Textual IDE for the Lilith Queen Orchestrator. This package exposes
 widgets, helpers, modals, themes, context handling and the main application.
 """
 
@@ -12,6 +12,7 @@ from .context import ContextItem, ContextManager
 from .lsp.client import LSPClient, LSPError
 from .lsp.languages import detect_language_server, language_server_command
 from .lsp.manager import LSPManager
+from .mission_panel import MissionPanelScreen
 from .plan import AgentPlan, PlanStep, build_execution_prompt, build_planning_prompt, parse_plan
 from .plugins import LoadedPlugin, PluginManager
 from .realms import Realm, RealmManager
@@ -68,6 +69,7 @@ __all__ = [
     "LSPClient",
     "LSPError",
     "LSPManager",
+    "MissionPanelScreen",
     "detect_language_server",
     "language_server_command",
     "LoadedPlugin",

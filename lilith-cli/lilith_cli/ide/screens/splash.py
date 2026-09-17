@@ -3,37 +3,37 @@
 from __future__ import annotations
 
 import asyncio
+from typing import ClassVar
 
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Static
 
+
 class SplashScreen(ModalScreen[None]):
-    """A short-lived welcome splash with Yggdrasil ASCII art."""
+    """A short-lived Queen Orchestrator welcome splash."""
 
     _YGGDRASIL_ART = r"""
-                  ᛟ
-                 /|\
-                / | \
-               /  |  \
-              ᚦ   ᚾ   ᚢ
-             /|         /|\
-            / | \       / | \
-           ᛒ  ᛋ  ᚷ     ᚠ  ᚢ  ᚦ
-          /|             /|\
-         / | \           / | \
-        ᛁ  ᛊ  ᛏ         ᚲ  ᛈ  ᛚ  ᛗ
 
-        ╔═══════════════════════════════════╗
-        ║     LILITH  CLI  —  IDE           ║
-        ║   Hlidskjalf Console · Yggdrasil  ║
-        ╚═══════════════════════════════════╝
+                    ᛚ
+                 ╱  │  ╲
+              ᚦ     │     ᚱ
+                    │
+             ╔══════════════════════════════╗
+             ║          L I L I T H         ║
+             ║      QUEEN ORCHESTRATOR      ║
+             ╠══════════════════════════════╣
+             ║  Mission Kernel · Court      ║
+             ║  Skills · MCP · Longrun      ║
+             ║  Sebas · Computer Use/Admin  ║
+             ╚══════════════════════════════╝
 
-        [dim]Presiona cualquier tecla para despertar a Lilith…[/]
+             Ainz / Overlord · authority root
+             [dim]Press any key to enter.[/]
     """
 
-    BINDINGS = [
+    BINDINGS: ClassVar[list[Binding]] = [
         Binding("escape", "dismiss", "Cerrar"),
     ]
 

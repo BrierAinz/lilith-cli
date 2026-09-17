@@ -29,6 +29,7 @@ _EVENTS: dict[str, list[str]] = {
     "on-error": ["LILITH_ERROR"],
     "on-cancel": ["LILITH_TURN_ID"],
     "on-compact": ["LILITH_OLD_TOKENS", "LILITH_NEW_TOKENS"],
+    "on-escalation": ["LILITH_RUN_ID", "LILITH_STOP_CODE", "LILITH_DECISION"],
 }
 
 

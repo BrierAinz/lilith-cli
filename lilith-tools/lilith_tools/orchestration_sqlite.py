@@ -17,7 +17,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-
 VALID_STATUSES = {
     "pendiente",
     "delegada",
@@ -435,6 +434,9 @@ class SQLiteOrchestrationBackend:
             for key in allowed:
                 if key in metadata:
                     task[key] = metadata[key]
+            if task.get("status") in TERMINAL_STATUSES:
+                task["lease_owner"] = None
+                task["lease_expires_at"] = None
             task["updated_at"] = now_iso()
             self._save_task(conn, task)
             plan = self._get_meta(conn, "plan", None)
@@ -496,7 +498,16 @@ class SQLiteOrchestrationBackend:
             self._add_usage(historical.setdefault("total", {}), usage)
             self._add_usage(session.setdefault("total", {}), usage)
             self._set_meta(conn, "costs", costs)
-            self._event(conn, "cost.recorded", {"preset": preset, "provider": provider, "usage": usage})
+            self._event(
+                conn,
+                "cost.recorded",
+                {
+                    "preset": preset,
+                    "provider": provider,
+                    "session_id": session_id or "default",
+                    "usage": usage,
+                },
+            )
             self._bump_revision(conn)
             conn.commit()
         return self.cost_summary(session_id)

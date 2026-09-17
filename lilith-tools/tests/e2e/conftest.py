@@ -80,11 +80,12 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             and parts[-2] == "e2e"
             and parts[-3] == "tests"
         )
+        if not is_e2e:
+            continue
         item.add_marker(pytest.mark.e2e)
         if opt_in:
             continue
-        if is_e2e:
-            item.add_marker(pytest.mark.skip(reason=_E2E_DEFAULT_SKIP))
+        item.add_marker(pytest.mark.skip(reason=_E2E_DEFAULT_SKIP))
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────

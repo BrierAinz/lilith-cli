@@ -70,9 +70,14 @@ class OrchestrationStateStore:
         if self.path.suffix.lower() != ".json":
             from .orchestration_sqlite import SQLiteOrchestrationBackend
 
+            explicit_override = bool(os.environ.get("YGGDRASIL_ORCHESTRATION_STATE"))
             self._sqlite = SQLiteOrchestrationBackend(
                 self.path,
-                legacy_json=legacy_state_path() if path is None else None,
+                legacy_json=(
+                    legacy_state_path()
+                    if path is None and not explicit_override
+                    else None
+                ),
             )
 
     def _read(self) -> dict[str, Any]:
@@ -248,6 +253,9 @@ class OrchestrationStateStore:
             ):
                 if key in metadata:
                     task[key] = metadata[key]
+            if task.get("status") in TERMINAL_STATUSES:
+                task["lease_owner"] = None
+                task["lease_expires_at"] = None
             task["updated_at"] = now_iso()
             if state.get("plan"):
                 state["plan"]["updated_at"] = task["updated_at"]

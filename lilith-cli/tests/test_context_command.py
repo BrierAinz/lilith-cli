@@ -29,8 +29,8 @@ from lilith_cli.extra_commands import (
 )
 
 
-def _make_session(model: str = "fugu-ultra") -> AgentSession:
-    cfg = YggdrasilConfig(provider="sakana", model=model)
+def _make_session(model: str = "gpt-4o") -> AgentSession:
+    cfg = YggdrasilConfig(provider="openai", model=model)
     session = AgentSession(cfg)
     session.system_prompt = "You are Lilith. " * 20  # ~100 words
     return session
@@ -54,7 +54,7 @@ async def test_context_default_renders_progress_bar(fake_session, capsys):
     """``/context`` shows a progress bar and a one-line summary."""
     fake_session._track_usage(
         {"prompt_tokens": 1000, "completion_tokens": 200, "total_tokens": 1200},
-        "fugu-ultra",
+        "gpt-4o",
     )
     await run_context_command(fake_session, "")
 
@@ -72,7 +72,7 @@ async def test_context_full_renders_breakdown_table(fake_session, capsys):
     """``/context full`` adds a per-bucket table under the bar."""
     fake_session._track_usage(
         {"prompt_tokens": 5000, "completion_tokens": 1000, "total_tokens": 6000},
-        "fugu-ultra",
+        "gpt-4o",
     )
     await run_context_command(fake_session, "full")
 
@@ -90,19 +90,19 @@ async def test_context_full_renders_breakdown_table(fake_session, capsys):
 async def test_context_json_emits_machine_readable(fake_session, capsys):
     """``/context json`` bypasses Rich and writes a JSON snapshot."""
     # The conftest fixture builds a session with model=local-model; we
-    # override to fugu-ultra so the snapshot pulls the real Sakana
+    # override to gpt-4o so the snapshot pulls the real supported
     # window from providers._MODEL_CONTEXTS.
-    fake_session.config.model = "fugu-ultra"
+    fake_session.config.model = "gpt-4o"
     fake_session._track_usage(
         {"prompt_tokens": 800, "completion_tokens": 200, "total_tokens": 1000},
-        "fugu-ultra",
+        "gpt-4o",
     )
     await run_context_command(fake_session, "json")
 
     out = capsys.readouterr().out.strip()
     data = json.loads(out)
 
-    assert data["model"] == "fugu-ultra"
+    assert data["model"] == "gpt-4o"
     # The model window is looked up in providers._MODEL_CONTEXTS and must
     # be a positive integer.
     assert data["max_tokens"] > 0
@@ -155,7 +155,7 @@ async def test_context_warn_zero_disables(fake_session, capsys, isolated_warn_fi
     _save_warn_pct(0)
     fake_session._track_usage(
         {"prompt_tokens": 100_000, "completion_tokens": 0, "total_tokens": 100_000},
-        "fugu-ultra",
+        "gpt-4o",
     )
     await run_context_command(fake_session, "")
 
@@ -170,13 +170,13 @@ async def test_context_warn_zero_disables(fake_session, capsys, isolated_warn_fi
 
 def test_context_snapshot_uses_real_model_window():
     """The snapshot must look up the model window, not hard-code 128K."""
-    session = _make_session(model="fugu-ultra")
+    session = _make_session(model="gpt-4o")
     snap = _context_snapshot(session)
 
-    # fugu-ultra is registered at 262_144 in providers._MODEL_CONTEXTS.
+    # gpt-4o is registered at 262_144 in providers._MODEL_CONTEXTS.
     # We don't hardcode the value here — only assert the lookup succeeded.
     assert snap["max_tokens"] > 0
-    assert snap["model"] == "fugu-ultra"
+    assert snap["model"] == "gpt-4o"
 
 
 def test_context_snapshot_handles_missing_total_usage():

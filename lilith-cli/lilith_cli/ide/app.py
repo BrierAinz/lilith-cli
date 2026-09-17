@@ -44,11 +44,14 @@ from ..config import CONFIG_DIR
 from .config import IDEConfig
 from .context import ContextManager
 from .lsp.manager import LSPManager
+from .mission_panel import MissionPanelScreen
 from .plan import AgentPlan, build_execution_prompt, build_planning_prompt, parse_plan
 from .plugins import PluginManager
 from .realms import RealmManager
 from .runestones import RunestoneForge
 from .theme import _NORSE_CSS, _NORSE_LIGHT_THEME, _NORSE_THEME
+from ..ui_widgets import FollowLog, MessageInput
+from .quality import QualityMixin, QUALITY_BINDINGS, QUALITY_CSS
 from .utils.helpers import (
     GrepResult,
     _apply_patch,
@@ -76,7 +79,6 @@ from .screens.modals import (
     RecentFilesScreen,
     RunestoneScreen,
     ToastHistoryScreen,
-    YggdrasilPanelScreen,
 )
 from .screens.splash import SplashScreen
 from .widgets.command_palette import CommandPaletteScreen, PaletteItem
@@ -86,13 +88,14 @@ from .views.agent_view import AgentMixin
 from .views.file_tree import FileTreeMixin
 from .views.terminal import TerminalMixin
 from .views.git_view import GitMixin
-from .views.yggdrasil_panel import YggdrasilPanelMixin
+from .views.court_panel import CourtPanelMixin
 
 class LilithIDEApp(
+    QualityMixin,
     FileTreeMixin,
     TerminalMixin,
     AgentMixin,
-    YggdrasilPanelMixin,
+    CourtPanelMixin,
     GitMixin,
     EditorMixin,
     App[None],
@@ -108,8 +111,8 @@ class LilithIDEApp(
         GitMixin. Both directions resolve via MRO.
     """
 
-    CSS = _NORSE_CSS
-    BINDINGS = [
+    CSS = _NORSE_CSS + QUALITY_CSS
+    BINDINGS = QUALITY_BINDINGS + [
         Binding("ctrl+q", "quit", "Salir"),
         Binding("ctrl+s", "save_file", "Guardar"),
         Binding("ctrl+r", "refresh_tree", "Refresh"),
@@ -122,13 +125,13 @@ class LilithIDEApp(
         Binding("ctrl+shift+g", "open_git", "Git"),
         Binding("ctrl+shift+alt+c", "commit", "Commit"),
         Binding("ctrl+shift+y", "open_history", "Historial"),
-        Binding("ctrl+y", "open_yggdrasil_panel", "Yggdrasil"),
+        Binding("ctrl+y", "open_mission_panel", "Mission"),
         Binding("ctrl+t", "toggle_theme", "Tema"),
         Binding("ctrl+m", "toggle_markdown", "Markdown"),
         Binding("ctrl+w", "close_tab", "Cerrar tab"),
         Binding("ctrl+shift+t", "reopen_closed_tab", "Reabrir tab"),
         Binding("ctrl+e", "recent_files", "Archivos recientes"),
-        Binding("ctrl+shift+p", "command_palette", "Command palette"),
+        Binding("ctrl+shift+p", "command_palette", "Comandos", priority=True),
         Binding("ctrl+shift+i", "format_file", "Formatear"),
         Binding("ctrl+shift+o", "show_outline", "Outline"),
         Binding("ctrl+shift+b", "toggle_bookmark", "Bookmark"),
@@ -142,7 +145,7 @@ class LilithIDEApp(
         Binding("ctrl+comma", "open_config", "Config"),
         Binding("ctrl+shift+d", "show_diff", "Diff"),
         Binding("ctrl+space", "request_completion", "Completar"),
-        Binding("ctrl+shift+i", "show_hover", "Hover"),
+        Binding("ctrl+alt+k", "show_hover", "Hover"),
         Binding("f12", "go_to_definition", "Definición"),
         Binding("ctrl+shift+m", "toggle_zen_mode", "Zen mode"),
         Binding("ctrl+shift+grave", "toggle_terminal_fullscreen", "Terminal fullscreen"),
@@ -158,7 +161,7 @@ class LilithIDEApp(
         session: SessionRuntime,
         root: Path | None = None,
         *,
-        title: str = "Lilith IDE — Hlidskjalf Console",
+        title: str = "Lilith IDE · Queen Orchestrator",
         show_splash: bool = True,
     ) -> None:
         super().__init__()
@@ -186,6 +189,7 @@ class LilithIDEApp(
         self._recent_files: list[Path] = []
         self._editor_id_counter: int = 0
         self.ide_config = IDEConfig.load()
+        self._init_quality()
         self._file_mtimes: dict[Path, float] = {}
         self._markdown_mode: bool = False
         self._bookmarks: dict[Path, set[int]] = {}
@@ -213,13 +217,21 @@ class LilithIDEApp(
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         with Vertical(id="main"):
+            with Horizontal(id="quality-nav"):
+                yield Button("F2 Conversar", id="view-conversation")
+                yield Button("F3 Código", id="view-code")
+                yield Button("F4 Revisar", id="view-review")
+                yield Button("F7 Estado", id="view-inspector")
+                yield Button("F8 Contexto", id="view-context")
+            yield Static("", id="context-bar")
             with Horizontal(id="workspace"):
                 with Vertical(id="sidebar"):
-                    yield Static("🌳 Yggdrasil — Reinos", classes="panel-title")
+                    yield Static("WORKSPACE · FILES", classes="panel-title")
                     yield RuneDirectoryTree(self.root, id="file-tree")
                 with Vertical(id="chat-panel"):
-                    yield Static("💬 Hlidskjalf — Oráculo", classes="panel-title")
-                    yield RichLog(id="chat-log", highlight=True, markup=True)
+                    yield Static("LILITH · QUEEN", classes="panel-title")
+                    yield FollowLog(id="chat-log", highlight=False, markup=True, wrap=True)
+                    yield Button("Ir al final", id="new-content")
                 with Vertical(id="editor-panel"):
                     yield Static("📜 Runas — Editor", classes="panel-title")
                     with TabbedContent(id="editor-tabs"):
@@ -229,11 +241,15 @@ class LilithIDEApp(
                             id="tab-welcome",
                         )
                     yield Static("Ningún archivo abierto", id="editor-info", classes="editor-info")
+                with Vertical(id="review-panel"):
+                    yield Static("Revisión · sin ejecución nueva", id="review-summary")
+                    yield Button("Ver diferencias actuales", id="review-diff")
+                    yield Button("Revisar herramientas · F10", id="review-tools")
             with Horizontal(id="input-bar"):
-                yield Input(placeholder="Escribí tu mensaje para Lilith…", id="chat-input")
+                yield MessageInput(id="chat-input", soft_wrap=True, show_line_numbers=False)
                 yield Button("Enviar", id="send-button", variant="primary")
             with Vertical(id="terminal-panel"):
-                yield Static("⚡ Terminal — Midgard", id="terminal-title")
+                yield Static("SEBAS · TERMINAL", id="terminal-title")
                 yield RichLog(id="terminal-log", highlight=True, markup=True)
                 yield Input(placeholder="> comando", id="terminal-input")
             with Horizontal(id="status-bar"):
@@ -248,14 +264,14 @@ class LilithIDEApp(
         self.register_theme(_NORSE_THEME)
         self.register_theme(_NORSE_LIGHT_THEME)
         self.theme = self.ide_config.theme if self.ide_config.theme in self.available_themes else "norse-dark"
-        if self._show_splash:
-            self.push_screen(SplashScreen())
+        # Startup motion is non-modal: the first keystroke is never swallowed.
         self.run_worker(
             self._welcome_typewriter_worker(),
             exclusive=False,
         )
         self._update_status()
         self._restore_session()
+        self._mount_quality()
         self.realm_manager.auto_index()
         self.realm_manager.save()
         self._load_plugins()
@@ -320,13 +336,13 @@ class LilithIDEApp(
         """Write the welcome message line-by-line with a subtle typewriter effect."""
         chat_log = self.query_one("#chat-log", RichLog)
         lines = [
-            "[bold green]Lilith[/] despierta en [bold]$primary-lighten-2$[/].",
-            "Navegá el árbol de reinos, abrí archivos, editá código y consultá al oráculo.",
+            "[bold cyan]LILITH[/] · Queen Orchestrator.",
+            "Misión, código, corte y herramientas comparten el mismo runtime.",
             "[dim]Atajos: Ctrl+Q salir | Ctrl+P buscar | Ctrl+E recientes | Ctrl+F find | Ctrl+H replace | Ctrl+G línea | Ctrl+Shift+F grep | Ctrl+Shift+H replace proyecto | Ctrl+Shift+G git | Ctrl+Shift+D diff | Ctrl+Shift+B blame | Ctrl+Shift+Y historial | Ctrl+Shift+N notif. | Ctrl+, config | Ctrl+Shift+M zen | Ctrl+Shift+` term-fs | Ctrl+T tema | Ctrl+M markdown | Esc cancelar[/]",
         ]
         for line in lines:
             chat_log.write(line)
-            await asyncio.sleep(0.15)
+            # Already available text appears immediately.
 
     def _load_plugins(self) -> None:
         """Discover and register plugins from .yggdrasil/plugins/."""
@@ -411,49 +427,23 @@ class LilithIDEApp(
                 else:
                     self._terminal_history_index = -1
                     focused.value = ""
-        elif focused.id == "chat-input":
-            if event.key == "up":
-                event.stop()
-                if self._chat_history and self._chat_history_index < len(self._chat_history) - 1:
-                    self._chat_history_index += 1
-                    focused.value = self._chat_history[-(self._chat_history_index + 1)]
-            elif event.key == "down":
-                event.stop()
-                if self._chat_history_index > 0:
-                    self._chat_history_index -= 1
-                    focused.value = self._chat_history[-(self._chat_history_index + 1)]
-                else:
-                    self._chat_history_index = -1
-                    focused.value = ""
         # Keep cursor position in the status bar in sync.
         if isinstance(focused, TextArea) and focused.id and focused.id.startswith("editor-"):
             self._update_status()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        if self.quality_button(event.button.id):
+            event.stop()
+            return
         if event.button.id == "send-button":
             self._send_message()
 
     # ── Actions ─────────────────────────────────────────────────────
 
     def action_show_help(self) -> None:
-        self._chat_system(
-            "[bold]Lilith IDE[/]\n"
-            "• Click / Enter en un archivo del árbol para abrirlo en una tab.\n"
-            "• Ctrl+P busca archivos, Ctrl+E archivos recientes, Ctrl+F busca en archivo, Ctrl+H reemplaza en archivo.\n"
-            "• Ctrl+G ir a línea, Ctrl+Shift+O outline.\n"
-            "• Ctrl+Shift+F grep en proyecto (navega a la línea), Ctrl+Shift+H reemplazar en proyecto.\n"
-            "• Ctrl+Shift+G git status/diff, Ctrl+Shift+Alt+C commit, Ctrl+Shift+D diff lado a lado, Ctrl+Shift+B blame.\n"
-            "• Ctrl+M alterna preview markdown, Ctrl+Shift+N historial de notificaciones, Ctrl+, config.\n"
-            "• Ctrl+Shift+M zen mode, Ctrl+Shift+` terminal fullscreen.\n"
-            "• Ctrl+T cambia tema (norse-dark, norse-light, textual-dark, textual-light; persiste en ~/.yggdrasil/ide.yaml).\n"
-            "• Ctrl+` enfoca la terminal; flechas ↑↓ recorren historial de comandos y chat. /run <cmd> y /test ejecutan comandos.\n"
-            "• Ctrl+S guarda el archivo activo (con backup automático) y ejecuta run-on-save si está configurado.\n"
-            "• Esc cancela la generación actual.\n"
-            "• /patch pega un diff y lo aplica tras revisión.\n"
-            "• /git-stash, /git-checkout <branch>, /git-branch <nombre>, /git-commit <mensaje>.\n"
-            "• /new <template> <ruta> — templates: py, test, class, md.\n"
-            "• Ctrl+Q cierra la consola."
-        )
+        rows = ["LILITH · ATAJOS", "Enter: nueva línea · Ctrl+Enter: enviar · F8: contexto de lectura"]
+        rows.extend(f"{binding.key}: {binding.description}" for binding in self.BINDINGS)
+        self._chat_system("\n".join(rows))
 
     def action_open_grep(self) -> None:
         def _on_select(result: GrepResult | None) -> None:
@@ -471,6 +461,10 @@ class LilithIDEApp(
     def action_toast_history(self) -> None:
         self.push_screen(ToastHistoryScreen(self._toast_history))
 
+    def action_open_mission_panel(self) -> None:
+        """Open the read-only Mission/Court/Compute dashboard."""
+        self.push_screen(MissionPanelScreen(self.session))
+
     def action_open_config(self) -> None:
         def _on_save(config: IDEConfig | None) -> None:
             if config is None:
@@ -485,7 +479,7 @@ class LilithIDEApp(
         self.push_screen(DiffScreen(self.root, self.current_file))
 
     def action_toggle_theme(self) -> None:
-        cycle = ["norse-dark", "norse-light", "textual-dark", "textual-light"]
+        cycle = ["norse-dark", "norse-light"]
         try:
             idx = cycle.index(self.theme)
         except ValueError:
@@ -493,11 +487,12 @@ class LilithIDEApp(
         next_theme = cycle[(idx + 1) % len(cycle)]
         self.theme = next_theme
         self.ide_config.theme = next_theme
-        self.ide_config.save()
+        self._save_ui(theme=next_theme)
         self.notify(f"Tema: {next_theme}", severity="information")
 
     def action_quit(self) -> None:
         """Save the current session and exit the IDE."""
+        self._save_draft()
         self._save_session()
         self.exit()
 
@@ -564,6 +559,15 @@ class LilithIDEApp(
 
         # IDE commands.
         commands = [
+            ("Vista Conversación · F2", self.action_layout_conversation),
+            ("Vista Código · F3", self.action_layout_code),
+            ("Vista Revisión · F4", self.action_layout_review),
+            ("Inspector de ejecución · F7", self.action_inspector),
+            ("Mission Control · Ctrl+Y", self.action_open_mission_panel),
+            ("Contexto de lectura · F8", self.action_context_files),
+            ("Movimiento reducido · F6", self.action_motion),
+            ("Densidad compacta · F9", self.action_density),
+            ("Detalles de herramientas · F10", self.action_tool_details),
             ("Guardar archivo", self.action_save_file),
             ("Buscar archivo", self.action_open_file_search),
             ("Archivos recientes", self.action_recent_files),
@@ -588,7 +592,13 @@ class LilithIDEApp(
             ("Ayuda", self.action_show_help),
         ]
         for label, callback in commands:
-            items.append(PaletteItem(label=label, callback=callback, category="Comandos"))
+            reason = "No hay archivo activo" if label in {"Guardar archivo", "Formatear archivo", "Outline"} and self.current_file is None else ""
+            def invoke(cb=callback, key=label):
+                self._recent_commands = [key] + [x for x in self._recent_commands if x != key][:9]
+                cb()
+            items.append(PaletteItem(label=label, callback=invoke, category="Recientes" if label in self._recent_commands else "Comandos", disabled_reason=reason))
+
+        items.sort(key=lambda item: 0 if item.category == "Recientes" else 1)
 
         # Open files / tabs.
         for tab_id, path in self._tab_paths.items():
@@ -633,28 +643,6 @@ class LilithIDEApp(
 
     # ── UI updates ────────────────────────────────────────────────────
 
-    def _chat_user(self, text: str) -> None:
-        log = self.query_one("#chat-log", RichLog)
-        log.write(f"\n[bold cyan]Tú:[/] {text}")
-
-    def _chat_assistant_chunk(self, chunk: str) -> None:
-        log = self.query_one("#chat-log", RichLog)
-        log.write(chunk, scroll_end=True)
-
-    def _chat_system(self, text: str) -> None:
-        log = self.query_one("#chat-log", RichLog)
-        log.write(f"\n[dim]{text}[/]")
-
-    def _chat_tool_call(self, name: str, args: Any) -> None:
-        log = self.query_one("#chat-log", RichLog)
-        args_str = json.dumps(args, ensure_ascii=False, indent=2) if args else "{}"
-        log.write(f"\n[bold yellow]⚡ Tool:[/] [yellow]{name}[/]\n[dim]{args_str}[/]")
-
-    def _chat_tool_result(self, name: str, content: str) -> None:
-        log = self.query_one("#chat-log", RichLog)
-        preview = content[:500] + "…" if len(content) > 500 else content
-        log.write(f"\n[bold green]✓ Resultado {name}:[/]\n[dim]{preview}[/]")
-
     def _load_conversation(self, path: Path) -> None:
         try:
             import json as _json
@@ -681,9 +669,7 @@ class LilithIDEApp(
         if not self.is_mounted:
             return ""
         if self._thinking:
-            runes = ["ᚠ", "ᚢ", "ᚦ", "ᚨ", "ᚱ", "ᚲ", "ᚷ", "ᚹ"]
-            rune = runes[self._thinking_frame % len(runes)]
-            return f"{rune} Lilith está forjando runas…"
+            return self.quality_status()
         try:
             tab_id = self._current_tab_id()
             if tab_id and tab_id in self._modified:

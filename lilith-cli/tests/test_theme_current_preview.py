@@ -53,34 +53,40 @@ async def test_theme_current_shows_active_theme(capsys):
 async def test_theme_preview_renders_sample_panel(capsys):
     """/theme preview <name> shows a sample panel styled with the target
     theme WITHOUT calling set_theme (so the live theme is untouched)."""
-    fake_target = type(
-        "T",
-        (),
-        {
-            "name": "cyberpunk",
-            "label": "Cyberpunk",
-            "prompt_prefix": "▰",
-            "border_style": "magenta",
-            "description": "Neón y reflejos",
-        },
-    )()
+    from lilith_cli.render import THEMES, get_theme, set_theme
 
-    set_theme_called = []
+    # Start from a known state.
+    original = get_theme().name
+    try:
+        set_theme("norse")
+        assert get_theme().name == "norse"
 
-    def fake_set_theme(name):
-        set_theme_called.append(name)
+        await run_theme_command(_Session(), "preview obsidiana")
 
-    with patch("lilith_cli.render.get_theme", return_value=fake_target):
-        with patch("lilith_cli.render.set_theme", side_effect=fake_set_theme):
-            await run_theme_command(_Session(), "preview cyberpunk")
-
-    out = capsys.readouterr().out
-    assert "cyberpunk" in out
-    assert "Cyberpunk" in out
-    assert "magenta" in out
-    assert "Neón y reflejos" in out
-    # Critical: the live theme must not have been touched.
-    assert set_theme_called == []
+        out = capsys.readouterr().out
+        assert "obsidiana" in out.lower()
+        # La previsualizacion tiene que mostrar el banner DE ESE tema. Se
+        # comprueba contra el banner real del objeto y no contra una cadena
+        # escrita a mano: aqui habia un literal "O B S I D I A N A" y se rompio
+        # en cuanto el banner dejo de llevar el nombre del tema (el producto se
+        # llama Lilith; obsidiana es la piel). Comprobar la RELACION en vez del
+        # texto sobrevive al siguiente rediseno y sigue detectando lo que
+        # importa: que no se pinte el banner equivocado.
+        objetivo = [l.strip() for l in THEMES["obsidiana"].banner.splitlines() if l.strip()]
+        assert objetivo, "el tema objetivo no tiene banner"
+        for linea in objetivo:
+            assert linea in out, f"falta esta linea del banner de obsidiana: {linea!r}"
+        activo = [l.strip() for l in THEMES["norse"].banner.splitlines() if l.strip()]
+        for linea in [l for l in activo if l not in objetivo]:
+            assert linea not in out, f"se pinto el banner del tema activo: {linea!r}"
+        # Tool line sample.
+        assert "file_read" in out
+        # Error sample.
+        assert "error" in out.lower()
+        # Critical: the live theme must NOT have changed.
+        assert get_theme().name == "norse"
+    finally:
+        set_theme(original)
 
 
 @pytest.mark.asyncio
@@ -95,13 +101,7 @@ async def test_theme_preview_without_name_errors(capsys):
 @pytest.mark.asyncio
 async def test_theme_preview_unknown_theme_errors(capsys):
     """/theme preview <unknown> errors with a list-pointer, not a traceback."""
-    from lilith_cli.render import get_theme as real_get_theme
-
-    def fake_get_theme(name):
-        raise KeyError(name)
-
-    with patch("lilith_cli.render.get_theme", side_effect=fake_get_theme):
-        await run_theme_command(_Session(), "preview inexistente")
+    await run_theme_command(_Session(), "preview inexistente")
 
     out = capsys.readouterr().out
     assert "inexistente" in out or "desconocido" in out.lower()

@@ -24,6 +24,15 @@ pre-tanda-2 behaviour exactly):
    when exhausted, the accumulated state is returned with a partial
    status — no exception is raised.
 
+Every agentic turn is also appended to a per-run ledger
+(``<workdir>/loop_ledger.jsonl``, see :mod:`lilith_tools.loop_ledger`),
+and the result carries ``loop_ledger`` (the path) plus
+``loop_diagnosis`` (``possible_loop`` and the streaks behind it). That is
+what makes a sub-agent *spinning* on the same call distinguishable from
+one that is simply *working*. Detection only: nothing here aborts,
+throttles or retries a run that the ledger flags. The ledger never
+records prompts, credentials or file contents.
+
 The agentic mode also accepts ``structured=True``, which asks the final
 assistant turn to emit a JSON object matching
 :data:`lilith_tools.task_schema.TASK_SCHEMA`. Validation is local so it
@@ -52,10 +61,12 @@ import asyncio
 import json
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Any
 
 from .base import BaseTool, ToolResult
+from .loop_ledger import LoopLedger
 from .registry import ToolRegistry
 from .task_schema import TASK_SCHEMA, validate_task_response
 
@@ -164,6 +175,28 @@ def _sanitize_path(raw: str, workdir: Path, tool_name: str) -> Path:
             f"{tool_name}: path {p!s} is outside the sandbox workdir {workdir}"
         )
     return p
+
+
+def _ledger_payload(ledger: LoopLedger) -> dict[str, Any]:
+    """Build the ledger keys for a tool result.
+
+    Kept in one place so the success, partial and failure paths of the
+    agentic loop report the same shape. Returns ``{}`` if the diagnosis
+    itself fails — observability must never sink the result it describes.
+    """
+    try:
+        summary = ledger.summary()
+    except Exception:  # noqa: BLE001  # pragma: no cover - observability only
+        return {}
+    payload: dict[str, Any] = {
+        "loop_ledger": str(ledger.path),
+        "loop_diagnosis": summary,
+    }
+    if summary.get("possible_loop"):
+        # Lifted to the top level so the orchestrator can spot a stuck
+        # sub-agent without unpacking the nested diagnosis.
+        payload["loop_warning"] = summary.get("loop_warning", "")
+    return payload
 
 
 def _run_agentic_tool(
@@ -455,12 +488,8 @@ class DelegateSubagentTool(BaseTool):
     timeout_seconds = 180
     description = (
         "Delegar una tarea autocontenida a un sub-agente y devolver su respuesta. "
-        "Presets disponibles: ejecutor-kimi (loops largos, scripting, refactors); "
-        "investigador-minimax (documentos largos, research multi-fuente); "
-        "orquestador-fugu (deep research, síntesis, decisiones de arquitectura); "
-        "opencode-glm52 (trabajo genérico barato); "
-        "grok-research (contexto 1M, research); "
-        "hf-glm52 (GLM-5.2 vía HuggingFace router, ejecutor genérico). "
+        "Los presets disponibles se cargan de la configuración de Hlidskjalf al "
+        "ejecutar; consulta `/subagents list` en el REPL para conocer sus nombres actuales. "
         "Usala para trabajo que otro modelo puede resolver solo: el sub-agente "
         "NO ve esta conversación, así que el prompt debe incluir todo el contexto. "
         "agentic=True activa un mini-loop con file_read/file_write/file_append/"
@@ -473,9 +502,8 @@ class DelegateSubagentTool(BaseTool):
         "preset": {
             "type": "string",
             "description": (
-                "Nombre del preset de Hlidskjalf: ejecutor-kimi | "
-                "investigador-minimax | orquestador-fugu | "
-                "opencode-glm52 | grok-research"
+                "Nombre exacto de un preset configurado en Hlidskjalf; consulta "
+                "`/subagents list` para ver los nombres disponibles"
             ),
             "required": True,
         },
@@ -498,7 +526,9 @@ class DelegateSubagentTool(BaseTool):
             "description": (
                 "Si True, ejecuta un mini-loop agentico con herramientas "
                 "file_read/file_write/file_append/directory_list/file_edit "
-                "confinadas al workdir"
+                "confinadas al workdir. El run deja una bitacora en "
+                "loop_ledger.jsonl y devuelve loop_diagnosis.possible_loop, "
+                "que marca si el sub-agente se quedo repitiendo la misma llamada"
             ),
             "required": False,
         },
@@ -557,23 +587,46 @@ class DelegateSubagentTool(BaseTool):
             state_store = None
             state_task_id = None
 
+        started = time.perf_counter()
         result = self._execute_delegate(preset_name, prompt, kwargs)
+        latency_ms = max(0, int((time.perf_counter() - started) * 1000))
         if state_store is not None and state_task_id is not None:
             data = result.data if isinstance(result.data, dict) else {}
             content = data.get("content") or data.get("raw_content") or result.error
             usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
             provider = str(data.get("provider") or "unknown")
             session_id = str(kwargs.get("session_id") or "default")
+            turns_used = int(data.get("turns_used", 0) or 0)
+            partial = bool(data.get("partial", False))
+            post_mortem: dict[str, Any] = {
+                "task_id": state_task_id,
+                "preset": preset_name,
+                "provider": provider,
+                "turns": turns_used,
+                "usage": usage,
+                "success": bool(result.success),
+                "cause": "" if result.success else str(result.error or content or "")[:1000],
+                "quality": 0.5 if result.success and partial else (1.0 if result.success else 0.0),
+                "latency_ms": latency_ms,
+                "agentic": bool(kwargs.get("agentic", False)),
+                "structured": bool(kwargs.get("structured", False)),
+            }
+            if kwargs.get("max_tokens") is not None:
+                post_mortem["max_tokens"] = int(kwargs["max_tokens"])
             try:
                 if usage:
                     state_store.record_cost(
                         preset_name, provider, usage, session_id=session_id
                     )
+                state_store.append_post_mortem(post_mortem)
                 state_store.update_task(
                     state_task_id,
                     status="completada" if result.success else "fallida",
                     result=str(content or "")[:1000],
                     usage=usage,
+                    provider=provider,
+                    turns=turns_used,
+                    post_mortem=post_mortem,
                 )
             except Exception:
                 pass
@@ -604,14 +657,15 @@ class DelegateSubagentTool(BaseTool):
                 data=None,
                 error=(
                     f"Preset '{preset_name}' no existe. "
-                    f"Disponibles: {sorted(presets) or '(ninguno)'}"
+                    f"Presets disponibles: "
+                    f"{', '.join(sorted(presets)) if presets else '(ninguno)'}"
                 ),
             )
 
         preset = presets[preset_name] or {}
         cfg = load_config()
         provider_name = str(preset.get("provider") or cfg.provider).lower()
-        if provider_name not in (cfg.providers or {}):
+        if provider_name not in (cfg.providers or {}) and provider_name != "fabric":
             return ToolResult(
                 success=False,
                 data=None,
@@ -621,12 +675,14 @@ class DelegateSubagentTool(BaseTool):
                 ),
             )
 
-        profile = cfg.providers[provider_name]
+        profile = (cfg.providers or {}).get(provider_name)
         cfg.provider = provider_name
-        cfg.model = preset.get("model") or profile.model or cfg.model
+        cfg.model = preset.get("model") or (
+            profile.model if profile is not None else None
+        ) or cfg.model
         if preset.get("max_tokens") is not None:
             cfg.max_tokens = int(preset["max_tokens"])
-        elif profile.max_tokens is not None:
+        elif profile is not None and profile.max_tokens is not None:
             cfg.max_tokens = profile.max_tokens
         if kwargs.get("max_tokens") is not None:
             cfg.max_tokens = int(kwargs["max_tokens"])
@@ -661,7 +717,7 @@ class DelegateSubagentTool(BaseTool):
         async def _run() -> dict[str, Any]:
             provider = LLMProviderWrapper(cfg)
             try:
-                return await provider.complete(messages)
+                return await provider.complete(messages, model=cfg.model)
             finally:
                 await provider.close()
 
@@ -670,7 +726,12 @@ class DelegateSubagentTool(BaseTool):
         except Exception as exc:
             return ToolResult(
                 success=False,
-                data=None,
+                data={
+                    "preset": preset_name,
+                    "provider": provider_name,
+                    "model": cfg.model,
+                    "usage": {},
+                },
                 error=f"Sub-agente '{preset_name}' falló: {exc}",
             )
 
@@ -780,14 +841,19 @@ class DelegateSubagentTool(BaseTool):
         turns_used = 0
         final_content = ""
         partial = False
+        # Per-run loop ledger: one JSONL record per tool call, so a stuck
+        # sub-agent can be told apart from a busy one. Detection only —
+        # nothing in the loop below consults it to decide anything.
+        ledger = LoopLedger(workdir, preset=preset_name, max_turns=max_turns)
+        outcome = "error"
 
         async def _run() -> None:
-            nonlocal final_content, turns_used, partial
+            nonlocal final_content, turns_used, partial, outcome
             provider = LLMProviderWrapper(cfg)
             try:
                 # Force response_format when structured and provider is
                 # OpenAI-compat; the wrapper passes it through to the
-                # payload. Anthropic-compat / Sakana-Responses fall back
+                # payload. Anthropic-compat / legacy non-OpenAI provider-Responses fall back
                 # to the prompt-only instruction already in system_prompt.
                 extra_kwargs: dict[str, Any] = {}
                 if structured:
@@ -798,7 +864,7 @@ class DelegateSubagentTool(BaseTool):
                 for turn in range(1, max_turns + 1):
                     turns_used = turn
                     response = await provider.complete(
-                        messages, tools=tool_schemas, **extra_kwargs
+                        messages, model=cfg.model, tools=tool_schemas, **extra_kwargs
                     )
                     usage = response.get("usage", {}) or {}
                     for k in usage_accum:
@@ -812,6 +878,7 @@ class DelegateSubagentTool(BaseTool):
                     # turn is the final assistant answer.
                     if not tool_calls_raw:
                         final_content = content
+                        outcome = "answered"
                         # Append the assistant turn so any subsequent
                         # structured-validation retry has the full trace.
                         messages.append({"role": "assistant", "content": content})
@@ -922,6 +989,13 @@ class DelegateSubagentTool(BaseTool):
                             "ok" if _ok else "error",
                             f" - {_err}" if _err else "",
                         )
+                        entry = ledger.record(
+                            turn, tc_name, tc_args, ok=_ok, error=_err
+                        )
+                        if entry.get("warning"):
+                            logger.warning(
+                                "delegate turn %d: %s", turn, entry["warning"]
+                            )
                         messages.append(
                             {
                                 "role": "tool",
@@ -932,10 +1006,17 @@ class DelegateSubagentTool(BaseTool):
 
                 # Turn budget exhausted without a final text turn.
                 partial = True
+                outcome = "partial"
                 final_content = (
                     f"[max_turns={max_turns} agotado sin cierre limpio del loop]"
                 )
             finally:
+                # Close the ledger before the provider so the trailing
+                # record lands even when the provider teardown is slow.
+                try:
+                    ledger.close(status=outcome)
+                except Exception:  # pragma: no cover - observability only
+                    logger.debug("no pude cerrar el loop ledger", exc_info=True)
                 await provider.close()
 
         try:
@@ -952,6 +1033,7 @@ class DelegateSubagentTool(BaseTool):
                     "turns_used": turns_used,
                     "usage": usage_accum,
                     "partial": partial,
+                    **_ledger_payload(ledger),
                 },
                 error=f"Sub-agente agentico '{preset_name}' falló: {exc}",
             )
@@ -966,6 +1048,7 @@ class DelegateSubagentTool(BaseTool):
             "files_written": written_files,
             "turns_used": turns_used,
             "partial": partial,
+            **_ledger_payload(ledger),
         }
 
         if structured:
@@ -1103,7 +1186,7 @@ class DelegateSubagentTool(BaseTool):
             kwargs: dict[str, Any] = {}
             if response_format is not None:
                 kwargs["response_format"] = response_format
-            return await provider.complete(messages, **kwargs)
+            return await provider.complete(messages, model=cfg.model, **kwargs)
         finally:
             try:
                 await provider.close()

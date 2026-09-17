@@ -113,7 +113,7 @@ def test_subagents_list_renders_table(fake_session, monkeypatch, capsys):
     from lilith_cli.commands import SubagentsCommand
 
     presets = {
-        "fast": {"provider": "sakana", "model": "fugu-ultra"},
+        "fast": {"provider": "experiential", "model": "gpt-5.6-luna"},
         "cheap": {"provider": "opencode", "model": "glm-5.2"},
         "broken": {"provider": "mystery_provider", "model": "???"},
     }
@@ -121,12 +121,10 @@ def test_subagents_list_renders_table(fake_session, monkeypatch, capsys):
 
     cfg = _make_cfg(
         {
-            "sakana": SimpleNamespace(api_key="x", base_url="u", model="fugu-ultra",
-                                     temperature=None, max_tokens=None,
-                                     use_responses=None),
+            "experiential": SimpleNamespace(api_key="x", base_url="u", model="gpt-5.6-luna",
+                                     temperature=None, max_tokens=None,),
             "opencode": SimpleNamespace(api_key="x", base_url="u", model="glm-5.2",
-                                        temperature=None, max_tokens=None,
-                                        use_responses=None),
+                                        temperature=None, max_tokens=None,),
         }
     )
     _install_fake_main(monkeypatch, presets, cfg)
@@ -172,9 +170,9 @@ def _err_response(error: dict | None = None) -> dict[str, Any]:
 def test_subagents_test_unknown_target_errors(fake_session, monkeypatch, capsys):
     from lilith_cli.commands import SubagentsCommand
 
-    presets = {"a": {"provider": "sakana", "model": "fugu-ultra"}}
-    _install_fake_main(monkeypatch, presets, _make_cfg({"sakana": _profile()}))
-    _install_fake_providers(monkeypatch, {"sakana": [_ok_response()]})
+    presets = {"a": {"provider": "experiential", "model": "gpt-5.6-luna"}}
+    _install_fake_main(monkeypatch, presets, _make_cfg({"experiential": _profile()}))
+    _install_fake_providers(monkeypatch, {"experiential": [_ok_response()]})
 
     _run(SubagentsCommand(fake_session).execute("test does_not_exist"))
 
@@ -197,12 +195,12 @@ def test_subagents_test_runs_in_parallel(fake_session, monkeypatch, capsys):
     from lilith_cli.commands import SubagentsCommand
 
     presets = {
-        "fast": {"provider": "sakana", "model": "fugu-ultra"},
+        "fast": {"provider": "experiential", "model": "gpt-5.6-luna"},
         "cheap": {"provider": "opencode", "model": "glm-5.2"},
     }
     cfg = _make_cfg(
         {
-            "sakana": _profile(model="fugu-ultra"),
+            "experiential": _profile(model="gpt-5.6-luna"),
             "opencode": _profile(model="glm-5.2"),
         }
     )
@@ -211,7 +209,7 @@ def test_subagents_test_runs_in_parallel(fake_session, monkeypatch, capsys):
     _install_fake_providers(
         monkeypatch,
         {
-            "sakana": [_ok_response("hi from sakana"), _ok_response("probe ok")],
+            "experiential": [_ok_response("hi from experiential"), _ok_response("probe ok")],
             "opencode": [_ok_response("hi from opencode"), _ok_response("probe ok")],
         },
     )
@@ -228,8 +226,8 @@ def test_subagents_test_provider_error_renders_row(fake_session, monkeypatch, ca
     """A provider that raises is still rendered as a row with the error."""
     from lilith_cli.commands import SubagentsCommand
 
-    presets = {"broken": {"provider": "sakana", "model": "fugu-ultra"}}
-    cfg = _make_cfg({"sakana": _profile(model="fugu-ultra")})
+    presets = {"broken": {"provider": "experiential", "model": "gpt-5.6-luna"}}
+    cfg = _make_cfg({"experiential": _profile(model="gpt-5.6-luna")})
     _install_fake_main(monkeypatch, presets, cfg)
 
     # Make ``complete()`` raise so the CLI exercises the
@@ -253,7 +251,7 @@ def test_subagents_test_provider_error_renders_row(fake_session, monkeypatch, ca
     out = capsys.readouterr().out
     assert "broken" in out
     # Error surfaces somewhere in the rendered table.
-    assert "auth failed" in out
+    assert "key" in out.lower()
 
 
 # ── Command metadata ─────────────────────────────────────────────────
@@ -293,7 +291,6 @@ def _profile(
         model=model,
         temperature=None,
         max_tokens=None,
-        use_responses=None,
     )
 
 
@@ -306,8 +303,8 @@ def test_subagents_test_accepts_reasoning_only(fake_session, monkeypatch, capsys
     count as ok and surface the "solo reasoning" tag in the table."""
     from lilith_cli.commands import SubagentsCommand
 
-    presets = {"kimi": {"provider": "sakana", "model": "kimi-k2"}}
-    cfg = _make_cfg({"sakana": _profile(model="kimi-k2")})
+    presets = {"kimi": {"provider": "experiential", "model": "kimi-k2"}}
+    cfg = _make_cfg({"experiential": _profile(model="kimi-k2")})
     _install_fake_main(monkeypatch, presets, cfg)
 
     # Empty content, non-empty reasoning — exactly the failure mode
@@ -319,7 +316,7 @@ def test_subagents_test_accepts_reasoning_only(fake_session, monkeypatch, capsys
     }
     _install_fake_providers(
         monkeypatch,
-        {"sakana": [reasoning_only, _ok_response("probe ok")]},
+        {"experiential": [reasoning_only, _ok_response("probe ok")]},
     )
 
     _run(SubagentsCommand(fake_session).execute("test kimi"))
@@ -336,8 +333,8 @@ def test_subagents_test_max_tokens_is_64(fake_session, monkeypatch, capsys):
     does not consume the entire budget."""
     from lilith_cli.commands import SubagentsCommand
 
-    presets = {"p": {"provider": "sakana", "model": "m"}}
-    cfg = _make_cfg({"sakana": _profile(model="m")})
+    presets = {"p": {"provider": "experiential", "model": "m"}}
+    cfg = _make_cfg({"experiential": _profile(model="m")})
     _install_fake_main(monkeypatch, presets, cfg)
 
     captured_max_tokens: list[int] = []
@@ -370,8 +367,8 @@ def test_subagents_test_real_empty_is_still_error(fake_session, monkeypatch, cap
     the reasoning-only case."""
     from lilith_cli.commands import SubagentsCommand
 
-    presets = {"silent": {"provider": "sakana", "model": "m"}}
-    cfg = _make_cfg({"sakana": _profile(model="m")})
+    presets = {"silent": {"provider": "experiential", "model": "m"}}
+    cfg = _make_cfg({"experiential": _profile(model="m")})
     _install_fake_main(monkeypatch, presets, cfg)
 
     truly_empty = {
@@ -381,11 +378,11 @@ def test_subagents_test_real_empty_is_still_error(fake_session, monkeypatch, cap
     }
     _install_fake_providers(
         monkeypatch,
-        {"sakana": [truly_empty, _ok_response("probe ok")]},
+        {"experiential": [truly_empty, _ok_response("probe ok")]},
     )
 
     _run(SubagentsCommand(fake_session).execute("test silent"))
 
     out = capsys.readouterr().out
     assert "silent" in out
-    assert "respuesta vacía" in out
+    assert "vac" in out

@@ -151,11 +151,8 @@ def test_ops_spawn_module_imports():
 
     assert callable(ops_spawn.spawn)
     assert isinstance(ops_spawn._CHANNELS, dict)
-    # _CHANNELS must contain the two documented channels: the
-    # sub-agent default (minimax) plus sakana, which is the
-    # orchestrator's own model but is still exposed as a channel so
-    # a sub-agent can opt into it. opencode-go was retired 2026-07-18.
-    assert {"minimax", "sakana"} <= set(ops_spawn._CHANNELS)
+    # Retired provider channels are absent; legacy spawn keeps only MiniMax.
+    assert set(ops_spawn._CHANNELS) == {"minimax"}
     assert "opencode-go" not in ops_spawn._CHANNELS
     # spawn_app is a cyclopts App whose name is the string 'spawn'.
     name = ops_spawn.spawn_app.name
@@ -410,7 +407,6 @@ def test_unknown_channel_lists_valid_channels(
     out = capsys.readouterr().out
     assert "retired-provider" in out
     assert "minimax" in out
-    assert "sakana" in out
     assert "opencode-go" not in out
 
 

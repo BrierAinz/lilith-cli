@@ -8,10 +8,12 @@ while this registry has a strict runtime schema and user-level lifecycle under
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +36,7 @@ class DelegationSkill:
     max_tokens: int | None = None
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "DelegationSkill":
+    def from_dict(cls, data: dict[str, Any]) -> DelegationSkill:
         skill = cls(
             name=str(data.get("name", "")).strip(),
             description=str(data.get("description", "")).strip(),
@@ -72,24 +74,43 @@ class DelegationSkill:
         )
 
 
+@dataclass(frozen=True)
+class SkillVersionRecord:
+    name: str
+    version_id: str
+    created_at: str
+    source: str
+    sha256: str
+    path: str
+    active: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 DEFAULT_SKILLS = (
     DelegationSkill(
         name="recon-repo",
         description="Reconocimiento estructurado de un repositorio",
-        preset="investigador-minimax",
+        # Era "investigador-minimax", un preset que NO existe en
+        # ~/.yggdrasil/hlidskjalf_subagents.yaml: la skill fallaba al delegar por
+        # preset inexistente. grok-research es el que encaja (contexto grande para
+        # leer un repo entero) y es el que exige test_registry_seeds_three_real_preset_skills.
+        preset="grok-research",
         prompt_template="Analiza {TASK}\nProyecto: {PROJECT}\nContexto: {CONTEXT}",
         structured=True,
     ),
     DelegationSkill(
         name="batch-docs",
         description="Procesamiento por lotes de documentación",
-        preset="investigador-minimax",
+        # Mismo caso: apuntaba a un preset inexistente. El de lote es este.
+        preset="batch-deepseek",
         prompt_template="Procesa en lote: {TASK}\nProyecto: {PROJECT}\nContexto: {CONTEXT}",
     ),
     DelegationSkill(
         name="implementar-feature",
         description="Implementación agéntica de una feature",
-        preset="ejecutor-kimi",
+        preset="batch-deepseek",
         prompt_template="Implementa {TASK}\nProyecto: {PROJECT}\nContexto: {CONTEXT}",
         agentic=True,
     ),
@@ -119,7 +140,7 @@ class DelegationSkillRegistry:
     def _load_text(text: str) -> dict[str, Any]:
         data = yaml.safe_load(text) if yaml is not None else json.loads(text)
         if not isinstance(data, dict):
-            raise ValueError("skill YAML inválida")
+            raise TypeError("skill YAML inválida")
         return data
 
     @staticmethod
@@ -127,6 +148,23 @@ class DelegationSkillRegistry:
         if yaml is not None:
             return yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
         return json.dumps(data, ensure_ascii=False, indent=2)
+
+    def _versions_dir(self, name: str, *, create: bool = True) -> Path:
+        self._path(name)
+        path = self.root / ".versions" / name
+        if create:
+            path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    @staticmethod
+    def _version_hash(text: str) -> str:
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    def _active_hash(self, name: str) -> str | None:
+        path = self._path(name)
+        if not path.exists():
+            return None
+        return self._version_hash(path.read_text(encoding="utf-8"))
 
     def list(self) -> list[DelegationSkill]:
         skills = []
@@ -153,6 +191,63 @@ class DelegationSkillRegistry:
         temp.write_text(self._dump(skill.to_dict()), encoding="utf-8")
         os.replace(temp, path)
         return path
+
+    def save_versioned(self, skill: DelegationSkill, *, source: str = "manual") -> SkillVersionRecord:
+        skill.validate()
+        text = self._dump(skill.to_dict())
+        digest = self._version_hash(text)
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+        version_id = f"{stamp}-{digest[:12]}"
+        versions = self._versions_dir(skill.name)
+        version_path = versions / f"{version_id}.yaml"
+        meta_path = versions / f"{version_id}.json"
+        version_path.write_text(text, encoding="utf-8")
+        record = {
+            "name": skill.name, "version_id": version_id,
+            "created_at": datetime.now(UTC).isoformat(), "source": str(source),
+            "sha256": digest, "path": str(version_path),
+        }
+        meta_path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.save(skill)
+        return SkillVersionRecord(**record, active=True)
+
+    def versions(self, name: str) -> list[SkillVersionRecord]:
+        active_hash = self._active_hash(name)
+        root = self._versions_dir(name, create=False)
+        if not root.is_dir():
+            return []
+        rows: list[SkillVersionRecord] = []
+        active_assigned = False
+        for meta in sorted(root.glob("*.json"), reverse=True):
+            try:
+                data = json.loads(meta.read_text(encoding="utf-8"))
+                is_active = bool(
+                    active_hash and not active_assigned and data.get("sha256") == active_hash
+                )
+                active_assigned = active_assigned or is_active
+                rows.append(SkillVersionRecord(**data, active=is_active))
+            except (OSError, TypeError, ValueError, json.JSONDecodeError):
+                continue
+        return rows
+
+    def get_version(self, name: str, version_id: str) -> DelegationSkill:
+        version_path = self.root / ".versions" / name / f"{version_id}.yaml"
+        if not version_path.is_file():
+            raise ValueError(f"versión de skill no encontrada: {version_id}")
+        skill = DelegationSkill.from_dict(
+            self._load_text(version_path.read_text(encoding="utf-8"))
+        )
+        if skill.name != name:
+            raise ValueError("la versión no pertenece a la skill solicitada")
+        return skill
+
+    def rollback(
+        self, name: str, version_id: str, *, source: str | None = None
+    ) -> SkillVersionRecord:
+        skill = self.get_version(name, version_id)
+        return self.save_versioned(
+            skill, source=source or f"rollback:{version_id}"
+        )
 
     def delete(self, name: str) -> bool:
         path = self._path(name)

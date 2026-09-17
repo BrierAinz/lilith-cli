@@ -38,9 +38,12 @@ import lilith_cli.extra_commands as extra_commands
 # source under test.
 # ---------------------------------------------------------------------------
 EXCLUDED: dict[str, str] = {
+    "run_pr_command": "pushes Git branch and creates a GitHub PR; covered by mocked PR tests",
     # ── Subprocess execution ────────────────────────────────────────────
     # Runs `git diff --cached` to summarise staged changes.
     "run_diff_staged_command": "spawns `git diff --cached`",
+    # Runs `git diff` to summarise unstaged changes.
+    "run_diff_unstaged_command": "spawns `git diff`",
     # Runs `git diff` plus an external linter (ruff / flake8 / black).
     "run_lint_command": "spawns git + external linter",
     # Runs `ruff check --fix` or `black` to rewrite files in place.
@@ -54,6 +57,8 @@ EXCLUDED: dict[str, str] = {
     "run_test_command": "spawns pytest via RunTestTool",
     # Runs `git rev-parse` and `git log` to populate the context panel.
     "run_whereami_command": "spawns git rev-parse/log subprocesses",
+    # ── File mutation / export ──────────────────────────────────────────
+    "run_export_command": "writes conversation export to disk",
     # ── Provider / network ──────────────────────────────────────────────
     # Builds a real LLM provider (e.g. Ollama / OpenAI) and streams
     # completions to measure latency — may hit the network or a remote

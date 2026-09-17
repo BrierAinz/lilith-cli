@@ -120,7 +120,8 @@ def test_default_config_yaml_parses_cleanly(tmp_path, monkeypatch):
     cfg = load_config(yaml_path)
     assert cfg.mcp_servers is None
     assert cfg.effective_mcp_servers == {}
-    assert cfg.providers["sakana"].use_responses is True
+    assert "sakana" not in cfg.providers
+    assert "minimax" in cfg.providers
 
 
 # ── Field-level behaviour ─────────────────────────────────────────────

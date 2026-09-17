@@ -11,6 +11,9 @@ Terminal interface for the Lilith ecosystem — part of the Yggdrasil monorepo.
 - `lilith prompt "<text>"` — Simple one-shot mode.
 - `lilith status`, `lilith launch`, `lilith config` — Ecosystem operations.
 
+Inside the REPL, `/help` shows the compact discovery guide, `/help <query>` searches
+families, names and aliases, and `/commands` shows the complete canonical catalog.
+
 ## IDE mode
 
 Launch the Norse-themed terminal IDE:

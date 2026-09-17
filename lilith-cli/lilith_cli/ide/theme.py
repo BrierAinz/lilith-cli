@@ -1,38 +1,5 @@
-"""Norse-themed colour schemes and CSS for the Lilith IDE."""
-
-from textual.theme import Theme
-
-_NORSE_THEME = Theme(
-    name="norse-dark",
-    primary="#5f9e6e",
-    secondary="#8b5a2b",
-    warning="#c78a2e",
-    error="#c94f4f",
-    success="#6aa66a",
-    accent="#d4a24c",
-    dark=True,
-    background="#12141a",
-    surface="#1a1d26",
-    panel="#20242f",
-    boost="#2a2f3d",
-    foreground="#e0e2e8",
-)
-
-_NORSE_LIGHT_THEME = Theme(
-    name="norse-light",
-    primary="#3a7a4f",
-    secondary="#8b5a2b",
-    warning="#b87a1e",
-    error="#b93d3d",
-    success="#4a8a4a",
-    accent="#b07f2c",
-    dark=False,
-    background="#f4f1ea",
-    surface="#ede8dd",
-    panel="#e6e0d2",
-    boost="#dcd5c5",
-    foreground="#2b2b2b",
-)
+"""Shared Nordic themes and IDE layout CSS."""
+from ..ui_quality import NORDIC_DARK as _NORSE_THEME, NORDIC_LIGHT as _NORSE_LIGHT_THEME
 
 _NORSE_CSS = """
 Screen {

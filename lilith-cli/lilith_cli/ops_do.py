@@ -2,7 +2,7 @@
 
 Adds the natural-language end-to-end loop of the pantheon:
 
-- ``lilith do "<pedido>" [--channel minimax|sakana|glm] [--timeout S]
+- ``lilith do "<pedido>" [--channel minimax|fabric|glm] [--timeout S]
   [--dry-run] [--db]``
     Loads the 14 Vanaheim agent cards, lets
     :class:`lilith_orchestrator.agent_router.AgentRouter` pick the best

@@ -67,11 +67,11 @@ class TestMergeYamlDicts:
 
     def test_empty_override_does_not_wipe(self) -> None:
         """An empty string override should NOT wipe the base value."""
-        base = {"provider": "sakana", "model": "fugu-ultra"}
+        base = {"provider": "experiential", "model": "gpt-5.6-luna"}
         override = {"model": ""}
         result = _merge_yaml_dicts(base, override)
         # Empty string is treated as "not set" — base wins.
-        assert result == {"provider": "sakana", "model": "fugu-ultra"}
+        assert result == {"provider": "experiential", "model": "gpt-5.6-luna"}
 
     def test_nested_merge(self) -> None:
         base = {"tools": {"filesystem": True, "browser": True}}

@@ -61,7 +61,6 @@ def _make_cfg() -> Any:
         model="fake-model",
         temperature=None,
         max_tokens=None,
-        use_responses=None,
     )
     return SimpleNamespace(
         provider="fake",
@@ -74,7 +73,13 @@ def _make_cfg() -> Any:
     )
 
 
-def _install_fake_lilith_cli(monkeypatch, fake_provider: _FakeProvider) -> None:
+def _install_fake_lilith_cli(
+    monkeypatch,
+    fake_provider: _FakeProvider,
+    *,
+    cfg: Any | None = None,
+    presets: dict[str, dict[str, Any]] | None = None,
+) -> None:
     """Inject stub ``lilith_cli.config``/``main``/``providers`` modules.
 
     The stub modules expose the three names ``DelegateSubagentTool.execute``
@@ -83,14 +88,15 @@ def _install_fake_lilith_cli(monkeypatch, fake_provider: _FakeProvider) -> None:
     resolve those names from the stubs without touching the real CLI.
     """
 
-    cfg = _make_cfg()
-    presets = {
-        "fake-preset": {
-            "provider": "fake",
-            "model": "fake-model",
-            "system_prompt": "stub system prompt",
-        },
-    }
+    cfg = cfg or _make_cfg()
+    if presets is None:
+        presets = {
+            "fake-preset": {
+                "provider": "fake",
+                "model": "fake-model",
+                "system_prompt": "stub system prompt",
+            },
+        }
 
     cfg_mod = types.ModuleType("lilith_cli.config")
     cfg_mod.load_config = lambda: cfg  # type: ignore[attr-defined]
@@ -167,6 +173,80 @@ class TestOneShotUnchanged:
         tool = DelegateSubagentTool()
         assert tool.execute(preset="", prompt="x").success is False
         assert tool.execute(preset="x", prompt="").success is False
+
+    def test_description_uses_runtime_catalog_instead_of_stale_names(self):
+        description = DelegateSubagentTool.description
+        preset_description = DelegateSubagentTool.parameters["preset"]["description"]
+        assert "subagents list" in description
+        assert "subagents list" in preset_description
+        for stale_name in (
+            "ejecutor-kimi",
+            "investigador-minimax",
+            "opencode-glm52",
+            "hf-glm52",
+        ):
+            assert stale_name not in description
+            assert stale_name not in preset_description
+
+    def test_unknown_preset_reports_runtime_catalog(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        provider = _FakeProvider([])
+        _install_fake_lilith_cli(monkeypatch, provider)
+
+        result = DelegateSubagentTool().execute(
+            preset="missing-preset", prompt="do thing"
+        )
+
+        assert result.success is False
+        assert result.error == (
+            "Preset 'missing-preset' no existe. "
+            "Presets disponibles: fake-preset"
+        )
+        assert provider.calls == []
+
+    def test_preset_model_is_explicitly_forwarded(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        provider = _FakeProvider([_make_tool_response(content="ok")])
+        _install_fake_lilith_cli(monkeypatch, provider)
+
+        result = DelegateSubagentTool().execute(
+            preset="fake-preset", prompt="do thing"
+        )
+
+        assert result.success is True
+        assert provider.calls[0]["kwargs"]["model"] == "fake-model"
+
+    def test_fabric_preset_needs_no_provider_profile(self, monkeypatch, tmp_path):
+        from types import SimpleNamespace
+
+        monkeypatch.chdir(tmp_path)
+        provider = _FakeProvider([_make_tool_response(content="routed")])
+        cfg = SimpleNamespace(
+            provider="fabric",
+            model="router",
+            providers={},
+            temperature=0.7,
+            max_tokens=4096,
+        )
+        _install_fake_lilith_cli(
+            monkeypatch,
+            provider,
+            cfg=cfg,
+            presets={
+                "opencode-glm52": {
+                    "provider": "fabric",
+                    "model": "glm-5.2",
+                }
+            },
+        )
+
+        result = DelegateSubagentTool().execute(
+            preset="opencode-glm52", prompt="do thing"
+        )
+
+        assert result.success is True
+        assert result.data["provider"] == "fabric"
+        assert provider.calls[0]["kwargs"]["model"] == "glm-5.2"
 
 
 # ── (a) Sandbox: writes inside, rejects outside ───────────────────────
@@ -831,3 +911,221 @@ class TestAgenticFileAppend:
         spec = next(d for d in defs if d["function"]["name"] == "file_append")
         assert "path" in spec["function"]["parameters"]["required"]
         assert "content" in spec["function"]["parameters"]["required"]
+
+
+# ── Loop ledger: telling a stuck sub-agent from a busy one ─────────────
+
+
+class TestLoopLedgerIntegration:
+    """The agentic loop must persist every turn and report a diagnosis.
+
+    Detection is deliberately non-fatal: a flagged run still finishes and
+    still returns its answer. These tests pin both halves of that.
+    """
+
+    def test_distinct_calls_write_ledger_without_loop(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        provider = _FakeProvider(
+            [
+                _make_tool_response(
+                    tool_calls=[_tc("file_write", {"path": "a.txt", "content": "a"})],
+                    finish_reason="tool_calls",
+                ),
+                _make_tool_response(
+                    tool_calls=[_tc("file_write", {"path": "b.txt", "content": "b"})],
+                    finish_reason="tool_calls",
+                ),
+                _make_tool_response(content="listo", finish_reason="stop"),
+            ]
+        )
+        _install_fake_lilith_cli(monkeypatch, provider)
+
+        result = DelegateSubagentTool().execute(
+            preset="fake-preset",
+            prompt="escribe dos archivos",
+            agentic=True,
+            workdir=str(tmp_path / "sandbox_ledger_ok"),
+        )
+
+        assert result.success is True
+        diag = result.data["loop_diagnosis"]
+        assert diag["turns"] == 2
+        assert diag["distinct_calls"] == 2
+        assert diag["repeated_calls"] == 0
+        assert diag["possible_loop"] is False
+        assert diag["status"] == "answered"
+        assert diag["persisted"] is True
+        # No loop → no scare key at the top level.
+        assert "loop_warning" not in result.data
+
+        ledger_path = Path(result.data["loop_ledger"])
+        assert ledger_path.name == "loop_ledger.jsonl"
+        assert ledger_path.is_file()
+        lines = [
+            json.loads(line)
+            for line in ledger_path.read_text(encoding="utf-8").splitlines()
+        ]
+        assert [line["kind"] for line in lines] == ["start", "turn", "turn", "end"]
+        assert [line["tool"] for line in lines[1:3]] == ["file_write", "file_write"]
+        assert [line["target"] for line in lines[1:3]] == ["a.txt", "b.txt"]
+        assert lines[1]["ok"] is True
+        assert lines[-1]["status"] == "answered"
+        assert lines[-1]["possible_loop"] is False
+
+    def test_repeated_identical_call_flags_possible_loop(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        same = {"path": "stuck.txt", "content": "again"}
+        provider = _FakeProvider(
+            [
+                _make_tool_response(
+                    tool_calls=[_tc("file_write", same)], finish_reason="tool_calls"
+                )
+                for _ in range(3)
+            ]
+        )
+        _install_fake_lilith_cli(monkeypatch, provider)
+
+        result = DelegateSubagentTool().execute(
+            preset="fake-preset",
+            prompt="el mismo archivo hasta el infinito",
+            agentic=True,
+            workdir=str(tmp_path / "sandbox_ledger_stuck"),
+            max_turns=3,
+        )
+
+        # Detection does NOT fail the run: it is reported, not enforced.
+        assert result.success is True
+        assert result.data["partial"] is True
+        assert "max_turns" in result.data["content"]
+
+        diag = result.data["loop_diagnosis"]
+        assert diag["possible_loop"] is True
+        assert diag["loop_signal"] == "identical_args"
+        assert diag["max_repeat_streak"] == 3
+        assert diag["stuck_on"]["count"] == 3
+        assert diag["stuck_on"]["target"] == "stuck.txt"
+        assert diag["status"] == "partial"
+        # Surfaced at the top level so the orchestrator sees it without
+        # unpacking the nested diagnosis.
+        assert "posible bucle" in result.data["loop_warning"]
+
+        end = [
+            json.loads(line)
+            for line in Path(result.data["loop_ledger"])
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ][-1]
+        assert end["kind"] == "end"
+        assert end["possible_loop"] is True
+        assert end["loop_signal"] == "identical_args"
+
+    def test_same_target_rewritten_flags_loop(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        provider = _FakeProvider(
+            [
+                _make_tool_response(
+                    tool_calls=[
+                        _tc("file_write", {"path": "draft.md", "content": version})
+                    ],
+                    finish_reason="tool_calls",
+                )
+                for version in ("v1", "v2", "v3")
+            ]
+        )
+        _install_fake_lilith_cli(monkeypatch, provider)
+
+        result = DelegateSubagentTool().execute(
+            preset="fake-preset",
+            prompt="reescribe draft.md",
+            agentic=True,
+            workdir=str(tmp_path / "sandbox_ledger_draft"),
+            max_turns=3,
+        )
+
+        diag = result.data["loop_diagnosis"]
+        # Different content every turn → no consecutive identical-args streak
+        # (0 = "no call repeated the previous one"), so the exact-repeat
+        # signal stays silent...
+        assert diag["max_repeat_streak"] == 0
+        # ...but the same file three times in a row is still spinning.
+        assert diag["loop_signal"] == "same_target"
+        assert diag["max_target_streak"] == 3
+        assert diag["possible_loop"] is True
+
+    def test_unwritable_ledger_does_not_break_the_run(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        sandbox = (tmp_path / "sandbox_ledger_broken").resolve()
+        sandbox.mkdir()
+        # A directory squatting on the ledger path blocks every write.
+        (sandbox / "loop_ledger.jsonl").mkdir()
+        provider = _FakeProvider(
+            [
+                _make_tool_response(
+                    tool_calls=[_tc("file_write", {"path": "a.txt", "content": "a"})],
+                    finish_reason="tool_calls",
+                ),
+                _make_tool_response(content="hecho igual", finish_reason="stop"),
+            ]
+        )
+        _install_fake_lilith_cli(monkeypatch, provider)
+
+        result = DelegateSubagentTool().execute(
+            preset="fake-preset",
+            prompt="x",
+            agentic=True,
+            workdir=str(sandbox),
+        )
+
+        assert result.success is True
+        assert result.data["content"] == "hecho igual"
+        assert result.data["loop_diagnosis"]["persisted"] is False
+        assert result.data["loop_diagnosis"]["turns"] == 1
+        # The actual work still happened.
+        assert (sandbox / "a.txt").read_text(encoding="utf-8") == "a"
+        assert result.data["files_written"] == ["a.txt"]
+
+    def test_structured_agentic_keeps_ledger_keys(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        provider = _FakeProvider(
+            [
+                _make_tool_response(
+                    tool_calls=[_tc("file_write", {"path": "x.txt", "content": "x"})],
+                    finish_reason="tool_calls",
+                ),
+                _make_tool_response(
+                    content=json.dumps({"summary": "wrote x", "status": "completed"}),
+                    finish_reason="stop",
+                ),
+            ]
+        )
+        _install_fake_lilith_cli(monkeypatch, provider)
+
+        result = DelegateSubagentTool().execute(
+            preset="fake-preset",
+            prompt="write and report",
+            agentic=True,
+            workdir=str(tmp_path / "sandbox_ledger_str"),
+            structured=True,
+        )
+
+        assert result.success is True
+        assert result.data["structured"]["summary"] == "wrote x"
+        # The structured branch rebuilds ``data`` — the ledger keys must
+        # survive that rebuild.
+        assert result.data["loop_diagnosis"]["turns"] == 1
+        assert Path(result.data["loop_ledger"]).is_file()
+
+    def test_one_shot_mode_has_no_ledger_keys(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        provider = _FakeProvider(
+            [_make_tool_response(content="hola", finish_reason="stop")]
+        )
+        _install_fake_lilith_cli(monkeypatch, provider)
+
+        result = DelegateSubagentTool().execute(preset="fake-preset", prompt="x")
+
+        assert result.success is True
+        # One-shot mode has no loop to observe; it must not grow a ledger.
+        assert "loop_diagnosis" not in result.data
+        assert "loop_ledger" not in result.data
+        assert "loop_warning" not in result.data

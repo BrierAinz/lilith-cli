@@ -20,7 +20,7 @@ Requirements:
 ```bash
 git clone https://github.com/BrierAinz/lilith-cli.git
 cd lilith-cli
-uv sync --all-extras
+uv sync --locked --all-packages --extra dev
 uv run lilith --help
 ```
 

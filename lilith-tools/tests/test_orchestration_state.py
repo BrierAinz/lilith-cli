@@ -98,6 +98,20 @@ def test_delegate_registers_success_and_usage(monkeypatch, tmp_path: Path) -> No
     assert task["result"] == "implemented"
     assert task["usage"]["total_tokens"] == 17
     assert task["description"] == "Implement persistent memory"
+    state = OrchestrationStateStore(state_path).get()
+    assert len(state["post_mortems"]) == 1
+    pm = state["post_mortems"][0]
+    assert pm["task_id"] == task["id"]
+    assert pm["preset"] == "fake-preset"
+    assert pm["provider"] == "fake"
+    assert pm["success"] is True
+    assert pm["quality"] == 1.0
+    assert pm["usage"]["total_tokens"] == 17
+    assert pm["agentic"] is False
+    assert pm["structured"] is False
+    assert pm["latency_ms"] >= 0
+    assert task["provider"] == "fake"
+    assert task["post_mortem"]["task_id"] == task["id"]
 
 
 def test_delegate_registers_failure(monkeypatch, tmp_path: Path) -> None:
@@ -125,3 +139,14 @@ def test_delegate_registers_failure(monkeypatch, tmp_path: Path) -> None:
     task = OrchestrationStateStore(state_path).get()["tasks"][0]
     assert task["status"] == "fallida"
     assert "provider failed" in task["result"]
+    state = OrchestrationStateStore(state_path).get()
+    assert len(state["post_mortems"]) == 1
+    pm = state["post_mortems"][0]
+    assert pm["task_id"] == task["id"]
+    assert pm["preset"] == "fake-preset"
+    assert pm["provider"] == "fake"
+    assert pm["success"] is False
+    assert pm["quality"] == 0.0
+    assert "provider failed" in pm["cause"]
+    assert task["provider"] == "fake"
+    assert task["post_mortem"]["success"] is False

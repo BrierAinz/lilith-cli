@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -27,10 +29,13 @@ from prompt_toolkit.styles import Style as PtStyle
 from pygments.lexers import MarkdownLexer as PygmentsMarkdownLexer
 from rich.live import Live
 
-
 if TYPE_CHECKING:
     from .session_runtime import SessionRuntime
+from .batch_command import run_batch_command
+from .bg_command import run_bg_command
+from .btw_command import run_btw_command
 from .commands import CommandRegistry
+from .completion_command import run_completion_command
 from .config import CONFIG_DIR
 from .extra_commands import (
     _load_aliases,
@@ -42,13 +47,11 @@ from .extra_commands import (
     run_capture_command,
     run_cd_command,
     run_changelog_command,
-    run_compact_command,
     run_clear_screen_command,
+    run_compact_command,
     run_compare_command,
-    run_context_command,
     run_conclave_command,
-    run_recent_command,
-    run_learn_command,
+    run_context_command,
     run_deps_command,
     run_diff_branch_command,
     run_diff_staged_command,
@@ -70,49 +73,55 @@ from .extra_commands import (
     run_json_command,
     run_json_mode_command,
     run_last_tool_command,
+    run_learn_command,
+    run_lines_command,
     run_lint_command,
     run_lint_fix_command,
-    run_lines_command,
     run_log_command,
-    run_map_command,
     run_macro_command,
+    run_map_command,
     run_metrics_command,
     run_model_info_command,
     run_multi_file_command,
     run_now_command,
     run_pin_command,
+    run_pr_command,
     run_profile_command,
+    run_pwd_command,
     run_qr_command,
     run_quote_command,
     run_random_command,
-    run_pwd_command,
-    run_pr_command,
-    run_test_command,
     run_recap_command,
+    run_recent_command,
     run_redact_command,
-    run_replay_command,
     run_release_command,
+    run_replay_command,
     run_reverse_command,
     run_review_command,
     run_search_command,
+    run_secret_command,
     run_security_command,
     run_snippet_command,
-    run_summary_command,
-    run_secret_command,
     run_stream_command,
-    run_tip_command,
+    run_summary_command,
+    run_test_command,
     run_timer_command,
+    run_tip_command,
+    run_todos_command,
     run_tokens_command,
+    run_tour_command,
+    run_tree_command,
     run_usage_command,
     run_uuid_command,
     run_voice_command,
-    run_todos_command,
-    run_whereami_command,
-    run_tour_command,
-    run_tree_command,
     run_watch_command,
+    run_whereami_command,
 )
-
+from .how_command import run_how_command
+from .ingest_command import run_ingest_command
+from .notes_command import run_note_command
+from .paste_command import run_paste_command
+from .pipeline_command import run_pipeline_command
 from .render import (
     Timer,
     build_stream_tail,
@@ -132,26 +141,23 @@ from .render import (
     render_welcome,
     set_theme,
 )
-from .batch_command import run_batch_command
-from .bg_command import run_bg_command
-from .completion_command import run_completion_command
-from .how_command import run_how_command
-from .notes_command import run_note_command
-from .btw_command import run_btw_command
-from .pipeline_command import run_pipeline_command
 from .temperature_command import run_temperature_command
-from .undo_command import run_undo_peek_command
-from .tool_progress import DelegationLive, DelegationStreamBuffer, ToolProgressTracker, render_tool_progress
+from .tool_progress import (
+    DelegationLive,
+    DelegationStreamBuffer,
+    ToolProgressTracker,
+    render_tool_progress,
+    set_tool_panels,
+)
 from .trace import AgentTrace
+from .transcript_commands import run_transcript_command
+from .undo_command import run_undo_peek_command
 from .workflow_command import run_workflow_command
-from .ingest_command import run_ingest_command
-from .paste_command import run_paste_command
-
 
 # ── Prompt constants ────────────────────────────────────────────────
 
 _HISTORY_FILE = CONFIG_DIR / "history"
-_CONVERSATIONS_DIR = CONFIG_DIR / "conversations"
+_CONVERSATIONS_DIR = Path(os.environ.get("LILITH_CONVERSATIONS_DIR", str(CONFIG_DIR / "conversations"))).expanduser()
 
 _SLASH_COMMANDS = [
     "/tools",
@@ -160,7 +166,11 @@ _SLASH_COMMANDS = [
     "/memory",
     "/costs",
     "/state",
+    "/mission",
+    "/court",
     "/skills",
+    "/kit",
+    "/capabilities",
     "/clear",
     "/cd",
     "/pwd",
@@ -212,6 +222,8 @@ _SLASH_COMMANDS = [
     "/changelog",
     "/stream",
     "/history",
+    "/transcript",
+    "/tr",
     "/hist",
     "/goal",
     "/last-tool",
@@ -450,15 +462,39 @@ def _is_multi_line_start(text: str) -> bool:
 
 def _auto_save_conversation(session: SessionRuntime) -> Path | None:
     """Save the conversation history as JSON. Returns the filepath or None."""
-    if not session.history:
+    if not session.history or not session.config.history.save:
         return None
 
     _CONVERSATIONS_DIR.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-    filepath = _CONVERSATIONS_DIR / f"conv_{timestamp}.json"
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S_%f")
+    session_name = getattr(session, "_conversation_name", None)
+    if not isinstance(session_name, str) or Path(session_name).name != session_name:
+        session_name = f"conv_{timestamp}_{uuid.uuid4().hex[:8]}.json"
+    filepath = _CONVERSATIONS_DIR / session_name
+
+    from .delegation_keys import encode_keys, validate_namespace
+    from .extra_commands import _goal_from_session
+    from .robust_kit import PROFILES
+    try:
+        delegation_requests = encode_keys(getattr(session, "_delegation_request_ids", {}))
+        delegation_namespace = validate_namespace(getattr(session, "_delegation_namespace", None))
+        execution_profile = getattr(session, "_execution_profile", None)
+        if execution_profile is not None and (not isinstance(execution_profile, str) or execution_profile not in PROFILES):
+            raise ValueError("Invalid execution profile")
+    except (ValueError, TypeError, AttributeError):
+        render_error("No se guardó la sesión: identidades de delegación inválidas.")
+        return None
 
     data = {
+        "delegation_requests": delegation_requests,
+        "delegation_namespace": delegation_namespace,
+        "execution_profile": execution_profile,
+        "goal": _goal_from_session(session),
+        "progress": getattr(session, "_run_progress", None),
+        "tool_receipts": getattr(session, "_tool_receipts", {}),
+        "task_request": getattr(session, "_task_request_file", None),
+        "project_root": getattr(session, "_project_root", str(Path.cwd().resolve())),
         "timestamp": timestamp,
         "model": session.config.model,
         "provider": session.config.provider,
@@ -467,10 +503,19 @@ def _auto_save_conversation(session: SessionRuntime) -> Path | None:
         "per_model_usage": session._per_model_usage,
     }
     try:
-        filepath.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False, default=str),
-            encoding="utf-8",
-        )
+        from .unicode_safety import sanitize_unicode
+
+        data = sanitize_unicode(data)
+        staging = filepath.with_name(f".{filepath.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            with staging.open("x", encoding="utf-8") as handle:
+                json.dump(data, handle, indent=2, ensure_ascii=False, default=str)
+                handle.flush()
+                os.fsync(handle.fileno())
+            staging.replace(filepath)
+        finally:
+            staging.unlink(missing_ok=True)
+        session._conversation_name = session_name
         return filepath
     except Exception as exc:
         render_error(f"Error guardando conversación: {exc}")
@@ -497,6 +542,10 @@ def _list_saved_conversations() -> list[dict[str, Any]]:
             conversations.append(
                 {
                     "file": fpath,
+                    "project_root": data.get("project_root"),
+                    "goal": data.get("goal"),
+                    "progress": data.get("progress"),
+                    "task_request": data.get("task_request"),
                     "name": fpath.stem,
                     "timestamp": data.get("timestamp", ""),
                     "model": data.get("model", "unknown"),
@@ -512,7 +561,7 @@ def _list_saved_conversations() -> list[dict[str, Any]]:
             console.print(f"[warning]No pude leer {fpath.name}: {exc}[/]")
             continue
 
-    return conversations
+    return sorted(conversations, key=lambda item: str(item["timestamp"]), reverse=True)
 
 
 def _load_conversation(filepath: Path) -> dict[str, Any] | None:
@@ -552,18 +601,22 @@ async def run_repl(session: SessionRuntime) -> None:
 
         _raw = _yaml.safe_load(CONFIG_FILE.read_text(encoding="utf-8")) or {}
         _saved_theme = _raw.get("theme", "norse")
-        if _saved_theme in [t.name for t in list_themes()]:
+        if getattr(session, "_console_style", None) != "agent" and _saved_theme in [t.name for t in list_themes()]:
             set_theme(_saved_theme)
     except Exception:
         pass  # Fall back to default theme.
 
     # ── Render welcome ────────────────────────────────────────────
-    render_welcome(
-        model=session.config.model,
-        provider=session.config.provider,
-        tools_count=len(session.get_tool_descriptions()),
-        has_memory=session.memory is not None,
-    )
+    if getattr(session, "_console_style", None) == "agent":
+        from .agent_console import render_header
+        render_header(session, console)
+    else:
+        render_welcome(
+            model=session.config.model,
+            provider=session.config.provider,
+            tools_count=len(session.get_tool_descriptions()),
+            has_memory=session.memory is not None,
+        )
     console.print()
 
     # Resume hint for persistent orchestration work from previous sessions.
@@ -639,7 +692,9 @@ async def run_repl(session: SessionRuntime) -> None:
 
     # ── prompt_toolkit setup ─────────────────────────────────────
     history = FileHistory(str(_HISTORY_FILE))
-    completer = WordCompleter(_SLASH_COMMANDS, ignore_case=True, sentence=True)
+    from .command_surface import completion_words
+
+    completer = WordCompleter(completion_words(_SLASH_COMMANDS), ignore_case=True, sentence=True)
 
     # Build prompt_toolkit style from the active theme — dynamically
     # resolved so that /theme switches update the prompt immediately.
@@ -703,7 +758,7 @@ async def run_repl(session: SessionRuntime) -> None:
         style=pt_style,
         multiline=False,
         prompt_continuation=_prompt_continuation,
-        bottom_toolbar=_bottom_toolbar,
+        bottom_toolbar=None if getattr(session, "_console_style", None) == "agent" else _bottom_toolbar,
     )
 
     # Key bindings.
@@ -735,10 +790,67 @@ async def run_repl(session: SessionRuntime) -> None:
     # ── Tool call callback ────────────────────────────────────────
     def on_tool_call(name: str, args: dict, result: str) -> None:
         """Render a tool call in the REPL UI."""
-        render_tool_call(name, args)
-        rendered = render_tool_result(name, result)
-        if rendered is not None:
-            console.print(rendered)
+        from .render import (
+            _extract_data,
+            render_diff,
+            render_tool_line,
+            summarize_tool_result,
+        )
+        
+        is_err = result.startswith("Error:") or result.startswith("Error ejecutando")
+        data = _extract_data(result)
+        if isinstance(data, dict):
+            error = data.get("error") or data.get("is_error")
+            if error:
+                is_err = True
+
+        activity = None
+        if getattr(session, "_console_style", None) == "agent":
+            from .mission.presentation import mission_activity_line
+
+            activity = mission_activity_line(
+                name, args, data, error=is_err, raw=result
+            )
+        if activity is not None:
+            console.print(activity)
+        elif is_err:
+            render_tool_call(name, args, result=result)
+        else:
+            has_diff = False
+            if name in ("file_write", "file_edit", "batch_edit") and isinstance(data, dict):
+                from pathlib import Path
+                if name == "batch_edit":
+                    edits = data.get("edits", [])
+                    if edits:
+                        for e in edits:
+                            diff_text = e.get("diff", "")
+                            if diff_text:
+                                has_diff = True
+                                path_str = e.get("path", "")
+                                path_name = Path(path_str).name if path_str else None
+                                console.print(render_diff(diff_text, path_name))
+                    else:
+                        diff_text = data.get("combined_diff", "")
+                        if diff_text:
+                            has_diff = True
+                            console.print(render_diff(diff_text))
+                else:
+                    diff_text = data.get("diff", "")
+                    if diff_text:
+                        has_diff = True
+                        path_str = data.get("path", "")
+                        path_name = Path(path_str).name if path_str else None
+                        console.print(render_diff(diff_text, path_name))
+
+            if has_diff:
+                pass
+            elif name in ("file_read", "directory_list", "grep_files"):
+                rendered = render_tool_result(name, result)
+                if rendered is not None:
+                    console.print(rendered)
+            else:
+                summary = summarize_tool_result(name, result, args)
+                render_tool_line(name, summary)
 
     session._on_tool_call = on_tool_call
 
@@ -759,6 +871,9 @@ async def run_repl(session: SessionRuntime) -> None:
                 ("class:prompt", f"{current_theme.prompt_prefix} {model_name}"),
                 ("", ": "),
             ]
+            if getattr(session, "_console_style", None) == "agent":
+                from .agent_console import prompt_fragments
+                prompt_formatted = prompt_fragments()
 
             try:
                 user_input = await prompt_session.prompt_async(
@@ -782,7 +897,7 @@ async def run_repl(session: SessionRuntime) -> None:
             # ── Slash command dispatch ────────────────────────────
             if text.startswith("/"):
                 parts = text[1:].split(maxsplit=1)
-                cmd_name = parts[0].lower()
+                cmd_name = parts[0].lower() if parts else "help"
                 cmd_args = parts[1] if len(parts) > 1 else ""
 
                 # ── User alias expansion (aliases.json, un nivel) ─────
@@ -790,6 +905,10 @@ async def run_repl(session: SessionRuntime) -> None:
                 if expanded_alias is not None:
                     cmd_name, cmd_args = expanded_alias
                     text = f"/{cmd_name} {cmd_args}".strip()
+                if cmd_name in ("capabilities", "kit", "mission", "court"):
+                    from .agent_console import console_command
+                    console_command(session, cmd_name, cmd_args, console)
+                    continue
                 if cmd_name == "macro":
                     from .commands import _macro_recording as macro_state
                     # While recording, append slash commands to the macro and
@@ -917,6 +1036,9 @@ async def run_repl(session: SessionRuntime) -> None:
                     continue
                 if cmd_name == "last-tool":
                     await run_last_tool_command(session, cmd_args)
+                    continue
+                if cmd_name in ("transcript", "tr"):
+                    await run_transcript_command(session, cmd_args)
                     continue
                 if cmd_name == "quote":
                     await run_quote_command(session, cmd_args)
@@ -1096,6 +1218,8 @@ async def run_repl(session: SessionRuntime) -> None:
 
                 traceback.print_exc()
                 continue
+            finally:
+                _auto_save_conversation(session)
 
     finally:
         # ── Auto-save on exit ─────────────────────────────────────
@@ -1175,6 +1299,9 @@ async def _process_with_streaming(
             stream_live = None
 
     # ── Live tool progress tracker for parallel tool execution ────
+    # La preferencia manda sobre los paneles. stream_live queda intacto a
+    # proposito: ese es el texto de su respuesta, no el proceso.
+    set_tool_panels(bool(getattr(session.config, "show_tool_panels", False)))
     tool_progress = ToolProgressTracker()
 
     # ── Live delegation streaming panel (tanda 6, ITEM 3) ────────────
@@ -1185,8 +1312,8 @@ async def _process_with_streaming(
     # buffer. tool_progress.pause_live() frees the single Rich Live
     # slot while our panel runs, mirroring how streaming alternates
     # with the tool tracker elsewhere in this loop.
-    delegation_live: "DelegationLive | None" = None
-    delegation_buffer: "DelegationStreamBuffer | None" = None
+    delegation_live: DelegationLive | None = None
+    delegation_buffer: DelegationStreamBuffer | None = None
 
     # ── Start the thinking spinner (shows while LLM processes) ────
     spinner_info = make_thinking_spinner()
@@ -1278,7 +1405,14 @@ async def _process_with_streaming(
                             console.print()
                         accumulated = ""
 
-                        tool_progress.start(event["name"])
+                        progress_name = event["name"]
+                        if getattr(session, "_console_style", None) == "agent":
+                            from .mission.presentation import mission_tool_label
+
+                            progress_name = mission_tool_label(
+                                event["name"], event.get("arguments") or {}
+                            )
+                        tool_progress.start(progress_name)
 
                         # ITEM 3 (tanda 6): open the delegation streaming
                         # panel when the model invokes delegate_subagent.
@@ -1311,7 +1445,14 @@ async def _process_with_streaming(
                         # Check for "error" indicator from provider-style events.
                         error = event.get("error") or event.get("is_error")
                         error_str = str(error) if error else None
-                        tool_progress.complete(event["name"], error=error_str)
+                        progress_name = event["name"]
+                        if getattr(session, "_console_style", None) == "agent":
+                            from .mission.presentation import mission_tool_label
+
+                            progress_name = mission_tool_label(
+                                event["name"], event.get("arguments") or {}
+                            )
+                        tool_progress.complete(progress_name, error=error_str)
 
                         # ITEM 3 (tanda 6): close the delegation streaming
                         # panel that ``tool_call`` opened above. The
@@ -1335,15 +1476,68 @@ async def _process_with_streaming(
                                 # tool_progress reopens automatically on
                                 # its next ``start()``.
 
-                        rendered = render_tool_result(event["name"], event["content"])
-                        if rendered is not None:
-                            console.print(rendered)
-
-                        # Also render the tool call card now that we have the result,
-                        # so users see the arguments that produced it.
-                        render_tool_call(
-                            event["name"], event.get("arguments", {}), result=event["content"]
+                        from .render import (
+                            _extract_data,
+                            render_diff,
+                            render_tool_line,
+                            summarize_tool_result,
                         )
+                        
+                        name = event["name"]
+                        args = event.get("arguments", {})
+                        content = event.get("content", "")
+                        data = _extract_data(content)
+                        is_err = content.startswith("Error:") or content.startswith("Error ejecutando")
+                        if error_str:
+                            is_err = True
+
+                        activity = None
+                        if getattr(session, "_console_style", None) == "agent":
+                            from .mission.presentation import mission_activity_line
+
+                            activity = mission_activity_line(
+                                name, args, data, error=is_err, raw=content
+                            )
+                        if activity is not None:
+                            console.print(activity)
+                        elif is_err:
+                            render_tool_call(name, args, result=content)
+                        else:
+                            has_diff = False
+                            if name in ("file_write", "file_edit", "batch_edit") and isinstance(data, dict):
+                                from pathlib import Path
+                                if name == "batch_edit":
+                                    edits = data.get("edits", [])
+                                    if edits:
+                                        for e in edits:
+                                            diff_text = e.get("diff", "")
+                                            if diff_text:
+                                                has_diff = True
+                                                path_str = e.get("path", "")
+                                                path_name = Path(path_str).name if path_str else None
+                                                console.print(render_diff(diff_text, path_name))
+                                    else:
+                                        diff_text = data.get("combined_diff", "")
+                                        if diff_text:
+                                            has_diff = True
+                                            console.print(render_diff(diff_text))
+                                else:
+                                    diff_text = data.get("diff", "")
+                                    if diff_text:
+                                        has_diff = True
+                                        path_str = data.get("path", "")
+                                        path_name = Path(path_str).name if path_str else None
+                                        console.print(render_diff(diff_text, path_name))
+
+                            if has_diff:
+                                pass
+                            elif name in ("file_read", "directory_list", "grep_files"):
+                                rendered = render_tool_result(name, content)
+                                if rendered is not None:
+                                    console.print(rendered)
+                            else:
+                                summary = summarize_tool_result(name, content, args)
+                                render_tool_line(name, summary, duration=event.get("duration"))
 
                     # ── Turn complete ─────────────────────────────────────
                     elif event_type == "done":

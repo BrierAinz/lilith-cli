@@ -12,8 +12,8 @@ class TestEstimateContextWindow:
 
     def test_known_model(self) -> None:
         from lilith_cli.providers import estimate_context_window
-        # fugu-ultra is 128k in our pricing table.
-        assert estimate_context_window("fugu-ultra") == 128_000
+        # gpt-4o is 128k in our pricing table.
+        assert estimate_context_window("gpt-4o") == 128_000
 
     def test_unknown_model_falls_back(self) -> None:
         from lilith_cli.providers import estimate_context_window
@@ -35,7 +35,7 @@ class TestRenderContext:
     def _make_session(self) -> MagicMock:
         sess = MagicMock()
         sess.config = MagicMock()
-        sess.config.model = "fugu-ultra"
+        sess.config.model = "gpt-4o"
         sess._total_usage = {
             "prompt_tokens": 1_000,
             "completion_tokens": 500,

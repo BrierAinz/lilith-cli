@@ -14,6 +14,7 @@ Covers:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 import yaml
@@ -27,6 +28,9 @@ from lilith_core.sandbox import (
 )
 
 from lilith_skills.agent_cards import AgentCard
+
+if TYPE_CHECKING:
+    from lilith_skills.agent_cards import AgentCardLoader
 from lilith_skills.sandbox_binder import (
     BoundSandbox,
     DEFAULT_MAX_CALLS_PER_MIN,
@@ -381,7 +385,7 @@ class TestBindLoader:
     """bind_loader derives a policy for every card in a loader."""
 
     @staticmethod
-    def _write_loader_yaml(tmp_path: Path, *cards: AgentCard) -> AgentCardLoader:
+    def _write_loader_yaml(tmp_path: Path, *cards: AgentCard) -> "AgentCardLoader":
         """Write a multi-doc YAML and load it."""
         from lilith_skills.agent_cards import AgentCardLoader
 

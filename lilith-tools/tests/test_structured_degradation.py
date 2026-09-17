@@ -71,7 +71,6 @@ def _make_cfg() -> Any:
         model="fake-model",
         temperature=None,
         max_tokens=None,
-        use_responses=None,
     )
     return SimpleNamespace(
         provider="fake",

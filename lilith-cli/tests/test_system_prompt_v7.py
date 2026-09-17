@@ -12,37 +12,22 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
-
-from lilith_cli.config import YggdrasilConfig, _DEFAULT_CONFIG_YAML
-
+from lilith_cli.agent import DECISION_SUPPORT_INSTRUCTIONS, AgentSession
+from lilith_cli.config import _DEFAULT_CONFIG_YAML, YggdrasilConfig
 
 # Tools / commands whose presence in the default prompt is required.
 # The filename stays for compatibility, but these assertions include the
 # additive v8 verified-orchestration contract.
 _REQUIRED_KEYWORDS: tuple[str, ...] = (
-    "orchestration_state",
-    "add_task",
-    "update_task",
-    "delegate_subagent",
-    "agentic=true",
-    "structured=true",
-    "max_tokens",
-    "skill_run",
-    "/skills",
-    "post_mortems",
-    "success_criteria",
-    "idempotency_key",
-    "resume_expired",
-    "checkpoint",
-    "memory_evidence",
-    "circuit breakers",
-    "timeline",
-    "correlation id",
-    "file_write",
-    "file_append",
-    "verify",  # "Verify every deliverable on disk"
+    "mission_prepare", "success_criteria", "mission_court", "mission_compute",
+    "mission_delegate", "mission_conclave", "mission_skill_run", "MCP",
+    "mission_authority", "longrun", "leases", "heartbeat", "checkpoint",
+    "post_mortems", "memory_evidence", "circuit breakers", "compute health",
+    "aggregate budgets", "rollback", "file_write", "file_edit", "file_append",
+    "mission_complete", "verify", "Campaign Mode", "Demiurge", "Sebas", "Cocytus",
 )
 
 
@@ -55,8 +40,9 @@ class TestYggdrasilConfigDefaultSystemPrompt:
     def test_default_prompt_preserves_orchestrator_identity(self) -> None:
         prompt = YggdrasilConfig().system_prompt
         # Anchor identity lines must survive.
-        assert "You are Lilith, the orchestrator of the Yggdrasil ecosystem" in prompt
-        assert "Where Ancient Meets Digital" in prompt
+        assert "Lilith, Queen / Prime Orchestrator" in prompt
+        assert "Ainz / Overlord" in prompt
+        assert "orchestrator of the Yggdrasil ecosystem" not in prompt
 
     @pytest.mark.parametrize("keyword", _REQUIRED_KEYWORDS)
     def test_default_prompt_mentions_v7_keyword(self, keyword: str) -> None:
@@ -70,16 +56,17 @@ class TestYggdrasilConfigDefaultSystemPrompt:
         """The verified arsenal is a numbered list 1..9 — pin the count."""
         prompt = YggdrasilConfig().system_prompt
         clause_markers = re.findall(r"(?:^|\n)\s*\d+\.\s", prompt)
-        assert len(clause_markers) >= 9, (
-            f"v8 arsenal list should have at least 9 numbered clauses, "
+        assert len(clause_markers) >= 11, (
+            f"Queen/Mission contract should have at least 11 numbered clauses, "
             f"found {len(clause_markers)} in:\n{prompt}"
         )
 
     def test_default_prompt_mentions_safeguard(self) -> None:
         """Safeguard rule: 2 failures -> change strategy."""
         prompt = YggdrasilConfig().system_prompt.lower()
-        assert "fails twice" in prompt or "fail twice" in prompt
-        assert "change" in prompt
+        assert "diagnose the cause" in prompt
+        assert "change strategy" in prompt
+        assert "never duplicate an effect whose outcome is unknown" in prompt
 
 
 class TestDefaultConfigYamlSystemPrompt:
@@ -97,7 +84,9 @@ class TestDefaultConfigYamlSystemPrompt:
         prompt = parsed["system_prompt"]
         # system_prompt uses '>' folded style, so it can be a string.
         assert isinstance(prompt, str)
-        assert "Where Ancient Meets Digital" in prompt
+        assert "Lilith, Queen / Prime Orchestrator" in prompt
+        assert parsed["provider"] == "fabric"
+        assert parsed["model"] == "router"
 
     @pytest.mark.parametrize("keyword", _REQUIRED_KEYWORDS)
     def test_default_yaml_prompt_mentions_v7_keyword(self, keyword: str) -> None:
@@ -111,20 +100,44 @@ class TestDefaultConfigYamlSystemPrompt:
 
 
 class TestUserConfigYamlSystemPrompt:
-    """Sanity-check the live user config at ~/.yggdrasil/config.yaml.
+    """Custom personalities are user data, independent of bundled defaults."""
 
-    Skipped automatically if the file is absent — the test is here so
-    operators see a clear message when their personal prompt is stale.
-    """
-
-    USER_CONFIG_PATH = Path.home() / ".yggdrasil" / "config.yaml"
-
-    def test_user_prompt_preserves_identity(self) -> None:
-        if not self.USER_CONFIG_PATH.exists():
-            pytest.skip("~/.yggdrasil/config.yaml not present")
+    def test_user_prompt_preserves_identity(self, tmp_path, monkeypatch) -> None:
         import yaml
+        from lilith_cli.config import load_config
 
-        parsed = yaml.safe_load(self.USER_CONFIG_PATH.read_text(encoding="utf-8"))
-        prompt = parsed.get("system_prompt", "")
-        assert "You are Lilith" in prompt
-        assert "Where Ancient Meets Digital" in prompt
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        path = tmp_path / "config.yaml"
+        personality = "Eres Lilith. Habla español y respeta mi estilo nórdico."
+        path.write_text(yaml.safe_dump({"system_prompt": personality}), encoding="utf-8")
+        assert load_config(path).system_prompt == personality
+
+
+class TestDecisionSupportContract:
+    """Decision guidance is runtime policy, independent of user personality."""
+
+    def test_contract_defines_bounded_options_and_recommendation(self) -> None:
+        prompt = DECISION_SUPPORT_INSTRUCTIONS.lower()
+        assert "2 to 4" in prompt
+        assert '"recommended"' in prompt
+        assert "number or by option name" in prompt
+        assert "otherwise make a\n  reasonable assumption" in prompt
+        assert "not a substitute" in prompt
+
+    def test_custom_personality_receives_decision_support_at_runtime(self) -> None:
+        session = AgentSession.__new__(AgentSession)
+        session.system_prompt = "Mi personalidad privada"
+        session.history = []
+        session.config = SimpleNamespace(
+            history=SimpleNamespace(max_turns=5),
+            memory=SimpleNamespace(enabled=False),
+        )
+        session._tools_enabled = False
+        session._progress_enabled = False
+        session.get_tool_descriptions = list
+        session._load_project_instructions = lambda: ""
+
+        messages = session._build_messages()
+
+        assert messages[0]["content"].startswith("Mi personalidad privada")
+        assert DECISION_SUPPORT_INSTRUCTIONS in messages[0]["content"]

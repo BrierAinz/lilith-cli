@@ -51,6 +51,7 @@ from .config import CONFIG_DIR
 from .render import console, get_theme, render_error, set_theme
 from rich.syntax import Syntax
 from rich.tree import Tree as RichTree
+from lilith_tools.file_walk import walk_all_files
 
 if TYPE_CHECKING:
     from .session_runtime import SessionRuntime
@@ -1410,7 +1411,7 @@ async def _run_review_agent_task(
 
         result = await asyncio.to_thread(
             DelegateSubagentTool().execute,
-            preset="investigador-minimax",
+            preset="revisor-deepseek",
             prompt=prompt,
             max_tokens=3000,
         )
@@ -3126,41 +3127,64 @@ async def run_theme_command(session: SessionRuntime, args: str) -> None:  # noqa
         if not rest:
             render_error("Uso: /theme preview <nombre>")
             return
-        try:
-            target = get_theme(rest)
-        except KeyError:
-            render_error(f"Tema desconocido: {rest}. Usá /theme list para ver los disponibles.")
+        from .render import THEMES as _themes_dict
+        target_name = rest.strip().lower()
+        if target_name not in _themes_dict:
+            render_error(
+                f"Tema desconocido: {rest}. Usá /theme list para ver los disponibles."
+            )
             return
-        # Render a sample panel with the target theme's colors without
-        # mutating the live theme. We use a temp console with the
-        # target theme's style to show what /help banners would look
-        # like. Does NOT call set_theme(), so the user's current theme
-        # is untouched.
-        from rich.console import Console
-        from rich.panel import Panel
+        target = _themes_dict[target_name]
 
-        preview_console = Console(theme=None, record=False, force_terminal=True)
-        # We can't easily swap themes mid-console; instead, just print
-        # the theme's attributes so the user sees what they'd get.
-        console.print(
-            f"\n[bold realm]᛭ Preview de '{rest}' (sin aplicar)[/]\n"
-        )
-        console.print(f"  [info]Label:[/]            [bold]{target.label}[/]")
-        console.print(f"  [info]Prefijo prompt:[/]    [bold]{target.prompt_prefix}[/]")
-        console.print(f"  [info]Bordes:[/]           [bold {target.border_style}]{target.border_style}[/]")
-        console.print(f"  [info]Descripción:[/]      {target.description}")
-        # Sample a panel in the target border color so the user sees
-        # the actual styling, not just metadata.
-        sample = Panel(
-            f"Prompt prefix: [bold]{target.prompt_prefix}[/]\n"
-            f"Border: {target.border_style}\n"
-            f"Label: {target.label}",
-            title=f"[bold {target.border_style}]{target.label}[/]",
-            border_style=target.border_style,
-            expand=False,
-        )
-        console.print(sample)
-        console.print()
+        # ── Render a truthful preview WITHOUT calling set_theme ──
+        # We temporarily push the target theme onto the console, render
+        # sample output using the REAL renderers, then pop it back.
+        # This never touches _active_theme_name, so get_theme() still
+        # returns the user's actual theme.
+        from rich.theme import Theme as _RichTheme
+
+        console.push_theme(_RichTheme(target.theme))
+        try:
+            console.print(
+                f"\n[bold realm]᛭ Preview de '{target_name}' (sin aplicar)[/]\n"
+            )
+            # 1. Banner
+            from rich.text import Text as _Text
+            lines = [l.rstrip() for l in target.banner.strip("\n").splitlines()]
+            console.print(_Text("\n".join(lines), style=f"bold {target.border_style}"))
+            console.print()
+
+            # 2. Tool line
+            from .render import render_tool_line
+            render_tool_line("file_read", "render.py — 42 líneas", duration=0.23)
+
+            # 3. Diff
+            from .render import render_diff
+            sample_diff = (
+                "--- render.py\n+++ render.py\n"
+                "@@ -10,3 +10,3 @@\n"
+                " def render():\n"
+                '-    return "old"\n'
+                '+    return "new"\n'
+            )
+            console.print(render_diff(sample_diff, "render.py"))
+
+            # 4. Error
+            from .render import render_error as _render_err
+            _render_err("Ejemplo de error — esto es rojo solo si algo falla")
+
+            # 5. Prompt prefix
+            console.print(
+                f"\n  [info]Prefijo prompt:[/]  [bold]{target.prompt_prefix}[/]"
+            )
+            console.print(
+                f"  [info]Bordes:[/]          "
+                f"[bold {target.border_style}]{target.border_style}[/]"
+            )
+            console.print(f"  [info]Descripción:[/]    {target.description}")
+            console.print()
+        finally:
+            console.pop_theme()
         return
 
     try:
@@ -4155,7 +4179,7 @@ def _pin_default_message(
     return {"ok": True, "entry": entry, "index": index}
 
 
-def _print_pin_result(result: dict[str, Any], pins: list[dict[str, Any]]) -> None:
+def _print_pin_result(session: Any, result: dict[str, Any], pins: list[dict[str, Any]]) -> None:
     """Render the result of a default ``/pin`` invocation."""
     if not result.get("ok"):
         render_error(result.get("error", "Error fijando mensaje"))
@@ -4320,7 +4344,6 @@ _register_pin_tool()
 
 # Provider hint derived from model-name prefixes or known families.
 _MODEL_PROVIDER_HINTS: dict[str, str] = {
-    "fugu": "Sakana",
     "claude": "Anthropic",
     "gpt": "OpenAI",
     "o3": "OpenAI",
@@ -4334,8 +4357,6 @@ _MODEL_PROVIDER_HINTS: dict[str, str] = {
 
 # Capabilities are broad tags useful for REPL display.
 _MODEL_CAPABILITIES: dict[str, list[str]] = {
-    "fugu-ultra": ["chat", "tool-calling", "long-context", "streaming"],
-    "fugu-ultra-20260615": ["chat", "tool-calling", "long-context", "streaming"],
     "claude-sonnet-4": ["chat", "tool-calling", "vision", "long-context", "streaming"],
     "claude-opus-4": ["chat", "tool-calling", "vision", "long-context", "streaming", "reasoning"],
     "claude-opus-5": ["chat", "tool-calling", "vision", "long-context", "streaming", "reasoning"],
@@ -5007,9 +5028,13 @@ def _build_tree(
 def _repo_map_entries(root: Path) -> list[tuple[str, str, int]]:
     """Collecta archivos Python con sus símbolos principales para /map."""
     entries: list[tuple[str, str, int]] = []
-    for path in sorted(root.rglob("*.py"), key=lambda item: str(item).lower()):
-        if any(part in _TREE_IGNORED_DIRS for part in path.parts):
-            continue
+    # Antes esto era rglob("*.py") y luego descartaba por _TREE_IGNORED_DIRS,
+    # o sea que ya habia bajado a .venv y a node_modules antes de descartarlos:
+    # el coste estaba pagado. Podar reutiliza la misma lista de ignorados.
+    candidatos = walk_all_files(
+        root, "*.py", exclude_dirs=frozenset(_TREE_IGNORED_DIRS)
+    )
+    for path in sorted(candidatos, key=lambda item: str(item).lower()):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         except (OSError, SyntaxError, UnicodeDecodeError):
@@ -7314,8 +7339,7 @@ async def run_goal_command(session: SessionRuntime, args: str) -> None:
 
 
 async def run_help_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
-    """Show available commands grouped by category (/help [category])."""
-    from rich.table import Table
+    """Show the canonical command discovery surface (/help [query])."""
 
     # Command catalog grouped by category
     catalog: dict[str, list[tuple[str, str]]] = {
@@ -7323,6 +7347,7 @@ async def run_help_command(session: SessionRuntime, args: str) -> None:  # noqa:
             ("clear", "Limpiar historial"),
             ("compact", "Resumir historial [--dry-run --force --keep-last N]"),
             ("history", "Ver historial [--tool <name>]"),
+            ("transcript", "Exportar o inspeccionar la transcripción de la sesión"),
             ("status", "Estado de la sesión con colores por uso"),
             ("undo", "Deshacer última operación"),
             ("undo-peek", "Listar/previsualizar backups pendientes [N | list | clear]"),
@@ -7399,6 +7424,8 @@ async def run_help_command(session: SessionRuntime, args: str) -> None:  # noqa:
                     ("state", "Plan de orquestación persistente [show|clear]"),
                     ("costs", "Telemetría de delegaciones por preset [reset]"),
                     ("skills", "Catálogo de skills de delegación [show|save|delete <name>]"),
+                    ("kit", "Skills incluidas: list | show NOMBRE; solo lectura"),
+                    ("capabilities", "Herramientas, límites y token de Windows; no cambia permisos"),
                     ("learn", "Minar post-mortems de delegación y sugerir skills [save N]"),
                     ("context", "Presupuesto de contexto con barra y umbral [--json]"),
             ("temperature", "Ver o ajustar la temperatura de sampling [valor|reset] [--save]"),
@@ -7468,36 +7495,9 @@ async def run_help_command(session: SessionRuntime, args: str) -> None:  # noqa:
         ],
     }
 
-    text = args.strip().lower()
+    from .command_surface import render_help
 
-    if text:
-        # Filter by category
-        matches = {k: v for k, v in catalog.items() if k.lower() == text or text in k.lower()}
-        if not matches:
-            available = ", ".join(sorted(catalog.keys()))
-            render_error(f"Categoría desconocida: {text}. Disponibles: {available}")
-            return
-        catalog = matches
-
-    table = Table(
-        title="[bold realm]᛭ Comandos de Lilith[/]",
-        show_header=True,
-        header_style="bold cyan",
-        border_style="cyan",
-        expand=True,
-        caption=f"[dim]{sum(len(v) for v in catalog.values())} comandos en {len(catalog)} categorías[/dim]",
-    )
-    table.add_column("Comando", style="bold cyan", no_wrap=True)
-    table.add_column("Descripción", style="white")
-
-    for category in sorted(catalog.keys()):
-        # Add category separator row
-        table.add_row(f"[bold magenta]{category}[/]", "")
-        for cmd_name, desc in catalog[category]:
-            table.add_row(f"  /{cmd_name}", desc)
-
-    console.print(table)
-    console.print()
+    render_help(catalog, args)
 """Source for /deps slash command block. Appended to extra_commands.py by _deps_section.py."""
 import re
 import shutil
@@ -9300,13 +9300,16 @@ async def run_cd_command(session: SessionRuntime, args: str) -> None:  # noqa: A
     """
     raw_path = args.strip()
     if not raw_path:
-        console.print(f"[info]Directorio actual:[/] [bold cyan]{Path.cwd()}[/]")
+        console.print(
+            f"[info]Directorio actual:[/] [bold cyan]{Path.cwd()}[/]",
+            soft_wrap=True,
+        )
         return
 
     # Las rutas con espacios se escriben entre comillas por costumbre de shell
     # (y porque otros comandos del REPL, como /random, las parsean con shlex).
     # Sin desenvolverlas la ruta se toma como relativa y en Windows falla
-    # siempre: "D:\Proyectos\60_Private\Influencer-IA" no existe dentro del cwd.
+    # siempre: "D:\workspace\private-project" no existe dentro del cwd.
     if len(raw_path) >= 2 and raw_path[0] == raw_path[-1] and raw_path[0] in ('"', "'"):
         raw_path = raw_path[1:-1].strip()
         if not raw_path:
@@ -9331,7 +9334,10 @@ async def run_cd_command(session: SessionRuntime, args: str) -> None:  # noqa: A
         render_error(f"No pude cambiar de directorio: {exc}")
         return
 
-    console.print(f"[success]✓ Directorio actual:[/] [bold cyan]{Path.cwd()}[/]")
+    console.print(
+        f"[success]✓ Directorio actual:[/] [bold cyan]{Path.cwd()}[/]",
+        soft_wrap=True,
+    )
 
 
 # ── /epoch command ────────────────────────────────────────────────────────────

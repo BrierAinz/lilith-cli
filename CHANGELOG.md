@@ -2,7 +2,7 @@
 
 All notable changes to the public Lilith CLI repository are documented here.
 
-## Unreleased — v4.6.0 candidate
+## v4.6.0 — 2026-09-18
 
 ### Added
 

@@ -44,6 +44,19 @@ flowchart LR
 | [`lilith-memory`](lilith-memory/) | Vector memory store: SQLite backend, semantic chunker, hashed-embedding RAG |
 | [`lilith-tools`](lilith-tools/) | Coding, filesystem, MCP, search, delegation and operator tools used by the CLI |
 
+## Security model
+
+Lilith treats model output as untrusted input to a capability-scoped tool runtime. The public OSS surface is designed around explicit authority boundaries rather than implicit workstation trust.
+
+- **Capability scopes:** tools declare whether they are read-only or mutating; review-only execution fails closed for tools without an explicit read-only capability.
+- **Human approval boundaries:** external consequences, credentials and irreversible operations remain operator-gated.
+- **Durable execution:** delegation intent and checkpoints are persisted before launch; unknown effects are never assumed safe to retry.
+- **MCP and external-agent boundaries:** optional adapters are explicit, configuration-driven and fail closed when their wrapper or observation root is absent.
+- **Secret handling:** credentials are referenced through environment variables and redacted from logs, fixtures and public configuration paths.
+- **Private infrastructure separation:** workstation-specific privileged launchers, account routing and owner transports are intentionally outside the public core.
+
+See [SECURITY.md](SECURITY.md) for vulnerability reporting and security scope.
+
 ## Installation
 
 Requires Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/).

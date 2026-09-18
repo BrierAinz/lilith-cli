@@ -232,7 +232,15 @@ class QualityMixin:
         return f"{self._execution_stage} · {age}"
 
     def _quality_tick(self) -> None:
-        if self.is_mounted and not self._exit and self.screen is self.screen_stack[0] and self.query("#status-center") and self.query("#review-summary"):
+        screen_stack = self.screen_stack
+        if (
+            self.is_mounted
+            and not self._exit
+            and screen_stack
+            and self.screen is screen_stack[0]
+            and self.query("#status-center")
+            and self.query("#review-summary")
+        ):
             self.query_one("#status-center", Static).update(Text(self.quality_status()))
             self.query_one("#review-summary", Static).update(Text(
                 "REVISIÓN\n\n" + self.quality_status() + "\n\n"

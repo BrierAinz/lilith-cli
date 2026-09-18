@@ -332,9 +332,6 @@ class AgentSession:
 
         store = OrchestrationStateStore()
         while self._mission_task_id == task_id:
-            await asyncio.sleep(self._mission_heartbeat_seconds)
-            if self._mission_task_id != task_id:
-                return
             try:
                 await asyncio.to_thread(
                     store.renew_lease,
@@ -360,6 +357,7 @@ class AgentSession:
                 self.cancel()
                 logger.error("Interactive mission lease lost for %s", task_id)
                 return
+            await asyncio.sleep(self._mission_heartbeat_seconds)
 
     async def _adopt_mission_prepare_result(self, result: ToolResult) -> None:
         if result.content.startswith("Error:"):

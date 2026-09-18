@@ -28,3 +28,5 @@ For TUI or other visible changes, include screenshots or recordings. Write `Not 
 - [ ] Documentation and help text are updated when needed.
 - [ ] No credentials, personal data, or generated noise are included.
 - [ ] Compatibility and security effects are documented above.
+- [ ] New tools or agent actions declare the correct capability/authority boundary.
+- [ ] Unknown or irreversible effects are not treated as safe to retry.

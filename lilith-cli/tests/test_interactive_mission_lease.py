@@ -54,9 +54,14 @@ async def _exercise_session(project: Path, state: Path, longruns: Path):
     )
     assert runtime.next_eligible() is None
 
-    await asyncio.sleep(0.12)
-    events = store.events(limit=100, task_id=task_id)
-    assert any(row["event_type"] == "task.lease_renewed" for row in events)
+    deadline = asyncio.get_running_loop().time() + 1.0
+    while True:
+        events = store.events(limit=100, task_id=task_id)
+        if any(row["event_type"] == "task.lease_renewed" for row in events):
+            break
+        if asyncio.get_running_loop().time() >= deadline:
+            raise AssertionError("mission heartbeat did not renew the lease within 1 second")
+        await asyncio.sleep(0.01)
 
     complete = ToolCall(
         id="complete",

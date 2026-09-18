@@ -19,13 +19,17 @@ def test_real_powershell_timeout_retains_job_header():
     started = time.monotonic()
     # No child process is created by this script. It intentionally does not test
     # cancellation of a real launcher/worker tree or access any existing job.
+    # Write directly to Console.Out and flush before sleeping: Write-Output goes
+    # through PowerShell's pipeline and may remain buffered when redirected on
+    # Windows, which made this transport test depend on scheduler/buffer timing.
     with pytest.raises(subprocess.TimeoutExpired) as caught:
         _powershell(
             [
                 "-NonInteractive",
                 "-Command",
                 (
-                    "Write-Output '=== Vor job 20260912-000000-1234  (synthetic)  ==='; "
+                    "[Console]::Out.WriteLine('=== Vor job 20260912-000000-1234  (synthetic)  ==='); "
+                    "[Console]::Out.Flush(); "
                     "Start-Sleep -Seconds 10"
                 ),
             ],

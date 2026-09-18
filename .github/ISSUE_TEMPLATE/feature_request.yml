@@ -20,7 +20,9 @@ body:
         - Core
         - Memory and RAG
         - Skills
-        - Orchestrator
+        - Orchestrator and Court
+        - Campaign runtime and durable missions
+        - Web console
         - Installation or packaging
         - Documentation
         - Other

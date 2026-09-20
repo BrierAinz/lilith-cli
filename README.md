@@ -17,6 +17,19 @@ Lilith is a terminal-first coding environment: an interactive agent REPL, a full
 
 > Born in the Yggdrasil ecosystem. This repository contains the complete open-source Lilith stack required by the CLI and terminal IDE.
 
+## Project status
+
+Lilith CLI is an active public workspace for terminal-first agent development.
+The current open-source surface focuses on the CLI, Textual IDE, capability-scoped
+tools, local memory, durable task execution and explicit recovery boundaries.
+
+| Area | Status |
+|---|---|
+| Primary platform | Windows-native development, with Python 3.11+ workspace support |
+| Interface | Chat REPL, Textual TUI IDE, Hoguera workspace and task runner |
+| Safety model | Capability-scoped tools, persisted intent, bounded verification and operator review |
+| Private boundary | Privileged launchers, account routing and workstation-specific orchestration are intentionally out of scope |
+
 ## Architecture
 
 ```mermaid

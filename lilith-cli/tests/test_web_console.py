@@ -53,6 +53,84 @@ def test_websocket_rejects_missing_token(tmp_path: Path) -> None:
     assert caught.value.code == 4401
 
 
+def _tokenless_loopback_client(tmp_path: Path, monkeypatch, host: str) -> TestClient:
+    monkeypatch.delenv("LILITH_AUTH_TOKEN", raising=False)
+    return TestClient(
+        create_app(workspace=str(tmp_path), allowed_origins=["http://localhost:12356"]),
+        headers={"host": host},
+        client=("127.0.0.1", 50000),
+    )
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1:12356", "localhost:12356", "[::1]:12356"])
+def test_tokenless_loopback_accepts_local_host_header(
+    tmp_path: Path, monkeypatch, host: str
+) -> None:
+    client = _tokenless_loopback_client(tmp_path, monkeypatch, host)
+    assert client.get("/api/files").status_code == 200
+    response = client.get("/api/files", headers={"origin": "http://localhost:5173"})
+    assert response.status_code == 200
+
+
+def test_tokenless_loopback_rejects_dns_rebinding_host(tmp_path: Path, monkeypatch) -> None:
+    """A rebinding page reaches 127.0.0.1, but its Host header is foreign."""
+    (tmp_path / "source.py").write_text("secret = 1\n", encoding="utf-8")
+    client = _tokenless_loopback_client(tmp_path, monkeypatch, "attacker.example:12356")
+    assert client.get("/api/files").status_code == 401
+    assert client.get("/api/files/source.py").status_code == 401
+
+
+def test_tokenless_loopback_rejects_foreign_origin(tmp_path: Path, monkeypatch) -> None:
+    client = _tokenless_loopback_client(tmp_path, monkeypatch, "127.0.0.1:12356")
+    response = client.get("/api/files", headers={"origin": "https://attacker.example"})
+    assert response.status_code == 401
+
+
+def test_tokenless_websocket_rejects_dns_rebinding_host(tmp_path: Path, monkeypatch) -> None:
+    client = _tokenless_loopback_client(tmp_path, monkeypatch, "attacker.example:12356")
+    with (
+        pytest.raises(WebSocketDisconnect) as caught,
+        client.websocket_connect("/api/terminal"),
+    ):
+        pass
+    assert caught.value.code == 4401
+
+
+def test_web_dev_reload_uses_an_import_string_factory(tmp_path: Path, monkeypatch) -> None:
+    """Regression: uvicorn exits when ``reload=True`` gets an app object."""
+    import uvicorn
+    from lilith_cli.web_console import server
+    from lilith_cli.web_console.serve import web
+
+    for name in ("LILITH_WEB_WORKSPACE", "LILITH_WEB_ORIGINS", "LILITH_WEB_CONFIG"):
+        monkeypatch.delenv(name, raising=False)
+    calls: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    web(root=str(tmp_path), dev=True)
+
+    (args, kwargs), = calls
+    assert args == ("lilith_cli.web_console.server:create_app_from_env",)
+    assert kwargs["factory"] is True and kwargs["reload"] is True
+    app = server.create_app_from_env()
+    assert app.state.workspace == tmp_path.resolve()
+
+
+def test_web_without_dev_passes_the_app_without_reload(tmp_path: Path, monkeypatch) -> None:
+    import uvicorn
+    from fastapi import FastAPI
+    from lilith_cli.web_console.serve import web
+
+    calls: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    web(root=str(tmp_path))
+
+    (args, kwargs), = calls
+    assert isinstance(args[0], FastAPI)
+    assert not kwargs.get("reload")
+
+
 class _Provider:
     async def close(self) -> None:
         return None
@@ -87,3 +165,18 @@ def test_authenticated_chat_uses_canonical_runtime(tmp_path: Path, monkeypatch) 
     assert result["type"] == "chat_result"
     assert result["content"] == "echo:hello"
     assert result["usage"]["total_tokens"] == 3
+
+
+def test_built_frontend_is_served_without_exposing_the_api(tmp_path: Path) -> None:
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<div id=root></div>", encoding="utf-8")
+    (dist / "assets" / "app.js").write_text("console.log(1)", encoding="utf-8")
+    client = TestClient(create_app(
+        workspace=str(tmp_path), auth_token=TOKEN, frontend_dir=dist,
+    ))
+
+    assert client.get("/").text == "<div id=root></div>"
+    assert client.get("/assets/app.js").status_code == 200
+    assert client.get("/api/files").status_code == 401
+    assert client.get("/api/health/").status_code == 200

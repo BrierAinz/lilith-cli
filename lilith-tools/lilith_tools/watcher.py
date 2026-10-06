@@ -61,11 +61,27 @@ class _WatchEntry:
                 return True
         return False
 
+    def _add_event(self, event_type: str, path: str) -> None:
+        """Record an observer event if it matches this watch's patterns."""
+        path_obj = Path(path)
+        try:
+            rel_str = str(path_obj.relative_to(Path(self.paths[0])))
+        except ValueError:
+            rel_str = path_obj.name
+
+        if not self.matches(rel_str):
+            return
+
+        with self.lock:
+            self.events.append(_WatchEvent(time.time(), event_type, str(path)))
+
 
 class _WatchManager:
     """In-memory manager for active file watches."""
 
     _instance: _WatchManager | None = None
+    _watches: dict[str, _WatchEntry]
+    _counter: int
     _lock = threading.Lock()
 
     def __new__(cls) -> _WatchManager:
@@ -73,7 +89,7 @@ class _WatchManager:
             with cls._lock:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
-                    cls._instance._watches: dict[str, _WatchEntry] = {}
+                    cls._instance._watches = {}
                     cls._instance._counter = 0
         return cls._instance
 
@@ -88,20 +104,6 @@ class _WatchManager:
             p = os.path.expanduser(p)
             expanded.append(str(Path(p).resolve()))
         return expanded
-
-    def _add_event(self, entry: _WatchEntry, event_type: str, path: str) -> None:
-        path_obj = Path(path)
-        try:
-            rel = path_obj.relative_to(Path(entry.paths[0]))
-            rel_str = str(rel)
-        except ValueError:
-            rel_str = path_obj.name
-
-        if not entry.matches(rel_str):
-            return
-
-        with entry.lock:
-            entry.events.append(_WatchEvent(time.time(), event_type, str(path)))
 
     def start(
         self,

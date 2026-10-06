@@ -8,8 +8,8 @@ import json
 import sqlite3
 import time
 import uuid
+from contextlib import closing
 from typing import TYPE_CHECKING, Any
-
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -46,7 +46,7 @@ class SemanticMemory:
 
     def _init_db(self) -> None:
         """Create the semantic_memories table and indexes."""
-        with sqlite3.connect(self._db_path) as conn:
+        with closing(sqlite3.connect(self._db_path)) as conn, conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute(
                 """
@@ -201,7 +201,7 @@ class SemanticMemory:
             merged_metadata.setdefault("provenance", []).append(dict(provenance))
 
         def _insert() -> str:
-            with sqlite3.connect(self._db_path) as conn:
+            with closing(sqlite3.connect(self._db_path)) as conn, conn:
                 conn.row_factory = sqlite3.Row
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("PRAGMA foreign_keys=ON")
@@ -316,7 +316,7 @@ class SemanticMemory:
         escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
         def _search() -> list[dict[str, Any]]:
-            with sqlite3.connect(self._db_path) as conn:
+            with closing(sqlite3.connect(self._db_path)) as conn, conn:
                 conn.row_factory = sqlite3.Row
                 conn.execute("PRAGMA journal_mode=WAL")
                 filters = ["content LIKE ? ESCAPE '\\'", "confidence >= ?"]
@@ -367,7 +367,7 @@ class SemanticMemory:
             )
 
         def _get() -> list[dict[str, Any]]:
-            with sqlite3.connect(self._db_path) as conn:
+            with closing(sqlite3.connect(self._db_path)) as conn, conn:
                 conn.row_factory = sqlite3.Row
                 conn.execute("PRAGMA journal_mode=WAL")
                 filters = ["fact_type = ?"]
@@ -403,7 +403,7 @@ class SemanticMemory:
         """
 
         def _update() -> bool:
-            with sqlite3.connect(self._db_path) as conn:
+            with closing(sqlite3.connect(self._db_path)) as conn, conn:
                 conn.execute("PRAGMA journal_mode=WAL")
                 # Fetch current confidence
                 row = conn.execute(
@@ -436,7 +436,7 @@ class SemanticMemory:
         delta = magnitude if supports else -magnitude
 
         def _record() -> bool:
-            with sqlite3.connect(self._db_path) as conn:
+            with closing(sqlite3.connect(self._db_path)) as conn, conn:
                 conn.execute("PRAGMA foreign_keys=ON")
                 conn.execute("BEGIN IMMEDIATE")
                 row = conn.execute(
@@ -467,7 +467,7 @@ class SemanticMemory:
 
     async def evidence(self, item_id: str) -> list[dict[str, Any]]:
         def _read() -> list[dict[str, Any]]:
-            with sqlite3.connect(self._db_path) as conn:
+            with closing(sqlite3.connect(self._db_path)) as conn, conn:
                 conn.row_factory = sqlite3.Row
                 rows = conn.execute(
                     "SELECT * FROM semantic_evidence WHERE memory_id=? "
@@ -497,7 +497,7 @@ class SemanticMemory:
 
     async def prune_expired(self) -> int:
         def _prune() -> int:
-            with sqlite3.connect(self._db_path) as conn:
+            with closing(sqlite3.connect(self._db_path)) as conn, conn:
                 conn.execute("PRAGMA foreign_keys=ON")
                 cursor = conn.execute(
                     "DELETE FROM semantic_memories WHERE expires_at IS NOT NULL AND expires_at <= ?",
@@ -524,7 +524,7 @@ class SemanticMemory:
         """Return the total number of semantic memory entries."""
 
         def _count() -> int:
-            with sqlite3.connect(self._db_path) as conn:
+            with closing(sqlite3.connect(self._db_path)) as conn, conn:
                 conn.execute("PRAGMA journal_mode=WAL")
                 row = conn.execute("SELECT COUNT(*) FROM semantic_memories").fetchone()
                 return row[0] if row else 0
@@ -543,7 +543,7 @@ class SemanticMemory:
         """
 
         def _delete() -> bool:
-            with sqlite3.connect(self._db_path) as conn:
+            with closing(sqlite3.connect(self._db_path)) as conn, conn:
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("PRAGMA foreign_keys=ON")
                 cursor = conn.execute(
@@ -564,7 +564,7 @@ class SemanticMemory:
         """
 
         def _clear() -> int:
-            with sqlite3.connect(self._db_path) as conn:
+            with closing(sqlite3.connect(self._db_path)) as conn, conn:
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("PRAGMA foreign_keys=ON")
                 cursor = conn.execute("DELETE FROM semantic_memories")

@@ -14,8 +14,8 @@ from unittest.mock import patch
 
 import pytest
 
-import lilith_cli.extra_commands as extra_commands
 from lilith_cli.extra_commands import run_feedback_command
+from lilith_cli.slash_commands import extras as extras_cmds
 
 
 class DummyConfig:
@@ -46,7 +46,7 @@ class _Session:
 
 def _patch_config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     """Redirect CONFIG_DIR lookups to a temporary directory."""
-    monkeypatch.setattr(extra_commands, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(extras_cmds, "CONFIG_DIR", tmp_path)
 
 
 def _feedback_file(tmp_path) -> str:
@@ -85,7 +85,7 @@ async def test_add_appends_entry_with_iso_timestamp(monkeypatch, tmp_path):
     _patch_config_dir(monkeypatch, tmp_path)
     session = _Session()
 
-    with patch("lilith_cli.extra_commands.console.print") as _print:
+    with patch("lilith_cli.render.console.print") as _print:
         await run_feedback_command(session, "add el agente clavó el bug")
 
     path = tmp_path / "feedback.json"
@@ -126,7 +126,7 @@ async def test_clear_confirmed_wipes_store(monkeypatch, tmp_path):
     session = _Session()
 
     with patch("rich.prompt.Confirm.ask", return_value=True), \
-         patch("lilith_cli.extra_commands.console.print") as _print:
+         patch("lilith_cli.render.console.print") as _print:
         await run_feedback_command(session, "clear")
 
     assert feedback_file.read_text(encoding="utf-8").strip() == "[]"
@@ -145,7 +145,7 @@ async def test_clear_declined_keeps_store(monkeypatch, tmp_path):
     session = _Session()
 
     with patch("rich.prompt.Confirm.ask", return_value=False), \
-         patch("lilith_cli.extra_commands.console.print") as _print:
+         patch("lilith_cli.render.console.print") as _print:
         await run_feedback_command(session, "clear")
 
     assert feedback_file.read_text(encoding="utf-8") == original

@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 
-import pytest
 
 
 def _run(coro):
@@ -94,7 +92,7 @@ def test_explain_feature_shallow(fake_session, capsys):
     out = capsys.readouterr().out
     assert "shallow" in out.lower()
     # Shallow version should be shorter than full
-    full_cmd_out = capsys.readouterr().out  # discard
+    capsys.readouterr()  # discard
     assert len(out) < 500  # sanity: shallow should fit easily
 
 

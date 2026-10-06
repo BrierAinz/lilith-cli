@@ -3,6 +3,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 
 # Ensure lilith_cli is importable
 _PKG_DIR = str(Path(__file__).resolve().parent.parent)
@@ -77,12 +79,55 @@ def test_resolve_yggdrasil_root(tmp_path, monkeypatch):
         "[project]\nname = 'fake-yggdrasil'\n", encoding="utf-8"
     )
     fake_module.write_text("", encoding="utf-8")
+    (fake_root / "ygg.py").write_text("", encoding="utf-8")
     monkeypatch.setattr(cli_main, "__file__", str(fake_module))
 
     root = cli_main._resolve_yggdrasil_root()
     assert isinstance(root, Path)
     assert root == fake_root
     assert (root / "pyproject.toml").exists()
+
+
+def test_resolve_yggdrasil_root_without_hub_uses_config_dir(tmp_path, monkeypatch):
+    """A standalone checkout must not guess a parent directory as the hub."""
+    from lilith_cli import main as cli_main
+
+    monkeypatch.delenv("YGGDRASIL_ROOT", raising=False)
+    fake_module = tmp_path / "home" / "src" / "lilith-cli" / "lilith_cli" / "main.py"
+    fake_module.parent.mkdir(parents=True)
+    fake_module.write_text("", encoding="utf-8")
+    monkeypatch.setattr(cli_main, "__file__", str(fake_module))
+
+    assert cli_main._resolve_yggdrasil_root() == cli_main.CONFIG_DIR
+    with pytest.raises(ImportError, match="YGGDRASIL_ROOT"):
+        cli_main._lazy_import_ygg()
+
+
+def test_lazy_import_ygg_loads_the_hub_file_not_a_shadowing_module(tmp_path, monkeypatch):
+    """Regression: ``import ygg`` ran whichever ygg came first on sys.path."""
+    from lilith_cli import main as cli_main
+
+    shadow = tmp_path / "shadow"
+    shadow.mkdir()
+    (shadow / "ygg.py").write_text("WHO = 'shadow'\n", encoding="utf-8")
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    (hub / "ygg.py").write_text("WHO = 'hub'\n", encoding="utf-8")
+    monkeypatch.setenv("YGGDRASIL_ROOT", str(hub))
+    monkeypatch.setattr(sys, "path", [str(shadow), *sys.path])
+    monkeypatch.delitem(sys.modules, "ygg", raising=False)
+
+    assert cli_main._lazy_import_ygg().WHO == "hub"
+    assert cli_main._lazy_import_ygg() is sys.modules["ygg"]
+
+
+def test_hub_paths_are_appended_after_installed_packages(tmp_path, monkeypatch):
+    from lilith_cli import main as cli_main
+
+    monkeypatch.setattr(sys, "path", ["site-packages"])
+    cli_main.add_hub_to_sys_path(tmp_path)
+    cli_main.add_hub_to_sys_path(tmp_path)
+    assert sys.path == ["site-packages", str(tmp_path)]
 
 
 def test_reconfigure_stdio_sets_utf8(monkeypatch):

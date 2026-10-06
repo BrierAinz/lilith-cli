@@ -7,16 +7,16 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from lilith_cli.slash_commands import sessions as sessions_cmds
 
 
 @pytest.fixture
 def isolated_replays(tmp_path: Path, monkeypatch):
     """Redirect the replay directory to a tmp_path so tests do not touch real config."""
-    from lilith_cli import extra_commands as ec
 
     fake_dir = tmp_path / "replays"
     fake_dir.mkdir()
-    monkeypatch.setattr(ec, "_REPLAY_DIR", fake_dir)
+    monkeypatch.setattr(sessions_cmds, "_REPLAY_DIR", fake_dir)
     return fake_dir
 
 
@@ -28,7 +28,7 @@ async def test_replay_list_empty(fake_session, isolated_replays):
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_replay_command
 
         await run_replay_command(fake_session, "")
@@ -54,7 +54,7 @@ async def test_replay_list_renders_saved_names(fake_session, isolated_replays):
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_replay_command
 
         await run_replay_command(fake_session, "list")
@@ -73,7 +73,7 @@ async def test_replay_save_writes_file(fake_session, isolated_replays):
         {"role": "assistant", "content": "chau"},
     ]
 
-    with patch("lilith_cli.extra_commands.console.print"):
+    with patch("lilith_cli.render.console.print"):
         from lilith_cli.extra_commands import run_replay_command
 
         await run_replay_command(fake_session, "save demo")
@@ -92,7 +92,7 @@ async def test_replay_save_without_name_reports_error(fake_session, isolated_rep
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_replay_command
 
         await run_replay_command(fake_session, "save")
@@ -110,7 +110,7 @@ async def test_replay_save_without_history_reports_error(fake_session, isolated_
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_replay_command
 
         await run_replay_command(fake_session, "save demo")
@@ -131,7 +131,7 @@ async def test_replay_load_populates_session_history(fake_session, isolated_repl
         json.dumps(saved), encoding="utf-8"
     )
 
-    with patch("lilith_cli.extra_commands.console.print"):
+    with patch("lilith_cli.render.console.print"):
         from lilith_cli.extra_commands import run_replay_command
 
         await run_replay_command(fake_session, "load demo")
@@ -147,7 +147,7 @@ async def test_replay_load_by_id(fake_session, isolated_replays):
         json.dumps(saved), encoding="utf-8"
     )
 
-    with patch("lilith_cli.extra_commands.console.print"):
+    with patch("lilith_cli.render.console.print"):
         from lilith_cli.extra_commands import run_replay_command
 
         await run_replay_command(fake_session, "demo")
@@ -165,7 +165,7 @@ async def test_replay_load_missing_reports_error(fake_session, isolated_replays)
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_replay_command
 
         await run_replay_command(fake_session, "load does-not-exist")
@@ -186,7 +186,7 @@ async def test_replay_load_invalid_format_reports_error(fake_session, isolated_r
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_replay_command
 
         await run_replay_command(fake_session, "load bad")
@@ -208,7 +208,7 @@ async def test_replay_load_non_list_payload_reports_error(fake_session, isolated
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_replay_command
 
         await run_replay_command(fake_session, "load weird")

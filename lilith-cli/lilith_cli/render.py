@@ -1307,7 +1307,6 @@ def render_plan(plan: Any) -> None:
     """
     from rich.table import Table as _Table
 
-    from rich.panel import Panel as _Panel
 
     steps = list(getattr(plan, "steps", []))
     if not steps:

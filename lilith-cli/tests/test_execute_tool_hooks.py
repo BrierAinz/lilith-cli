@@ -11,7 +11,6 @@ hook firing. These tests verify that the CLI's tool execution path:
 
 from __future__ import annotations
 
-import asyncio
 import sys
 import types
 from pathlib import Path
@@ -218,7 +217,7 @@ async def test_pre_tool_call_hook_can_rewrite_args():
     session.attach_hooks(reg, session_id="sess-2")
 
     tc = _ToolCall("7", "dangerous", {"cmd": "original"})
-    res = await session.execute_tool(tc)
+    await session.execute_tool(tc)
     assert _DangerousTool.last_cmd == "REWRITTEN"
 
 

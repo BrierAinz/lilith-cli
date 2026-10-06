@@ -155,7 +155,8 @@ class LilithBus:
                 "VALUES (?, ?, ?, ?)",
                 (topic, body, role, ts),
             )
-            return int(cur.lastrowid)
+            assert cur.lastrowid is not None  # set by a successful INSERT
+            return cur.lastrowid
 
     # ---------------- poll (fan-out, non-destructive) ----------------
 

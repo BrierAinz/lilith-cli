@@ -3,34 +3,23 @@
 from __future__ import annotations
 
 import asyncio
-import dataclasses
-import difflib
-import json
-import re
-import shutil
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import yaml
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.events import Key
 from textual.reactive import reactive
-from textual.screen import ModalScreen
-from textual.theme import Theme
 from textual.widgets import (
     Button,
     Footer,
     Header,
     Input,
-    Label,
-    ListItem,
-    ListView,
     RichLog,
-    Select,
     Static,
     TabbedContent,
     TabPane,
@@ -45,7 +34,7 @@ from .config import IDEConfig
 from .context import ContextManager
 from .lsp.manager import LSPManager
 from .mission_panel import MissionPanelScreen
-from .plan import AgentPlan, build_execution_prompt, build_planning_prompt, parse_plan
+from .plan import AgentPlan
 from .plugins import PluginManager
 from .realms import RealmManager
 from .runestones import RunestoneForge
@@ -54,33 +43,15 @@ from ..ui_widgets import FollowLog, MessageInput
 from .quality import QualityMixin, QUALITY_BINDINGS, QUALITY_CSS
 from .utils.helpers import (
     GrepResult,
-    _apply_patch,
-    _backup_path,
-    _detect_language,
-    _normalize_line_endings,
-    _parse_unified_diff,
     _shorten_path,
 )
 from .screens.modals import (
-    CompletionScreen,
     ConfigScreen,
-    DiagnosticsScreen,
     DiffScreen,
-    FileSearchScreen,
-    FindReplaceScreen,
-    FindScreen,
-    GoToLineScreen,
     GrepScreen,
     HistoryScreen,
-    HoverScreen,
-    OutlineScreen,
-    PatchScreen,
-    ProjectFindReplaceScreen,
-    RecentFilesScreen,
-    RunestoneScreen,
     ToastHistoryScreen,
 )
-from .screens.splash import SplashScreen
 from .widgets.command_palette import CommandPaletteScreen, PaletteItem
 from .widgets.file_tree import RuneDirectoryTree
 from .views.editor import EditorMixin
@@ -89,6 +60,8 @@ from .views.file_tree import FileTreeMixin
 from .views.terminal import TerminalMixin
 from .views.git_view import GitMixin
 from .views.court_panel import CourtPanelMixin
+
+logger = logging.getLogger(__name__)
 
 class LilithIDEApp(
     QualityMixin,
@@ -345,14 +318,25 @@ class LilithIDEApp(
             # Already available text appears immediately.
 
     def _load_plugins(self) -> None:
-        """Discover and register plugins from .yggdrasil/plugins/."""
+        """Register plugins from .yggdrasil/plugins/ if the project is trusted."""
+        candidates = self.plugin_manager.discover()
+        if not candidates:
+            return
+        if not self.plugin_manager.is_trusted():
+            names = ", ".join(path.name for path in candidates)
+            self._chat_system(
+                f"[warning]Este proyecto trae plugins en .yggdrasil/plugins ({names}). "
+                "No se ejecutaron: son código del repositorio. Si confías en él, "
+                "escribe /plugins trust.[/]"
+            )
+            return
         try:
             self.plugin_manager.load_all()
             loaded = self.plugin_manager.register_all(self)
             if loaded:
                 self._chat_system(f"[dim]Plugins cargados: {', '.join(loaded)}[/]")
         except Exception:
-            pass
+            logger.exception("Plugin startup failed")
 
     def notify(
         self,
@@ -601,7 +585,7 @@ class LilithIDEApp(
         items.sort(key=lambda item: 0 if item.category == "Recientes" else 1)
 
         # Open files / tabs.
-        for tab_id, path in self._tab_paths.items():
+        for path in self._tab_paths.values():
             rel = _shorten_path(path, self.root)
             items.append(
                 PaletteItem(

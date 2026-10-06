@@ -6,15 +6,11 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 from lilith_cli.longrun.supervisor import (
     LegResult,
-    StopReason,
-    _check_pending_tools,
-    _fire_escalation,
     classify,
     failure_signature,
     supervise,
@@ -188,7 +184,6 @@ def _report(contract, consumed, journal, evidence, *, stop_reason=None, now=None
 @pytest.fixture(autouse=True)
 def _patch_longrun_imports(monkeypatch):
     """Patch the longrun contract/journal/evidence modules used by supervisor."""
-    import lilith_cli.longrun.supervisor as sup_mod
 
     # We need to patch at the point where supervisor does its lazy imports.
     # supervisor uses: from .contract import RunContract, Consumed, exhausted
@@ -592,27 +587,9 @@ class TestSupervise:
                       retry_after=None, tokens=20, usd=0.002,
                       raw={"status": "verified"}),
         ])
-        # We'll check state.json content between calls by wrapping the runner
-        state_snapshots = []
-        original_runner = runner
-
-        class InspectingRunner:
-            def __init__(self):
-                self.calls = 0
-
-            def __call__(self, contract, consumed, session_id, directory):
-                result = original_runner(contract, consumed, session_id, directory)
-                self.calls = original_runner.calls
-                # After the runner returns (and before the next iteration starts),
-                # we can't intercept *after* state is saved from here.
-                # But we'll check the final state below.
-                return result
-
-        inspecting = InspectingRunner()
-        # We need a different approach: check state.json exists at the end
-        # and has the right content
         fixed_now = datetime(2026, 9, 16, 12, 0, 30, tzinfo=timezone.utc)
         result = supervise(tmp_path, runner=runner, sleeper=FakeSleeper(), now=fixed_now)
+        assert result.code == "terminado"
 
         # state.json must exist on disk
         state_path = tmp_path / "state.json"
@@ -741,7 +718,6 @@ class TestSupervise:
         runner = FakeRunner([])
 
         call_count = [0]
-        park_jumped = [False]
 
         def advancing_clock():
             call_count[0] += 1

@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .api import chat, files, git, health, sessions, terminal
 from .auth import TokenAuthMiddleware
+
+
+FRONTEND_DIST = Path(__file__).resolve().parent / "frontend" / "dist"
 
 
 def create_app(
@@ -14,6 +19,7 @@ def create_app(
     auth_token: str | None = None,
     allowed_origins: list[str] | None = None,
     config_path: str | None = None,
+    frontend_dir: Path | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="Lilith Web Console",
@@ -49,4 +55,24 @@ def create_app(
     app.include_router(git.router, prefix="/api/git")
     app.include_router(sessions.router, prefix="/api/sessions")
     app.include_router(health.router, prefix="/api/health")
+
+    # The built React app (``npm run build`` in frontend/) is served from /
+    # when present; the API routes above take precedence.
+    dist = frontend_dir or FRONTEND_DIST
+    if (dist / "index.html").is_file():
+        app.mount("/", StaticFiles(directory=dist, html=True), name="frontend")
     return app
+
+
+def create_app_from_env() -> FastAPI:
+    """Build the app from ``LILITH_WEB_*`` variables for ``uvicorn --reload``.
+
+    The bearer token is still read from ``LILITH_AUTH_TOKEN`` by the
+    authentication middleware.
+    """
+    origins = [item for item in os.environ.get("LILITH_WEB_ORIGINS", "").split(",") if item]
+    return create_app(
+        workspace=os.environ.get("LILITH_WEB_WORKSPACE"),
+        allowed_origins=origins or None,
+        config_path=os.environ.get("LILITH_WEB_CONFIG") or None,
+    )

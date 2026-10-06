@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from rich.markdown import Markdown
+from textual.css.query import NoMatches
 from textual.widgets import Static, TabbedContent, TabPane, TextArea
 
 from ..screens.modals import (
@@ -775,22 +776,31 @@ class EditorMixin:
 
     def _auto_save_modified_files(self) -> None:
         saved: list[str] = []
+        failed: list[str] = []
         for tab_id in list(self._modified):  # type: ignore[attr-defined]
             path = self._tab_paths.get(tab_id)  # type: ignore[attr-defined]
             if not path:
                 continue
             try:
                 editor = self.query_one(f"#editor-{tab_id}", TextArea)  # type: ignore[attr-defined]
+            except NoMatches:
+                continue  # tab closed while the timer was pending
+            try:
                 backup = _backup_path(path)
                 backup.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
                 path.write_text(editor.text, encoding="utf-8")
                 self._modified.discard(tab_id)  # type: ignore[attr-defined]
                 saved.append(path.name)
-            except Exception:
-                pass
+            except (OSError, UnicodeError) as exc:
+                failed.append(f"{path.name} ({exc})")
         if saved:
             self.notify(f"Auto-guardado: {', '.join(saved)}", severity="information")  # type: ignore[attr-defined]
             self._update_editor_info()
+        if failed:
+            # The tab stays marked as modified, so the next attempt retries.
+            self.notify(  # type: ignore[attr-defined]
+                f"No se pudo auto-guardar: {'; '.join(failed)}", severity="error"
+            )
 
     # ── Editor TextArea event handlers ─────────────────────────────
 

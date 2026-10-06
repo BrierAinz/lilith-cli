@@ -62,9 +62,11 @@ class TestCacheControl:
 
     def test_disable_cache(self, engine):
         """disable_cache() turns off caching but keeps entries."""
-        engine._cache_enabled is True  # already enabled
+        assert engine._cache_enabled is True  # already enabled
+        engine._response_cache.put("key", "cached response")
         engine.disable_cache()
         assert engine._cache_enabled is False
+        assert engine._response_cache.has("key")
 
     def test_clear_cache_resets_counters(self, engine):
         """clear_cache() resets hits/misses counters."""

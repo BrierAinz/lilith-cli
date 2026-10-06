@@ -6,8 +6,8 @@ import asyncio
 import sqlite3
 import time
 import uuid
+from contextlib import closing
 from typing import TYPE_CHECKING, Any
-
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -44,7 +44,7 @@ class PreferenceStore:
 
     def _init_db(self) -> None:
         """Create the user_preferences table and indexes."""
-        with sqlite3.connect(self._db_path) as conn:
+        with closing(sqlite3.connect(self._db_path)) as conn, conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute(
                 """
@@ -117,7 +117,7 @@ class PreferenceStore:
         now = time.time()
 
         def _upsert() -> str:
-            with sqlite3.connect(self._db_path) as conn:
+            with closing(sqlite3.connect(self._db_path)) as conn, conn:
                 conn.execute("PRAGMA journal_mode=WAL")
                 # Check if key exists
                 existing = conn.execute(
@@ -164,7 +164,7 @@ class PreferenceStore:
         """
 
         def _get() -> dict[str, Any] | None:
-            with sqlite3.connect(self._db_path) as conn:
+            with closing(sqlite3.connect(self._db_path)) as conn, conn:
                 conn.row_factory = sqlite3.Row
                 conn.execute("PRAGMA journal_mode=WAL")
                 row = conn.execute(
@@ -184,7 +184,7 @@ class PreferenceStore:
         """
 
         def _get_all() -> list[dict[str, Any]]:
-            with sqlite3.connect(self._db_path) as conn:
+            with closing(sqlite3.connect(self._db_path)) as conn, conn:
                 conn.row_factory = sqlite3.Row
                 conn.execute("PRAGMA journal_mode=WAL")
                 rows = conn.execute(
@@ -206,7 +206,7 @@ class PreferenceStore:
         """
 
         def _delete() -> bool:
-            with sqlite3.connect(self._db_path) as conn:
+            with closing(sqlite3.connect(self._db_path)) as conn, conn:
                 conn.execute("PRAGMA journal_mode=WAL")
                 cursor = conn.execute(
                     "DELETE FROM user_preferences WHERE key = ?",
@@ -231,7 +231,7 @@ class PreferenceStore:
         """
 
         def _increase() -> bool:
-            with sqlite3.connect(self._db_path) as conn:
+            with closing(sqlite3.connect(self._db_path)) as conn, conn:
                 conn.execute("PRAGMA journal_mode=WAL")
                 row = conn.execute(
                     "SELECT confidence FROM user_preferences WHERE key = ?",
@@ -272,7 +272,7 @@ class PreferenceStore:
         """
 
         def _get_design() -> dict[str, Any]:
-            with sqlite3.connect(self._db_path) as conn:
+            with closing(sqlite3.connect(self._db_path)) as conn, conn:
                 conn.row_factory = sqlite3.Row
                 conn.execute("PRAGMA journal_mode=WAL")
                 rows = conn.execute(

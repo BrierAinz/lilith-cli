@@ -3,19 +3,14 @@
 from __future__ import annotations
 
 import json
-import tempfile
 from pathlib import Path
 
 import pytest
 
 from lilith_memory.ontology_graph import (
-    Entity,
     EntityType,
-    GraphPath,
     OntologyGraph,
-    Relation,
     RelationType,
-    SubGraph,
 )
 
 
@@ -446,3 +441,14 @@ class TestEdgeCases:
 
         sub = graph.neighbors(a.id, depth=5)
         assert len(sub.entities) == 3  # all reachable without infinite loop
+
+
+def test_default_in_memory_graph_keeps_its_data():
+    """Regression: each call opened a new, empty :memory: database, so the
+    default graph failed with "no such table: entities"."""
+    graph = OntologyGraph()
+    odin = graph.add_entity("Odin", "person")
+    mimir = graph.add_entity("Mimir", "person")
+    graph.add_relation(odin.id, mimir.id, "related_to")
+    assert graph.stats()["entity_count"] == 2
+    assert graph.get_entity(odin.id).name == "Odin"

@@ -1130,7 +1130,6 @@ class DelegateSubagentTool(BaseTool):
 
         last_raw = content
         last_errors = errors
-        last_response_format = response_format
 
         for level_name, level_system, level_rf in levels:
             logger.info(
@@ -1153,7 +1152,6 @@ class DelegateSubagentTool(BaseTool):
                 last_errors = last_errors + [
                     f"level {level_name} call failed: {type(exc).__name__}: {exc}"
                 ]
-                last_response_format = level_rf
                 continue
 
             response_content = response.get("content", "") or ""
@@ -1163,7 +1161,6 @@ class DelegateSubagentTool(BaseTool):
                 return obj2, response_content, []
 
             last_errors = errors2 or ["response is not JSON"]
-            last_response_format = level_rf
 
         # All levels failed. Return None with the most recent raw_content
         # so callers can still read what the model produced.

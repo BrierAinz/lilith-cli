@@ -10,8 +10,6 @@ in ``lilith-api/tests/test_traces_router.py``.
 """
 from __future__ import annotations
 
-import time
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest

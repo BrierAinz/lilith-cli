@@ -203,7 +203,7 @@ def _split_into_steps(text: str) -> list[str]:
         r"\s*"
     )
     parts = re.split(sequential_pattern, text, flags=re.IGNORECASE)
-    parts = [p.strip().strip(",.;.") for p in parts if p.strip()]
+    parts = [p.strip().strip(",.;") for p in parts if p.strip()]
 
     if len(parts) >= 2:
         return parts

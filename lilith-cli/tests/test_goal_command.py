@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from lilith_cli.slash_router import route, slash_commands
 
 
 @pytest.mark.asyncio
@@ -58,9 +59,7 @@ async def test_goal_lifecycle_se_recupera_del_historial(fake_session, capsys):
 
 
 def test_goal_esta_conectado_al_repl():
-    import inspect
+    from lilith_cli.extra_commands import run_goal_command
 
-    from lilith_cli import repl
-
-    assert "/goal" in repl._SLASH_COMMANDS
-    assert 'cmd_name == "goal"' in inspect.getsource(repl.run_repl)
+    assert "/goal" in slash_commands()
+    assert route("goal").handler is run_goal_command

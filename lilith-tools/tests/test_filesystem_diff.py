@@ -1,8 +1,6 @@
 """Tests for filesystem tools diff-preview safety feature."""
 
-from pathlib import Path
 
-from lilith_tools.base import ToolResult
 from lilith_tools.filesystem import FileEditTool, FileWriteTool
 
 

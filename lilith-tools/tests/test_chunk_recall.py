@@ -13,12 +13,9 @@ Covers:
 from __future__ import annotations
 
 import os
-import tempfile
-from pathlib import Path
 
 import pytest
 
-from lilith_tools.base import ToolResult
 from lilith_tools.chunk_recall import (
     ChunkIngestTool,
     ChunkRecallTool,

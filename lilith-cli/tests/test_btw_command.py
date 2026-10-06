@@ -20,8 +20,8 @@ import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
-
 from lilith_cli.btw_command import run_btw_command
+from lilith_cli.slash_router import slash_commands
 
 
 def _run(coro):
@@ -178,49 +178,17 @@ def test_alias_aside_y_side_funcionan_igual(fake_session, capsys):
 
 @pytest.mark.parametrize("ancla", ["/btw", "/aside", "/side"])
 def test_alias_listados_en_slash_commands(ancla):
-    """Las tres formas deben estar en ``_SLASH_COMMANDS`` para autocompletado."""
-    from lilith_cli.repl import _SLASH_COMMANDS
-
-    assert ancla in _SLASH_COMMANDS, (
-        f"{ancla} no aparece en _SLASH_COMMANDS — el usuario no lo descubrirá "
-        "tabulando. Agregalo junto a los otros comandos de sesión."
+    """Las tres formas deben estar en el autocompletado."""
+    assert ancla in slash_commands(), (
+        f"{ancla} no aparece en el autocompletado — el usuario no lo descubrirá "
+        "tabulando."
     )
-
 
 def test_alias_listados_en_help_catalog():
     """``/help`` debe documentar al menos ``/btw`` (los alias se mencionan en
     el docstring del módulo, pero el catálogo sólo lista el nombre canónico).
     """
-    import ast
-    from pathlib import Path
+    from lilith_cli.slash_commands.help import HELP_CATALOG
 
-    src = Path(__file__).resolve().parent.parent / "lilith_cli" / "extra_commands.py"
-    tree = ast.parse(src.read_text(encoding="utf-8"))
-    run_help = next(
-        n
-        for n in ast.walk(tree)
-        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and n.name == "run_help_command"
-    )
-    catalog = next(
-        n
-        for n in ast.walk(run_help)
-        if isinstance(n, ast.AnnAssign)
-        and isinstance(n.target, ast.Name)
-        and n.target.id == "catalog"
-        and isinstance(n.value, ast.Dict)
-    )
-    names = {
-        elt.elts[0].value
-        for value in catalog.value.values
-        if isinstance(value, ast.List)
-        for elt in value.elts
-        if isinstance(elt, ast.Tuple) and elt.elts
-        and isinstance(elt.elts[0], ast.Constant)
-        and isinstance(elt.elts[0].value, str)
-    }
-    assert "btw" in names, (
-        "/btw debe figurar en el catálogo de /help. Sin eso, "
-        "test_autocomplete_covers_help_catalog falla y el usuario nunca lo "
-        "descubre en la ayuda interactiva."
-    )
+    names = {name for family in HELP_CATALOG.values() for name, _ in family}
+    assert "btw" in names

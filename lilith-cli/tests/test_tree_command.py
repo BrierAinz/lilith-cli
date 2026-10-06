@@ -62,7 +62,7 @@ async def test_tree_command_lists_directory_tree(tmp_path, monkeypatch):
         nonlocal output
         output += _capture_output(renderable)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_tree_command(session, "")
 
     assert "Árbol de archivos" in output
@@ -89,7 +89,7 @@ async def test_tree_command_respects_custom_path_and_depth(tmp_path, monkeypatch
         nonlocal output
         output += _capture_output(renderable)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_tree_command(session, f"{tmp_path} depth=2")
 
     assert "a" in output
@@ -107,7 +107,7 @@ async def test_tree_command_rejects_non_directory():
     def capture_error(text: str = ""):
         errors.append(str(text))
 
-    with patch("lilith_cli.extra_commands.render_error", side_effect=capture_error):
+    with patch("lilith_cli.slash_commands.navigation.render_error", side_effect=capture_error):
         await run_tree_command(session, "__this_file_does_not_exist_123__")
 
     assert any("no encontrada" in e for e in errors)

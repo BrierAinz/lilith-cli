@@ -18,10 +18,9 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from pathlib import Path
 from typing import Any
 
-import pytest
+from lilith_cli.slash_router import slash_commands
 
 
 def _run(coro):
@@ -425,14 +424,8 @@ def test_conclave_is_in_help_catalog(fake_session, capsys):
 
 
 def test_conclave_is_dispatched_by_repl(fake_session, monkeypatch):
-    """The repl dispatcher must hand ``/conclave`` to ``run_conclave_command``.
-
-    We don't spin up the full REPL: instead we patch
-    ``run_conclave_command`` on the ``repl`` module to a recorder and
-    invoke the dispatcher's branch directly via the same ``cmd_name``
-    the REPL would feed it.
-    """
-    import lilith_cli.repl as repl_mod
+    """The REPL router must hand ``/conclave`` and its arguments to its handler."""
+    from lilith_cli import slash_router
 
     recorder: dict[str, Any] = {}
 
@@ -440,70 +433,29 @@ def test_conclave_is_dispatched_by_repl(fake_session, monkeypatch):
         recorder["session"] = session
         recorder["args"] = args
 
-    monkeypatch.setattr(repl_mod, "run_conclave_command", _recorder)
+    monkeypatch.setitem(
+        slash_router._BUILTIN, "conclave", slash_router.SlashRoute("conclave", _recorder)
+    )
 
-    async def _drive():
-        # Simulate the exact branch from repl.run_repl
-        cmd_name = "conclave"
-        cmd_args = "hello --presets a,b"
-        if cmd_name == "conclave":
-            await repl_mod.run_conclave_command(fake_session, cmd_args)
-
-    _run(_drive())
-
+    assert _run(slash_router.dispatch(fake_session, "/conclave hello --presets a,b"))
     assert recorder["args"] == "hello --presets a,b"
     assert recorder["session"] is fake_session
-
 
 # ── (f) Slash autocomplete presence ─────────────────────────────────────
 
 
 def test_conclave_is_in_slash_autocomplete():
     """The completer list in repl.py must include ``/conclave``."""
-    from lilith_cli.repl import _SLASH_COMMANDS
 
-    assert "/conclave" in _SLASH_COMMANDS
+    assert "/conclave" in slash_commands()
 
 
 # ── (g) Help wiring test recognises conclave ───────────────────────────
 
 
 def test_help_catalog_wiring_includes_conclave():
-    """The wiring test extracts the catalog via AST; ensure conclave is parsed."""
-    from lilith_cli.extra_commands import run_help_command
+    """``/help`` lists conclave under the System family."""
+    from lilith_cli.slash_commands.help import HELP_CATALOG
 
-    import ast
-    import inspect
-
-    source = inspect.getsource(run_help_command)
-    tree = ast.parse(source)
-    fn = tree.body[0]
-    catalog_node = None
-    for node in ast.walk(fn):
-        if (
-            isinstance(node, ast.AnnAssign)
-            and isinstance(node.target, ast.Name)
-            and node.target.id == "catalog"
-            and isinstance(node.value, ast.Dict)
-        ):
-            catalog_node = node
-            break
-    assert catalog_node is not None, "catalog literal not found"
-
-    flat = set()
-    for key, value in zip(catalog_node.value.keys, catalog_node.value.values):
-        if isinstance(key, ast.Constant) and isinstance(value, ast.List):
-            cat = key.value
-            for elt in value.elts:
-                if isinstance(elt, ast.Tuple) and len(elt.elts) >= 1:
-                    name_node = elt.elts[0]
-                    if isinstance(name_node, ast.Constant):
-                        flat.add((cat, name_node.value))
-
-    flat_dict: dict[str, list[str]] = {}
-    for cat, name in flat:
-        flat_dict.setdefault(cat, []).append(name)
-
-    assert "conclave" in flat_dict.get("System", []), (
-        f"conclave missing from System category; found: {flat_dict}"
-    )
+    names = [name for name, _ in HELP_CATALOG["System"]]
+    assert "conclave" in names, f"conclave missing from System category; found: {names}"

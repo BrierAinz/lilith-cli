@@ -28,7 +28,7 @@ async def test_recap_default_uses_five(fake_session):
     """
     fake_session.history = [{"role": "user", "content": "x"}] * 5
     with patch(
-        "lilith_cli.extra_commands._stream_agent_reply",
+        "lilith_cli.slash_commands.conversation._stream_agent_reply",
         new_callable=AsyncMock,
     ) as mock_stream:
         await run_recap_command(fake_session, "")
@@ -44,7 +44,7 @@ async def test_recap_with_explicit_n(fake_session):
     """/recap <n> must embed the parsed integer in the awaited prompt."""
     fake_session.history = [{"role": "user", "content": "x"}] * 20
     with patch(
-        "lilith_cli.extra_commands._stream_agent_reply",
+        "lilith_cli.slash_commands.conversation._stream_agent_reply",
         new_callable=AsyncMock,
     ) as mock_stream:
         await run_recap_command(fake_session, "10")
@@ -60,7 +60,7 @@ async def test_recap_invalid_n_reports_error(fake_session, capsys):
     """/recap with a non-integer arg must report a usage error and skip the stream."""
     fake_session.history = [{"role": "user", "content": "x"}] * 5
     with patch(
-        "lilith_cli.extra_commands._stream_agent_reply",
+        "lilith_cli.slash_commands.conversation._stream_agent_reply",
         new_callable=AsyncMock,
     ) as mock_stream:
         await run_recap_command(fake_session, "abc")
@@ -76,7 +76,7 @@ async def test_recap_out_of_range_reports_error(fake_session, capsys, bad_n):
     """/recap <n> where n is outside [1, 50] must report a usage error and skip the stream."""
     fake_session.history = [{"role": "user", "content": "x"}] * 5
     with patch(
-        "lilith_cli.extra_commands._stream_agent_reply",
+        "lilith_cli.slash_commands.conversation._stream_agent_reply",
         new_callable=AsyncMock,
     ) as mock_stream:
         await run_recap_command(fake_session, bad_n)
@@ -91,7 +91,7 @@ async def test_recap_empty_history_warns_and_skips_stream(fake_session, capsys):
     """/recap on an empty session must print a warning and not call the LLM."""
     fake_session.history = []
     with patch(
-        "lilith_cli.extra_commands._stream_agent_reply",
+        "lilith_cli.slash_commands.conversation._stream_agent_reply",
         new_callable=AsyncMock,
     ) as mock_stream:
         await run_recap_command(fake_session, "5")
@@ -106,7 +106,7 @@ async def test_recap_clamps_n_to_history_length(fake_session):
     """/recap 50 on a 3-message history must clamp the prompt to n=3."""
     fake_session.history = [{"role": "user", "content": f"msg-{i}"} for i in range(3)]
     with patch(
-        "lilith_cli.extra_commands._stream_agent_reply",
+        "lilith_cli.slash_commands.conversation._stream_agent_reply",
         new_callable=AsyncMock,
     ) as mock_stream:
         await run_recap_command(fake_session, "50")

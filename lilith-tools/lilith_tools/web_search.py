@@ -39,7 +39,7 @@ class WebSearchTool(BaseTool):
             with urllib.request.urlopen(req, timeout=15) as resp:
                 html = resp.read().decode("utf-8", errors="ignore")
 
-            results = []
+            results: list[dict[str, str]] = []
             for m in re.finditer(
                 r'<a rel="nofollow" class="result__a" href="([^"]+)">([^<]+)</a>',
                 html,

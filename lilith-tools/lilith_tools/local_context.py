@@ -25,7 +25,6 @@ import shutil
 import socket
 import subprocess
 import sys
-from pathlib import Path
 from typing import Any
 
 from .base import BaseTool, ToolResult

@@ -199,7 +199,7 @@ class ChunkIngestTool(BaseTool):
                 "source_id": source_id,
                 "vector_ids": vids,
                 "chunk_count": len(vids),
-                "chars": len(text),
+                "chars": len(text or ""),
                 "db_path": db_path,
             },
             error="",

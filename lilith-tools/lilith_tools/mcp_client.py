@@ -51,8 +51,8 @@ try:  # pragma: no cover — exercised via integration tests
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 except Exception as _exc:  # pragma: no cover — defensive
-    ClientSession = None  # type: ignore[assignment]
-    StdioServerParameters = None  # type: ignore[assignment]
+    ClientSession = None  # type: ignore[assignment,misc]
+    StdioServerParameters = None  # type: ignore[assignment,misc]
     stdio_client = None  # type: ignore[assignment]
     _MCP_IMPORT_ERROR = _exc
 
@@ -282,8 +282,10 @@ class MCPClient:
                 error=f"MCP server '{self.server_name}' no está listo",
             )
 
+        session = self._session
+
         async def _do_call() -> Any:
-            return await self._session.call_tool(name, arguments or {})
+            return await session.call_tool(name, arguments or {})
 
         try:
             future: Future = asyncio.run_coroutine_threadsafe(

@@ -10,7 +10,7 @@ research/emerging-agents-2026-06-21.md, next-cycle priorities).
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator

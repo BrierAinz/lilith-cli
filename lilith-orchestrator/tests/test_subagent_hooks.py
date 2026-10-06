@@ -15,7 +15,6 @@ attach a registry, so existing call sites and tests are untouched.
 """
 from __future__ import annotations
 
-import asyncio
 import sys
 from pathlib import Path
 

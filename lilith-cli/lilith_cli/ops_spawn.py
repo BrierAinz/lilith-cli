@@ -274,7 +274,7 @@ def run_spawn(
 
     # ── resolve workspace ────────────────────────────────────────────
     root = Path(repo_root).resolve() if repo_root is not None else _resolve_yggdrasil_root()
-    bus_path = Path(db).resolve() if db is not None else default_bus_db_path()
+    bus_path = Path(db).resolve() if db is not None else root / ".ygg" / "lilith_bus.db"
     log_dir = root / ".ygg" / "spawns"
 
     # ── load agent card ──────────────────────────────────────────────
@@ -489,7 +489,7 @@ def run_spawn_status(
     ``started_at`` and ``topic``.
     """
     root = Path(repo_root).resolve() if repo_root is not None else _resolve_yggdrasil_root()
-    bus_path = Path(db).resolve() if db is not None else default_bus_db_path()
+    bus_path = Path(db).resolve() if db is not None else root / ".ygg" / "lilith_bus.db"
     if not bus_path.exists():
         return []
 

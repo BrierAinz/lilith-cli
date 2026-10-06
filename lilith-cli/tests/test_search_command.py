@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -81,7 +80,7 @@ async def test_search_history_command_finds_user_prompt():
         def capture(*args, **kwargs):
             prints.append(args)
 
-        with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+        with patch("lilith_cli.render.console.print", side_effect=capture):
             await run_search_command(session, "bug")
 
         rendered = _render_panels_to_text(prints)
@@ -104,7 +103,7 @@ async def test_search_in_file_command_finds_line(tmp_path, monkeypatch):
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_search_command(session, f"in {test_file} bug")
 
     rendered = _render_panels_to_text(prints)
@@ -125,7 +124,7 @@ async def test_search_across_files_command_finds_match(tmp_path, monkeypatch):
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_search_command(session, f"across def.*foo {tmp_path}")
 
     rendered = _render_panels_to_text(prints)

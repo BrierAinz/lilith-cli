@@ -7,7 +7,6 @@ structured results so the LLM can reason about failures and next steps.
 
 from __future__ import annotations
 
-import json
 import os
 import shlex
 import shutil
@@ -159,6 +158,43 @@ def _detect_formatter(path: str, formatter: str | None) -> str | None:
     return None
 
 
+def _formatter_check_command(command: str) -> tuple[list[str], bool] | None:
+    """Return a report-only argv for a formatter *command* (without the path).
+
+    The second element is ``True`` when the tool reports pending changes by
+    printing file names (``gofmt -l``) rather than with a non-zero exit code.
+    Returns ``None`` when no report-only mode is known, so callers never fall
+    back to the mutating invocation.
+    """
+    tokens = shlex.split(command)
+    names = [Path(tok).name.lower().removesuffix(".exe").removesuffix(".cmd") for tok in tokens]
+
+    if "black" in names:
+        return [*tokens, "--check"], False
+    if "ruff" in names:
+        if "format" in tokens:
+            return [*tokens, "--check"], False
+        if "check" in tokens:
+            return [tok for tok in tokens if tok != "--fix"], False
+        return None
+    if "prettier" in names:
+        return [*(tok for tok in tokens if tok not in ("--write", "-w")), "--check"], False
+    if "rustfmt" in names:
+        return [*tokens, "--check"], False
+    if "cargo" in names and "fmt" in tokens:
+        return [*tokens, "--check", "--"], False
+    if "gofmt" in names:
+        return [*(tok for tok in tokens if tok != "-w"), "-l"], True
+    return None
+
+
+def _quote_path(path: Path) -> str:
+    """Quote *path* so ``_run_command`` keeps it as a single argument."""
+    if os.name == "nt":
+        return subprocess.list2cmdline([str(path)])
+    return shlex.quote(str(path))
+
+
 # ── Test tool ───────────────────────────────────────────────────────
 
 
@@ -219,10 +255,7 @@ class RunTestTool(BaseTool):
                 error="No se pudo detectar un comando de test para el proyecto",
             )
 
-        shell = bool(subprocess.run is not None)  # always use shell for flexible commands
         try:
-            # Use the shell so compound commands like "python -m pytest" work without
-            # us needing to parse quoted strings.
             stdout, stderr, rc = _run_command(cmd, cwd, timeout)
             return ToolResult(
                 success=True,
@@ -380,7 +413,7 @@ class FormatFileTool(BaseTool):
         cwd = p.parent
         try:
             # Append the target file path to the formatter command.
-            full_cmd = f"{cmd} {p}"
+            full_cmd = f"{cmd} {_quote_path(p)}"
             stdout, stderr, rc = _run_command(full_cmd, cwd, timeout)
             formatted = rc == 0
             return ToolResult(

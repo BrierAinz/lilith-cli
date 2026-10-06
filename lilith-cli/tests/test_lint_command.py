@@ -37,7 +37,7 @@ async def test_lint_command_requires_explicit_path(tmp_path, monkeypatch):
     def capture(text: str = ""):
         prints.append(text)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_lint_command(session, "")
 
     assert any("ruta-relativa" in str(p) for p in prints)
@@ -51,7 +51,7 @@ async def test_lint_command_accepts_explicit_relative_path(tmp_path, monkeypatch
     session = DummySession()
     fake_result = MagicMock(success=True, data={"command": "ruff check foo.py"})
 
-    with patch("lilith_cli.extra_commands.RunLinterTool") as tool:
+    with patch("lilith_cli.slash_commands.quality.RunLinterTool") as tool:
         tool.return_value.execute.return_value = fake_result
         await run_lint_command(session, "foo.py --tool ruff check")
 
@@ -72,7 +72,7 @@ async def test_lint_command_staged_empty_repo(tmp_path, monkeypatch):
     def capture(text: str = ""):
         prints.append(text)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_lint_command(session, "staged")
 
     assert any("No hay archivos staged" in str(p) for p in prints)

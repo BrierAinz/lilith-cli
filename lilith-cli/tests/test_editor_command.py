@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import os
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from lilith_cli import extra_commands
+from lilith_cli.config import CONFIG_DIR
 from lilith_cli.extra_commands import run_editor_command
+from lilith_cli.slash_commands import _shared as shared_cmds
 
 
 class DummyConfig:
@@ -41,14 +40,14 @@ class DummySession:
 @pytest.fixture
 async def reset_editor(monkeypatch):
     """Reset the in-memory and persisted editor state for isolated tests."""
-    monkeypatch.setattr(extra_commands, "_FROZEN_EDITOR", None)
+    monkeypatch.setattr(shared_cmds, "_FROZEN_EDITOR", None)
     monkeypatch.setattr(
-        extra_commands, "EDITOR_CONFIG_FILE", extra_commands.CONFIG_DIR / "editor_test.json"
+        shared_cmds, "EDITOR_CONFIG_FILE", CONFIG_DIR / "editor_test.json"
     )
-    if extra_commands.EDITOR_CONFIG_FILE.exists():
-        extra_commands.EDITOR_CONFIG_FILE.unlink()
+    if shared_cmds.EDITOR_CONFIG_FILE.exists():
+        shared_cmds.EDITOR_CONFIG_FILE.unlink()
     yield
-    extra_commands._FROZEN_EDITOR = None
+    shared_cmds._FROZEN_EDITOR = None
 
 
 @pytest.mark.asyncio
@@ -60,13 +59,13 @@ async def test_editor_set_and_current(reset_editor):
     def capture(text: str = ""):
         prints.append(str(text))
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_editor_command(session, "set nano")
         await run_editor_command(session, "current")
 
     assert any("configurado" in p and "nano" in p for p in prints)
     assert any("nano" in p and "Editor actual" in p for p in prints)
-    assert extra_commands._FROZEN_EDITOR == "nano"
+    assert shared_cmds._FROZEN_EDITOR == "nano"
 
 
 @pytest.mark.asyncio
@@ -83,11 +82,11 @@ async def test_editor_opens_file_at_line(tmp_path, monkeypatch, reset_editor):
         return MagicMock()
 
     session = DummySession()
-    with patch("lilith_cli.extra_commands.subprocess.Popen", side_effect=fake_popen):
+    with patch("subprocess.Popen", side_effect=fake_popen):
         await run_editor_command(session, f"{target}:2")
 
     assert len(popen_calls) == 1
     cmd = popen_calls[0]
     assert "vim" in cmd[0]
-    assert f"+2" in cmd
+    assert "+2" in cmd
     assert str(target) in cmd

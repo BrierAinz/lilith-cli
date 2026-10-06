@@ -1,7 +1,6 @@
 """Tests for lilith_memory.store (MemoryStore)."""
 import pytest
 from pathlib import Path
-import tempfile
 
 from lilith_memory.read_guard import guard
 from lilith_memory.store import MemoryStore

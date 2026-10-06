@@ -22,7 +22,6 @@ The ProjectContext class manages this directory:
 from __future__ import annotations
 
 import json
-import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -454,7 +453,7 @@ class ProjectContext:
             # If task is done, move it to completed section
             if new_status == "done":
                 # Find the line and remove it from tasks
-                task_line = None
+                task_line = lines[i]
                 new_lines = []
                 for line in lines:
                     if title.lower() in line.lower() and new_mark in line:

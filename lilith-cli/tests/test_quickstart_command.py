@@ -2,9 +2,7 @@
 import pytest
 
 from lilith_cli.commands import (
-    BaseCommand,
     CommandRegistry,
-    HelpCommand,
     QuickstartCommand,
 )
 

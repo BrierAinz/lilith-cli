@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import importlib.util
 import os
 import platform
 import subprocess
@@ -116,10 +117,10 @@ def _is_wsl() -> bool:
 def _resolve_yggdrasil_root() -> Path:
     """Find the Yggdrasil workspace root.
 
-    Order: ``YGGDRASIL_ROOT`` env var, then the nearest ancestor that
-    contains the hub's ``ygg.py``. The fixed-depth fallback only holds for
-    the historical ``Asgard/lilith-cli`` layout, not for standalone
-    checkouts of lilith-stack.
+    Order: ``YGGDRASIL_ROOT`` env var, then the nearest ancestor of this
+    package that contains the hub's ``ygg.py``. A standalone checkout has no
+    hub, so the fallback is Lilith's own state directory (``CONFIG_DIR``),
+    never a guessed parent directory.
     """
     env_root = os.environ.get("YGGDRASIL_ROOT")
     if env_root:
@@ -127,17 +128,46 @@ def _resolve_yggdrasil_root() -> Path:
     for parent in Path(__file__).resolve().parents:
         if (parent / "ygg.py").is_file():
             return parent
-    return Path(__file__).resolve().parents[3]
+    return CONFIG_DIR
+
+
+def add_hub_to_sys_path(path: Path) -> None:
+    """Make an optional hub directory importable without shadowing anything.
+
+    Appending (instead of inserting first) keeps the standard library and
+    installed packages ahead of whatever the directory contains.
+    """
+    entry = str(path)
+    if entry not in sys.path:
+        sys.path.append(entry)
 
 
 def _lazy_import_ygg() -> types.ModuleType:
-    """Import the hub's ygg module, adding the root to sys.path."""
-    root = str(_resolve_yggdrasil_root())
-    if root not in sys.path:
-        sys.path.insert(0, root)
-    import ygg
-
-    return ygg
+    """Import the Yggdrasil hub's ``ygg`` module from the workspace root."""
+    root = _resolve_yggdrasil_root()
+    if not (root / "ygg.py").is_file():
+        raise ImportError(
+            f"No Yggdrasil hub (ygg.py) in {root}; set YGGDRASIL_ROOT to use hub commands."
+        )
+    hub_file = (root / "ygg.py").resolve()
+    loaded = sys.modules.get("ygg")
+    if loaded is not None and Path(getattr(loaded, "__file__", "") or ".").resolve() == hub_file:
+        return loaded
+    # Load the checked file itself: a plain ``import ygg`` would pick any
+    # other ``ygg`` earlier on sys.path. The directory is still appended so
+    # the hub can import its own sibling modules.
+    add_hub_to_sys_path(root)
+    spec = importlib.util.spec_from_file_location("ygg", hub_file)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load {hub_file}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["ygg"] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop("ygg", None)
+        raise
+    return module
 
 
 def _apply_overrides(
@@ -324,10 +354,12 @@ def status() -> None:
     try:
         ygg_cli = _lazy_import_ygg()
         ygg_cli.status()
-    except (ImportError, ModuleNotFoundError):
+    except ImportError as exc:
+        from rich.markup import escape
+
         from .render import console
 
-        console.print("[error]No se pudo importar ygg. Verifica la instalación.[/]")
+        console.print(f"[error]No se pudo importar ygg: {escape(str(exc))}[/]")
 
 
 @app.command
@@ -339,10 +371,12 @@ def launch() -> None:
     try:
         ygg_cli = _lazy_import_ygg()
         ygg_cli.status()
-    except (ImportError, ModuleNotFoundError):
+    except ImportError as exc:
+        from rich.markup import escape
+
         from .render import console
 
-        console.print("[error]No se pudo importar ygg. Verifica la instalación.[/]")
+        console.print(f"[error]No se pudo importar ygg: {escape(str(exc))}[/]")
 
 
 @app.command
@@ -476,11 +510,10 @@ def delegate(
 
     try:
         from lilith_tools.delegate import DelegateSubagentTool  # type: ignore[import-not-found]
-        from lilith_tools.base import ToolResult  # type: ignore[import-not-found]
     except Exception as exc:
         from .render import render_error
         render_error(f"No se pudo cargar DelegateSubagentTool: {exc}")
-        raise SystemExit(2)
+        raise SystemExit(2) from exc
 
     kwargs: dict[str, Any] = {
         "preset": preset_name,

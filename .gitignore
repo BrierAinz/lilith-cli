@@ -7,6 +7,9 @@ build/
 .venv/
 venv/
 
+# Node (web console frontend)
+node_modules/
+
 # Tooling caches
 .pytest_cache/
 .ruff_cache/

@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
+from .json_store import preserve_corrupt
 from .render import console, render_error
-
 
 if TYPE_CHECKING:
     from .session_runtime import SessionRuntime
@@ -83,8 +83,9 @@ def _load_workflows() -> dict[str, list[str]]:
         data = json.loads(workflow_file.read_text(encoding="utf-8"))
         if isinstance(data, dict):
             return {str(k): [str(s) for s in v] for k, v in data.items()}
-    except Exception:
-        pass
+        raise ValueError("se esperaba un dict JSON")
+    except Exception as exc:
+        preserve_corrupt(workflow_file, exc)
     return dict(_DEFAULT_WORKFLOWS)
 
 
@@ -114,8 +115,8 @@ async def _run_workflow_steps(
 
         # Streaming processing requires these functions; import lazily to avoid cycles.
         try:
-            from .repl import _process_with_streaming
             from .render import render_turn_start
+            from .repl import _process_with_streaming
 
             render_turn_start(999)
             await _process_with_streaming(session, prompt)

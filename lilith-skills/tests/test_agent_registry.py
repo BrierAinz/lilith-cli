@@ -3,7 +3,7 @@ import pytest
 import tempfile
 from pathlib import Path
 
-from lilith_skills.agent_cards import AgentCard, AgentCardLoader
+from lilith_skills.agent_cards import AgentCardLoader
 from lilith_skills.agent_registry import AgentRegistry
 
 

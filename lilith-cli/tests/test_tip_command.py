@@ -30,7 +30,7 @@ async def test_tip_random_shows_one_tip(_rich_console):
     """/tip sin argumentos muestra un consejo aleatorio."""
     session = DummySession()
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=rich.get_console().print):
+    with patch("lilith_cli.render.console.print", side_effect=rich.get_console().print):
         await run_tip_command(session, "")
 
     output = _rich_console.getvalue()
@@ -45,7 +45,7 @@ async def test_tip_specific_number(_rich_console):
     """/tip <n> muestra el consejo número n."""
     session = DummySession()
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=rich.get_console().print):
+    with patch("lilith_cli.render.console.print", side_effect=rich.get_console().print):
         await run_tip_command(session, "3")
 
     output = _rich_console.getvalue()
@@ -58,7 +58,7 @@ async def test_tip_list_shows_all_tips(_rich_console):
     """/tip list muestra todos los consejos numerados."""
     session = DummySession()
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=rich.get_console().print):
+    with patch("lilith_cli.render.console.print", side_effect=rich.get_console().print):
         await run_tip_command(session, "list")
 
     output = _rich_console.getvalue()
@@ -78,7 +78,7 @@ async def test_tip_invalid_number_shows_error():
     def capture(text: str = "") -> None:
         prints.append(str(text))
 
-    with patch("lilith_cli.extra_commands.render_error", side_effect=capture):
+    with patch("lilith_cli.slash_commands.extras.render_error", side_effect=capture):
         await run_tip_command(session, "999")
 
     output = "\n".join(prints)
@@ -94,7 +94,7 @@ async def test_tip_non_numeric_shows_usage():
     def capture(text: str = "") -> None:
         prints.append(str(text))
 
-    with patch("lilith_cli.extra_commands.render_error", side_effect=capture):
+    with patch("lilith_cli.slash_commands.extras.render_error", side_effect=capture):
         await run_tip_command(session, "hola")
 
     output = "\n".join(prints)

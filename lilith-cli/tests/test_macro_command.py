@@ -77,7 +77,6 @@ async def test_macro_record_stop_and_play(
 @pytest.mark.asyncio
 async def test_macro_delete_and_registry(fake_session) -> None:
     """MacroCommand should delete macros and be discoverable by registry."""
-    from lilith_cli.commands import _load_macros, _save_macros
 
     tmp_macros_path = Path.home() / "tmp_macros_for_test.json"
     tmp_macros_path.write_text(
@@ -134,7 +133,7 @@ async def test_run_macro_record_shows_rec_indicator(
         prints.append(args)
 
     with patch(
-        "lilith_cli.extra_commands.console.print", side_effect=capture
+        "lilith_cli.render.console.print", side_effect=capture
     ):
         from lilith_cli.extra_commands import run_macro_command
 
@@ -166,7 +165,7 @@ async def test_run_macro_stop_shows_stop_indicator(
         prints.append(args)
 
     with patch(
-        "lilith_cli.extra_commands.console.print", side_effect=capture
+        "lilith_cli.render.console.print", side_effect=capture
     ):
         from lilith_cli.extra_commands import run_macro_command
 
@@ -195,7 +194,7 @@ async def test_run_macro_play_no_status_indicator(
         prints.append(args)
 
     with patch(
-        "lilith_cli.extra_commands.console.print", side_effect=capture
+        "lilith_cli.render.console.print", side_effect=capture
     ):
         from lilith_cli.extra_commands import run_macro_command
 

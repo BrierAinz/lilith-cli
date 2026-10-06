@@ -4,7 +4,6 @@ import base64
 import pytest
 from unittest.mock import MagicMock, patch
 
-from lilith_tools.base import ToolResult
 from lilith_tools.vision import (
     ScreenshotCaptureTool,
     VisionAnalyzeTool,
@@ -233,10 +232,7 @@ class TestScreenshotCaptureTool:
     def test_capture_windows_mocked(self, tool, monkeypatch):
         """Test Windows screenshot capture with mocked PIL."""
         # Only run on Windows or when PIL is available
-        try:
-            from PIL import Image
-        except ImportError:
-            pytest.skip("Pillow not installed")
+        pytest.importorskip("PIL", reason="Pillow not installed")
 
         # Create a mock image
         mock_img = MagicMock()

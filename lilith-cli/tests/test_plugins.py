@@ -5,6 +5,8 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+import pytest
+
 from lilith_cli.ide.plugins import LilithPlugin, PluginManager
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples" / "plugins"
@@ -340,3 +342,68 @@ class TestExamplePlugins:
         handled = mgr.emit("file_save", app, target)
         assert "todo_runes" in handled
         assert any("1 marcadores" in msg for msg in app.messages)
+
+
+class TestProjectTrust:
+    """Project plugins are repository code: they only run once trusted."""
+
+    def _setup(self, tmp_path, monkeypatch):
+        from lilith_cli.ide import plugins
+
+        monkeypatch.delenv(plugins.TRUST_ALL_ENV, raising=False)
+        monkeypatch.setattr(plugins, "TRUSTED_PROJECTS_FILE", tmp_path / "config" / "trusted.json")
+        project = tmp_path / "project"
+        plugin_dir = _make_plugin_dir(project)
+        marker = tmp_path / "ran.txt"
+        (plugin_dir / "evil.py").write_text(
+            f"from pathlib import Path\nPath({str(marker)!r}).write_text('ran')\n"
+            "def register(app):\n    pass\n",
+            encoding="utf-8",
+        )
+        return project, marker
+
+    def test_untrusted_project_plugins_do_not_run_on_startup(self, tmp_path, monkeypatch):
+        from lilith_cli.ide.app import LilithIDEApp
+
+        project, marker = self._setup(tmp_path, monkeypatch)
+        app = FakeApp(project)
+        app.plugin_manager = PluginManager(project)
+        LilithIDEApp._load_plugins(app)
+
+        assert not marker.exists()
+        assert any("/plugins trust" in message for message in app.messages)
+
+    def test_trusting_a_project_lets_its_plugins_run(self, tmp_path, monkeypatch):
+        from lilith_cli.ide.app import LilithIDEApp
+
+        project, marker = self._setup(tmp_path, monkeypatch)
+        PluginManager(project).trust()
+        app = FakeApp(project)
+        app.plugin_manager = PluginManager(project)
+        assert app.plugin_manager.is_trusted()
+        LilithIDEApp._load_plugins(app)
+
+        assert marker.read_text() == "ran"
+        assert PluginManager(tmp_path / "other").is_trusted() is False
+
+    def test_env_var_trusts_every_project(self, tmp_path, monkeypatch):
+        from lilith_cli.ide import plugins
+
+        project, _ = self._setup(tmp_path, monkeypatch)
+        monkeypatch.setenv(plugins.TRUST_ALL_ENV, "1")
+        assert PluginManager(project).is_trusted()
+
+    @pytest.mark.parametrize("content", ["{not json", '{"a": 1}'])
+    def test_unreadable_registry_is_not_overwritten(self, tmp_path, monkeypatch, content):
+        """Regression: a malformed registry read as empty and the next trust replaced it."""
+        from lilith_cli.ide import plugins
+
+        project, _ = self._setup(tmp_path, monkeypatch)
+        registry = plugins.TRUSTED_PROJECTS_FILE
+        registry.parent.mkdir(parents=True)
+        registry.write_text(content, encoding="utf-8")
+
+        assert PluginManager(project).is_trusted() is False
+        with pytest.raises(plugins.TrustRegistryError):
+            PluginManager(project).trust()
+        assert registry.read_text(encoding="utf-8") == content

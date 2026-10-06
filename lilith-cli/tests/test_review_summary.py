@@ -16,7 +16,6 @@ don't depend on git state.
 
 from __future__ import annotations
 
-import pytest
 
 from lilith_cli.extra_commands import _review_summary
 

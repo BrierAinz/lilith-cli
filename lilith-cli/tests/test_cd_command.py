@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
 
 import pytest
-
 from lilith_cli.extra_commands import run_cd_command
+from lilith_cli.slash_router import route, slash_commands
 
 
 @pytest.mark.asyncio
@@ -118,9 +117,7 @@ async def test_cd_with_only_quotes_is_an_error(fake_session, tmp_path, monkeypat
 
 
 def test_cd_is_wired_in_repl():
-    import lilith_cli.repl as repl_module
+    from lilith_cli.extra_commands import run_cd_command
 
-    assert "/cd" in repl_module._SLASH_COMMANDS
-    source = inspect.getsource(repl_module.run_repl)
-    assert 'cmd_name == "cd"' in source
-    assert "run_cd_command(session, cmd_args)" in source
+    assert "/cd" in slash_commands()
+    assert route("cd").handler is run_cd_command

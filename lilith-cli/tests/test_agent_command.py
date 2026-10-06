@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from lilith_cli.agent_modes import (
-    AgentMode,
     apply_agent_mode,
     get_agent_mode,
     get_current_agent_mode,

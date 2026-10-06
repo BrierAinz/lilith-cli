@@ -12,7 +12,8 @@ import secrets
 from collections.abc import Iterable
 from urllib.parse import urlsplit
 
-EXEMPT_PATHS = {"/api/health", "/docs", "/openapi.json", "/redoc"}
+# The static app shell carries no data; the API behind it stays protected.
+EXEMPT_PATHS = {"/", "/index.html", "/api/health", "/docs", "/openapi.json", "/redoc"}
 
 
 def _headers(scope: dict) -> dict[str, str]:
@@ -39,7 +40,16 @@ def _is_loopback_client(scope: dict) -> bool:
     return bool(client and _is_loopback_host(str(client[0])))
 
 
-def _trusted_websocket_origin(scope: dict, allowed_origins: set[str]) -> bool:
+def _is_loopback_host_header(scope: dict) -> bool:
+    """Reject DNS-rebinding requests: the browser sends the attacker's name."""
+    host = _headers(scope).get("host", "")
+    try:
+        return _is_loopback_host(urlsplit(f"//{host}").hostname)
+    except ValueError:
+        return False
+
+
+def _trusted_origin(scope: dict, allowed_origins: set[str]) -> bool:
     origin = _headers(scope).get("origin")
     if not origin:
         return True
@@ -69,7 +79,14 @@ class TokenAuthMiddleware:
 
     def _authorized(self, scope: dict) -> bool:
         if not self.token:
-            return _is_loopback_client(scope)
+            # Without a token, loopback is the only credential. A page on any
+            # site can reach 127.0.0.1 from the user's browser, so the Host
+            # and Origin headers must also be local.
+            return (
+                _is_loopback_client(scope)
+                and _is_loopback_host_header(scope)
+                and _trusted_origin(scope, self.allowed_origins)
+            )
         headers = _headers(scope)
         auth_header = headers.get("authorization", "")
         if auth_header.startswith("Bearer "):
@@ -115,9 +132,7 @@ class TokenAuthMiddleware:
                 await send({"type": "http.response.body", "body": body})
             return
 
-        if scope_type == "websocket" and not _trusted_websocket_origin(
-            scope, self.allowed_origins
-        ):
+        if scope_type == "websocket" and not _trusted_origin(scope, self.allowed_origins):
             await send({"type": "websocket.close", "code": 4403, "reason": "Origin denied"})
             return
 

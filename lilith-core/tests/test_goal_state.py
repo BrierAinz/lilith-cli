@@ -606,7 +606,7 @@ class TestHandoff:
         handoff = manager.export_handoff(g.id)
 
         # Import into a fresh manager (simulates new session)
-        new_manager = GoalStateManager(storage_dir=g.id and "x" or "anything")
+        GoalStateManager(storage_dir=g.id and "x" or "anything")
         # Simulate with a fresh tmp dir to keep test isolation
         import tempfile
 

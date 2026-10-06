@@ -253,8 +253,8 @@ class VisionAnalyzeTool(BaseTool):
         try:
             base64.b64decode(source[:100])
             return source, "image/png"  # default mime
-        except Exception:
-            raise ValueError(f"Could not determine image source type: {source[:50]}...")
+        except Exception as exc:
+            raise ValueError(f"Could not determine image source type: {source[:50]}...") from exc
 
     def _call_vision_api(
         self,

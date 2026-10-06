@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from lilith_cli.slash_router import slash_commands
 
 
 @pytest.fixture
@@ -20,14 +21,13 @@ def session():
 
 def test_commands_registered_and_autocomplete_present(session) -> None:
     from lilith_cli.commands import CommandRegistry
-    from lilith_cli.repl import _SLASH_COMMANDS
 
     registry = CommandRegistry(session)
     registry.discover()
     assert registry.get("state") is not None
     assert registry.get("skills") is not None
-    assert "/state" in _SLASH_COMMANDS
-    assert "/skills" in _SLASH_COMMANDS
+    assert "/state" in slash_commands()
+    assert "/skills" in slash_commands()
 
 
 @pytest.mark.asyncio

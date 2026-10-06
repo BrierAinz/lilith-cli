@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -51,7 +50,7 @@ async def test_multi_file_command_edits_two_files(tmp_path, monkeypatch) -> None
     def capture(text: str = "") -> None:
         prints.append(str(text))
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_multi_file_command(
             session, "[a.txt] hello -> hola ; [b.txt] foo -> baz"
         )
@@ -76,7 +75,7 @@ async def test_multi_file_command_rolls_back_on_failure(tmp_path, monkeypatch) -
         prints.append(str(text))
 
     # "missing" doesn't exist in f2 so batch_edit should fail and rollback f1.
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_multi_file_command(
             session, "[a.txt] hello -> hola ; [b.txt] missing -> baz"
         )

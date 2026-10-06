@@ -45,9 +45,9 @@ def _run(coro):
 def _reset_extra_index():
     """Clear the cached fallback index between tests."""
     saved = getattr(how_module, "_EXTRA_INDEX", None)
-    setattr(how_module, "_EXTRA_INDEX", None)
+    how_module._EXTRA_INDEX = None
     yield
-    setattr(how_module, "_EXTRA_INDEX", saved)
+    how_module._EXTRA_INDEX = saved
 
 
 def test_how_resolves_orphaned_timer_command(fake_session, capsys):

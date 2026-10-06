@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from rich.console import Console
 
-from lilith_cli.plan import AgentPlan, PlanStep, parse_plan
+from lilith_cli.plan import AgentPlan, parse_plan
 
 
 class TestPlanParser:
@@ -65,10 +64,6 @@ class TestRenderPlan:
     def test_render_empty_plan(self) -> None:
         # Just verify it doesn't raise.
         from lilith_cli.render import render_plan
-        import io
-        from rich.console import Console
-
-        buf = io.StringIO()
         # Replace the global console temporarily by using a local render_plan
         # that prints to a buffer. Easier: just call it and check it doesn't
         # raise an exception.
@@ -97,7 +92,6 @@ class TestPlanCommand:
 
     def _make_session(self, plan_text: str = "1. A\n2. B\n3. C"):
         from unittest.mock import AsyncMock
-        from lilith_cli.commands import PlanCommand
 
         class _Sess:
             pass

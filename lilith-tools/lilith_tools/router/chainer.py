@@ -138,6 +138,7 @@ class ChainExecutor:
             value = _deep_get(context, lhs_key)
 
             # Parse right-hand side
+            rhs: Any
             if rhs_raw == "True":
                 rhs = True
             elif rhs_raw == "False":

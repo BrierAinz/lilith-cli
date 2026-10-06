@@ -2,7 +2,6 @@
 
 import pytest
 from lilith_cli.agent import AgentSession
-from lilith_cli.commands import UsageCommand
 from lilith_cli.extra_commands import run_usage_command
 from lilith_cli.config import YggdrasilConfig
 

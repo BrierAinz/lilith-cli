@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from lilith_cli.slash_commands import git as git_cmds
 
 
 @pytest.mark.asyncio
@@ -34,7 +35,7 @@ async def test_review_agent_delega_diff_staged_sin_tocar_historial(
                 error=None,
             )
 
-    monkeypatch.setattr(ec, "_run_review_git", fake_review_git)
+    monkeypatch.setattr(git_cmds, "_run_review_git", fake_review_git)
     monkeypatch.setattr(delegate_mod, "DelegateSubagentTool", FakeDelegate)
     original_history = list(fake_session.history)
 

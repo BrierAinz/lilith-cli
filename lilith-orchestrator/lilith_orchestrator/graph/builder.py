@@ -84,6 +84,10 @@ class ConversationGraph:
         self._custom_conditional_edges: list[tuple[str, Callable, dict[str, str]]] = []
         self._custom_edges: list[tuple[str, str]] = []
         self._graph: Any = None
+        # Set by the presets in graph/presets.py.
+        self._research_mode = False
+        self._creative_mode = False
+        self._pipeline_mode = False
 
     # ── Configuration ─────────────────────────────────────────────────────
 

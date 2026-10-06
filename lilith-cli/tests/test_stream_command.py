@@ -7,15 +7,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from lilith_cli.slash_commands import settings as settings_cmds
 
 
 @pytest.fixture
 def isolated_stream_config(tmp_path: Path, monkeypatch):
     """Redirect the stream config file to a tmp_path so tests do not touch real config."""
-    from lilith_cli import extra_commands as ec
 
     fake_file = tmp_path / "stream_config.json"
-    monkeypatch.setattr(ec, "_STREAM_CONFIG_FILE", fake_file)
+    monkeypatch.setattr(settings_cmds, "_STREAM_CONFIG_FILE", fake_file)
     return fake_file
 
 
@@ -33,7 +33,7 @@ async def test_stream_default_defaults_to_enabled(fake_session, isolated_stream_
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_stream_command
 
         await run_stream_command(fake_session, "")
@@ -55,7 +55,7 @@ async def test_stream_status_alias(fake_session, isolated_stream_config):
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_stream_command
 
         await run_stream_command(fake_session, "status")
@@ -70,7 +70,7 @@ async def test_stream_on_persists_true(fake_session, isolated_stream_config):
     for variant in ("on", "true", "1"):
         isolated_stream_config.unlink(missing_ok=True)
 
-        with patch("lilith_cli.extra_commands.console.print"):
+        with patch("lilith_cli.render.console.print"):
             from lilith_cli.extra_commands import run_stream_command
 
             await run_stream_command(fake_session, variant)
@@ -84,7 +84,7 @@ async def test_stream_off_persists_false(fake_session, isolated_stream_config):
     for variant in ("off", "false", "0"):
         isolated_stream_config.unlink(missing_ok=True)
 
-        with patch("lilith_cli.extra_commands.console.print"):
+        with patch("lilith_cli.render.console.print"):
             from lilith_cli.extra_commands import run_stream_command
 
             await run_stream_command(fake_session, variant)
@@ -104,7 +104,7 @@ async def test_stream_unknown_arg_reports_usage_error(fake_session, isolated_str
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_stream_command
 
         await run_stream_command(fake_session, "frobnicate")

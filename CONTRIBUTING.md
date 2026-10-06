@@ -20,7 +20,7 @@ Requirements:
 ```bash
 git clone https://github.com/BrierAinz/lilith-cli.git
 cd lilith-cli
-uv sync --locked --all-packages --extra dev
+uv sync --locked --all-packages --extra dev --extra web
 uv run lilith --help
 ```
 
@@ -43,6 +43,19 @@ uv run pytest lilith-skills/tests
 ```
 
 Add or update tests for every behavior change. A fix should include a regression test whenever practical.
+
+## Lint, types and the web frontend
+
+CI also runs these; run them before opening a pull request:
+
+```bash
+uv run ruff check .
+uv run mypy            # lilith-core, -memory, -skills, -tools, -orchestrator
+cd lilith-cli/lilith_cli/web_console/frontend && npm ci && npm run build
+```
+
+New slash commands need a route in `lilith_cli/slash_router.py` and an entry in
+`HELP_CATALOG` (`lilith_cli/slash_commands/help.py`); see [docs/plugins.md](docs/plugins.md).
 
 ## Branches and commits
 

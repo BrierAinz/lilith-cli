@@ -44,11 +44,10 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from lilith_core.hooks import HookContext, HookType, get_hook_registry
+from lilith_core.hooks import HookContext
 
 
 if TYPE_CHECKING:
-    from lilith_tools.registry import ToolRegistry
     from lilith_tools.router.router import SmartToolRouter
 
 

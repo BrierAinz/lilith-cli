@@ -20,7 +20,6 @@ pytest automatically.
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -161,6 +160,7 @@ def test_load_mimir_cli_returns_working_module(monkeypatch, tmp_path: Path):
     fake_main = fake_root / "Asgard" / "lilith-cli" / "lilith_cli" / "main.py"
     fake_main.parent.mkdir(parents=True)
     fake_main.write_text("", encoding="utf-8")
+    (fake_root / "ygg.py").write_text("", encoding="utf-8")
     monkeypatch.setattr(cli_main, "__file__", str(fake_main))
 
     mimir_dir = fake_root / "Vanaheim" / "Agents" / "Mimir"
@@ -184,6 +184,7 @@ def test_load_mimir_cli_missing_file(monkeypatch, tmp_path: Path, capsys):
     fake_main = fake_root / "Asgard" / "lilith-cli" / "lilith_cli" / "main.py"
     fake_main.parent.mkdir(parents=True)
     fake_main.write_text("", encoding="utf-8")
+    (fake_root / "ygg.py").write_text("", encoding="utf-8")
     monkeypatch.setattr(cli_main, "__file__", str(fake_main))
     # YGGDRASIL_ROOT would short-circuit the file-walk resolution.
     monkeypatch.delenv("YGGDRASIL_ROOT", raising=False)

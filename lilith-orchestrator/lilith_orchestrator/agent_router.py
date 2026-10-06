@@ -379,7 +379,7 @@ def score_definition(
         tool_fit = len(matched_tools) / len(hinted)
         available_tuple: tuple[str, ...] | None = tuple(sorted(available))
     else:
-        matched_tools = ()
+        matched_tools = []
         tool_fit = 0.0
         available_tuple = (
             tuple(sorted(tool_pool)) if tool_pool is not None else None

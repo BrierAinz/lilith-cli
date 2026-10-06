@@ -19,7 +19,7 @@ from lilith_cli.extra_commands import run_continue_command
 async def test_continue_default_prompt(fake_session):
     """/continue with no args must await _stream_agent_reply with the base prompt only."""
     with patch(
-        "lilith_cli.extra_commands._stream_agent_reply",
+        "lilith_cli.slash_commands.conversation._stream_agent_reply",
         new_callable=AsyncMock,
     ) as mock_stream:
         await run_continue_command(fake_session, "")
@@ -33,7 +33,7 @@ async def test_continue_default_prompt(fake_session):
 async def test_continue_appends_extra_text(fake_session):
     """/continue <text> must append the args after a newline to the base prompt."""
     with patch(
-        "lilith_cli.extra_commands._stream_agent_reply",
+        "lilith_cli.slash_commands.conversation._stream_agent_reply",
         new_callable=AsyncMock,
     ) as mock_stream:
         await run_continue_command(fake_session, "sigue hablando")
@@ -48,7 +48,7 @@ async def test_continue_appends_extra_text(fake_session):
 async def test_continue_prompt_starts_with_base(fake_session):
     """The awaited prompt must always start with the documented prefix."""
     with patch(
-        "lilith_cli.extra_commands._stream_agent_reply",
+        "lilith_cli.slash_commands.conversation._stream_agent_reply",
         new_callable=AsyncMock,
     ) as mock_stream:
         await run_continue_command(fake_session, "cualquier cosa")

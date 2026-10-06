@@ -4,7 +4,8 @@ Al arrancar el IDE saluda en el chat con el nombre del proyecto y un pequeño
 resumen (cantidad de archivos y carpetas de primer nivel).
 
 Instalación: copiá este archivo a ``.yggdrasil/plugins/`` en la raíz de tu
-proyecto y reiniciá el IDE. Verificá con el comando ``/plugins`` en el chat.
+proyecto, escribí ``/plugins trust`` en el chat del IDE (los plugins del
+proyecto no se ejecutan sin esa confirmación) y verificá con ``/plugins``.
 
 Este ejemplo usa la forma más simple del contrato: una función module-level
 ``register(app)`` que actúa como hook ``on_load``.

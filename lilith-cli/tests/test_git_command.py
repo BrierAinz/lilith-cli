@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
+from lilith_cli.slash_commands import git as git_cmds
 
 
 def _tool_result(success: bool = True, data=None, error: str | None = None):
@@ -16,7 +17,6 @@ def _tool_result(success: bool = True, data=None, error: str | None = None):
 @pytest.fixture
 def patched_git_tool(monkeypatch):
     """Patch GitOperationTool in extra_commands so no real git subprocess is spawned."""
-    import lilith_cli.extra_commands as ec
     from lilith_tools.base import ToolResult
 
     captured: list[dict[str, object]] = []
@@ -29,7 +29,7 @@ def patched_git_tool(monkeypatch):
                 return pending_result.pop(0)
             return ToolResult(success=True, data={"message": "On branch main"})
 
-    monkeypatch.setattr(ec, "GitOperationTool", FakeGit)
+    monkeypatch.setattr(git_cmds, "GitOperationTool", FakeGit)
     return {"captured": captured, "pending_result": pending_result}
 
 
@@ -38,7 +38,7 @@ async def test_git_status_invokes_tool(fake_session, patched_git_tool):
     """/git status must invoke GitOperationTool with op='status'."""
     from lilith_cli.extra_commands import run_git_command
 
-    with patch("lilith_cli.extra_commands.console.print"):
+    with patch("lilith_cli.render.console.print"):
         await run_git_command(fake_session, "status")
 
     assert len(patched_git_tool["captured"]) == 1
@@ -52,7 +52,7 @@ async def test_git_log_with_args(fake_session, patched_git_tool):
     """/git log --oneline -5 must pass the trailing text as the args field."""
     from lilith_cli.extra_commands import run_git_command
 
-    with patch("lilith_cli.extra_commands.console.print"):
+    with patch("lilith_cli.render.console.print"):
         await run_git_command(fake_session, "log --oneline -5")
 
     assert len(patched_git_tool["captured"]) == 1
@@ -64,20 +64,19 @@ async def test_git_log_with_args(fake_session, patched_git_tool):
 @pytest.mark.asyncio
 async def test_git_empty_args_shows_usage_error(fake_session, monkeypatch):
     """/git with no args must print a usage error and NOT invoke GitOperationTool."""
-    import lilith_cli.extra_commands as ec
 
     class ShouldNotCall:
         def execute(self, **_kw):  # pragma: no cover - guard
             raise AssertionError("GitOperationTool must not be called for empty args")
 
-    monkeypatch.setattr(ec, "GitOperationTool", ShouldNotCall)
+    monkeypatch.setattr(git_cmds, "GitOperationTool", ShouldNotCall)
 
     prints = []
 
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_git_command
 
         await run_git_command(fake_session, "")
@@ -98,7 +97,7 @@ async def test_git_tool_failure_renders_error(fake_session, monkeypatch, patched
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_git_command
 
         await run_git_command(fake_session, "status")
@@ -119,7 +118,7 @@ async def test_git_tool_data_output_is_printed(fake_session, monkeypatch, patche
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_git_command
 
         await run_git_command(fake_session, "diff")

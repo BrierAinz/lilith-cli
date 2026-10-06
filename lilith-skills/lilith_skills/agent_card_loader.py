@@ -17,7 +17,6 @@ Usage:
 
 from __future__ import annotations
 
-import re
 import yaml
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -347,7 +346,7 @@ class AgentRegistry:
             score = 0
             role_desc = f"{card.role} {card.description}".lower()
 
-            for task_type, keywords in task_keywords.items():
+            for keywords in task_keywords.values():
                 if any(kw in task_lower for kw in keywords):
                     if any(kw in role_desc for kw in keywords):
                         score += 10

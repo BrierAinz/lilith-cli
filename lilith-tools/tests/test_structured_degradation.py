@@ -21,13 +21,10 @@ from __future__ import annotations
 import json
 import sys
 import types
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-import pytest
 
-import lilith_tools.delegate as delegate_mod
 from lilith_tools.delegate import DelegateSubagentTool
 
 

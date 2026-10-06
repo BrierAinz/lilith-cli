@@ -11,7 +11,6 @@ import asyncio
 import contextlib
 import json
 import logging
-import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,6 +21,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from .config import CONFIG_DIR, CONFIG_FILE, find_project_config, load_config
+from .json_store import preserve_corrupt
 from .render import (
     console,
     get_theme,
@@ -44,9 +44,9 @@ def _load_feedback() -> list[dict[str, Any]]:
         data = json.loads(_FEEDBACK_PATH.read_text(encoding="utf-8"))
         if isinstance(data, list):
             return data
-    except Exception as exc:  # pragma: no cover — defensive
-        logger = logging.getLogger(__name__)
-        logger.warning("Error cargando feedback: %s", exc)
+        raise ValueError("se esperaba un list JSON")
+    except Exception as exc:
+        preserve_corrupt(_FEEDBACK_PATH, exc)
     return []
 
 
@@ -77,9 +77,9 @@ def _load_bookmarks() -> list[dict[str, Any]]:
         data = json.loads(_BOOKMARKS_PATH.read_text(encoding="utf-8"))
         if isinstance(data, list):
             return data
-    except Exception as exc:  # pragma: no cover — defensive
-        logger = logging.getLogger(__name__)
-        logger.warning("Error cargando bookmarks: %s", exc)
+        raise ValueError("se esperaba un list JSON")
+    except Exception as exc:
+        preserve_corrupt(_BOOKMARKS_PATH, exc)
     return []
 
 
@@ -828,12 +828,9 @@ class StatusCommand(BaseCommand):
     async def execute(self, _args: str) -> None:
         # Try importing from ygg (hub CLI) for realm status.
         try:
-            # Add root to sys.path if needed.
-            from lilith_cli.main import _resolve_yggdrasil_root
+            from lilith_cli.main import _lazy_import_ygg
 
-            root = str(_resolve_yggdrasil_root())
-            if root not in sys.path:
-                sys.path.insert(0, root)
+            _lazy_import_ygg()
             from ygg import (
                 REALMS,
                 SERVICES,
@@ -916,10 +913,9 @@ class BifrostCommand(BaseCommand):
             return
 
         try:
-            # Try to load BifrostIPC
-            import sys
+            from lilith_cli.main import add_hub_to_sys_path
 
-            sys.path.insert(0, str(root / "Vanaheim" / "bifrost"))
+            add_hub_to_sys_path(root / "Vanaheim" / "bifrost")
             from bifrost.bifrost.ipc import BifrostIPC
 
             ipc = BifrostIPC(root=root / ".bifrost")
@@ -2912,9 +2908,9 @@ def _load_macros() -> dict[str, list[str]]:
         data = json.loads(_MACROS_PATH.read_text(encoding="utf-8"))
         if isinstance(data, dict):
             return {k: v for k, v in data.items() if isinstance(v, list)}
-    except Exception as exc:  # pragma: no cover — defensive
-        logger = logging.getLogger(__name__)
-        logger.warning("Error cargando macros: %s", exc)
+        raise ValueError("se esperaba un dict JSON")
+    except Exception as exc:
+        preserve_corrupt(_MACROS_PATH, exc)
     return {}
 
 
@@ -3113,7 +3109,9 @@ class MacroCommand(BaseCommand):
                     },
                 )
             try:
-                await registry.dispatch(cmd)
+                from .slash_router import dispatch as dispatch_slash
+
+                await dispatch_slash(self.session, cmd, registry)
             except SystemExit:
                 raise
             except Exception as exc:  # pragma: no cover — defensive
@@ -3478,12 +3476,9 @@ class MacroCommand(BaseCommand):
             render_error(f"Macro no encontrada: [model]{name}[/]")
             return
 
-        registry = CommandRegistry(self.session)
-        registry.discover()
-        valid_names = set(registry._commands.keys())
-        for alias, target in registry._aliases.items():
-            valid_names.add(alias)
-            valid_names.add(target)
+        from .slash_router import slash_commands
+
+        valid_names = {word[1:] for word in slash_commands()}
 
         valid_lines: list[tuple[int, str]] = []
         invalid_lines: list[tuple[int, str, str]] = []

@@ -18,7 +18,7 @@ from lilith_cli.extra_commands import run_summary_command
 async def test_summary_uses_fixed_prompt(fake_session):
     """/summary must await _stream_agent_reply with the documented fixed prompt."""
     with patch(
-        "lilith_cli.extra_commands._stream_agent_reply",
+        "lilith_cli.slash_commands.conversation._stream_agent_reply",
         new_callable=AsyncMock,
     ) as mock_stream:
         await run_summary_command(fake_session, "")
@@ -33,7 +33,7 @@ async def test_summary_uses_fixed_prompt(fake_session):
 async def test_summary_with_args_reports_error(fake_session, capsys):
     """/summary must reject any extra args and never call _stream_agent_reply."""
     with patch(
-        "lilith_cli.extra_commands._stream_agent_reply",
+        "lilith_cli.slash_commands.conversation._stream_agent_reply",
         new_callable=AsyncMock,
     ) as mock_stream:
         await run_summary_command(fake_session, "extra")

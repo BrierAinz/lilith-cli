@@ -156,7 +156,7 @@ def test_paragraph_chunker_splits_on_blank_lines():
 
 def test_paragraph_chunker_packs_oversize_paragraphs():
     paras = []
-    for i in range(5):
+    for _ in range(5):
         paras.append("P" * 50)
     text = "\n\n".join(paras)
     chunker = SemanticChunker(

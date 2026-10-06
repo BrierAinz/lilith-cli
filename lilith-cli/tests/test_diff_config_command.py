@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from io import StringIO
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 

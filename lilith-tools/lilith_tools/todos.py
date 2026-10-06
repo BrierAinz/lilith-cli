@@ -9,7 +9,7 @@ The list is exposed to the LLM via ``todo_add``, ``todo_done``,
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 

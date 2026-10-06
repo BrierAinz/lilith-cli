@@ -1,9 +1,7 @@
 """Tests for ygg_context module."""
 
-import tempfile
 from pathlib import Path
 
-import pytest
 
 from lilith_cli.ygg_context import (
     YGG_DIR,

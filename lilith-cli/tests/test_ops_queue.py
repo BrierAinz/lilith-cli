@@ -65,6 +65,7 @@ def fake_repo_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     fake_main = fake_root / "Asgard" / "lilith-cli" / "lilith_cli" / "main.py"
     fake_main.parent.mkdir(parents=True)
     fake_main.write_text("", encoding="utf-8")
+    (fake_root / "ygg.py").write_text("", encoding="utf-8")
     monkeypatch.setattr(cli_main, "__file__", str(fake_main))
     # _resolve_yggdrasil_root prefers YGGDRASIL_ROOT over __file__, so unset
     # it during tests so the relocated tmp_path root is authoritative.
@@ -108,6 +109,7 @@ def fake_repo_root_no_yaml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> P
     fake_main = fake_root / "Asgard" / "lilith-cli" / "lilith_cli" / "main.py"
     fake_main.parent.mkdir(parents=True)
     fake_main.write_text("", encoding="utf-8")
+    (fake_root / "ygg.py").write_text("", encoding="utf-8")
     monkeypatch.setattr(cli_main, "__file__", str(fake_main))
     # _resolve_yggdrasil_root prefers YGGDRASIL_ROOT over __file__, so unset
     # it during tests so the relocated tmp_path root is authoritative.
@@ -398,7 +400,6 @@ def test_work_once_with_pinned_agent_acks_on_success(
     the bus message gets acked, exit 0.
     """
     from lilith_cli import ops_queue
-    from lilith_core.bus import LilithBus
 
     bus_db = _bus_path(fake_repo_root)
 
@@ -449,7 +450,6 @@ def test_work_once_releases_on_subprocess_failure(
     subprocess's exit code.
     """
     from lilith_cli import ops_queue
-    from lilith_core.bus import LilithBus
 
     bus_db = _bus_path(fake_repo_root)
 

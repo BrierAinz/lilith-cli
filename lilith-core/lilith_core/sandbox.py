@@ -39,10 +39,8 @@ Usage::
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
@@ -249,8 +247,10 @@ class AgentSandbox:
                 logger.warning("Violations: %s", sandbox.violations)
     """
 
-    def __init__(self, policy: SandboxPolicy) -> None:
+    def __init__(self, policy: SandboxPolicy, agent_name: str | None = None) -> None:
         self.policy = policy
+        #: Agent this sandbox was bound to, when it was bound to one.
+        self.agent_name = agent_name
         self.state = SandboxState()
         self._active = False
 

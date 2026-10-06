@@ -1,18 +1,12 @@
 """Tests for the .ygg project context module."""
 
-import tempfile
-from pathlib import Path
 
-import pytest
 
 from lilith_tools.ygg import (
     YggContext,
     YggLoader,
     CURRENT_FILE,
     LOG_FILE,
-    TASKS_FILE,
-    DESIGN_FILE,
-    RESEARCH_FILE,
 )
 
 

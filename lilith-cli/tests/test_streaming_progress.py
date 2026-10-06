@@ -79,10 +79,9 @@ async def test_process_with_streaming_tracks_tool_progress(fake_session, capsys)
     ]
     fake_session.process_message_stream = lambda text, cancel_event=None: _fake_stream(events)
 
-    with patch("lilith_cli.repl.render_tool_progress") as mock_render_progress, \
-         patch("lilith_cli.repl.render_tool_call") as mock_render_call, \
-         patch("lilith_cli.repl.render_tool_result") as mock_render_result, \
-         patch("lilith_cli.repl.render_markdown") as mock_render_md, \
+    with patch("lilith_cli.repl.render_tool_call"), \
+         patch("lilith_cli.repl.render_tool_result"), \
+         patch("lilith_cli.repl.render_markdown"), \
          patch("lilith_cli.repl.render_turn_end") as mock_turn_end:
         await _process_with_streaming(fake_session, "hola")
 
@@ -107,8 +106,8 @@ async def test_process_with_streaming_handles_failed_tool(fake_session):
     ]
     fake_session.process_message_stream = lambda text, cancel_event=None: _fake_stream(events)
 
-    with patch("lilith_cli.repl.render_tool_call") as mock_render_call, \
-         patch("lilith_cli.repl.render_tool_result") as mock_render_result, \
+    with patch("lilith_cli.repl.render_tool_call"), \
+         patch("lilith_cli.repl.render_tool_result"), \
          patch("lilith_cli.repl.render_turn_end") as mock_turn_end, \
          patch("lilith_cli.tool_progress.console.print") as mock_console_print:
         await _process_with_streaming(fake_session, "run")

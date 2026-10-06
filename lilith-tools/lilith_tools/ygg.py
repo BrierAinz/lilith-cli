@@ -26,7 +26,6 @@ Usage:
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -245,7 +244,7 @@ class YggContext:
         # Pending tasks
         tasks = self.get_tasks()
         if tasks:
-            parts.append(f"\n## Pending Tasks\n" + "\n".join(f"- {t}" for t in tasks))
+            parts.append("\n## Pending Tasks\n" + "\n".join(f"- {t}" for t in tasks))
 
         # Design notes
         design = self.design.read()

@@ -1,6 +1,6 @@
 [project]
 name = "lilith-workspace"
-version = "4.4.0"
+version = "4.6.0"
 description = "Lilith CLI — Norse-themed terminal IDE and agent interface (uv workspace)"
 requires-python = ">=3.11"
 license = "MIT"
@@ -25,11 +25,57 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
+    "mypy>=2.4",
+    "pytest-cov>=7",
     "ruff>=0.16.6",
 ]
 
 [tool.hatch.build.targets.wheel]
 bypass-selection = true
+
+[tool.ruff]
+target-version = "py311"
+extend-exclude = ["lilith-cli/lilith_cli/web_console/frontend"]
+
+[tool.ruff.lint]
+# Pyflakes (unused/undefined names), bugbear and syntax errors. Style rules
+# are left out on purpose: this gate is for defects, not formatting.
+select = ["E9", "F", "B"]
+ignore = [
+    "B905",  # zip() without strict=: the default is intended in this codebase
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Facades re-export names on purpose.
+"lilith-cli/lilith_cli/extra_commands.py" = ["F401"]
+"**/__init__.py" = ["F401"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+# The library packages type-check clean; lilith-cli does not yet.
+files = [
+    "lilith-core/lilith_core",
+    "lilith-memory/lilith_memory",
+    "lilith-skills/lilith_skills",
+    "lilith-tools/lilith_tools",
+    "lilith-orchestrator/lilith_orchestrator",
+]
+
+[tool.coverage.run]
+source = [
+    "lilith_cli",
+    "lilith_core",
+    "lilith_memory",
+    "lilith_orchestrator",
+    "lilith_skills",
+    "lilith_tools",
+]
+omit = ["*/web_console/frontend/*"]
+
+[tool.coverage.report]
+# Measured at 78% when the gate was added; fail on a clear regression.
+fail_under = 76
 
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib"

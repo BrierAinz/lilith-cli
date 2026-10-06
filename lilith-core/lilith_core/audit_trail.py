@@ -81,9 +81,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from lilith_core.hooks import HookContext, HookType
+from lilith_core.hooks import HookContext
 from lilith_core.policy_engine import (
-    PolicyAction,
     PolicyEngine,
     PolicyResult,
 )

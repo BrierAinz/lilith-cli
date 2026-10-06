@@ -100,6 +100,7 @@ def test_default_bus_db_path_uses_resolved_root(monkeypatch, tmp_path: Path):
     fake_module = fake_root / "Asgard" / "lilith-cli" / "lilith_cli" / "main.py"
     fake_module.parent.mkdir(parents=True)
     fake_module.write_text("", encoding="utf-8")
+    (fake_root / "ygg.py").write_text("", encoding="utf-8")
     monkeypatch.setattr(cli_main, "__file__", str(fake_module))
     # _resolve_yggdrasil_root prefers YGGDRASIL_ROOT over __file__, so unset
     # it during tests so the relocated tmp_path root is authoritative.
@@ -238,7 +239,7 @@ def test_bus_publish_rejects_invalid_json(bus_db: Path, capsys):
 
 def test_bus_tail_against_published_messages(bus_db: Path, capsys):
     """tail should show previously published messages and respect the topic pattern."""
-    from lilith_cli.ops import publish, tail
+    from lilith_cli.ops import tail
     from lilith_core.bus import LilithBus
 
     bus = LilithBus(bus_db)

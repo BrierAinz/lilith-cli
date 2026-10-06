@@ -36,7 +36,7 @@ async def test_watch_command_is_importable_and_callable():
     def capture(text: str = ""):
         prints.append(str(text))
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_watch_command(session, "")
 
     assert any("No hay watchers activos" in p for p in prints)
@@ -52,7 +52,7 @@ async def test_watch_start_and_stop_and_list(tmp_path, monkeypatch):
     def capture(text: str = ""):
         prints.append(str(text))
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_watch_command(session, str(tmp_path))
         await run_watch_command(session, "list")
         await run_watch_command(session, "stop watch_1")
@@ -72,7 +72,7 @@ async def test_watch_events_without_active_watch():
     def capture_error(text: str = ""):
         errors.append(str(text))
 
-    with patch("lilith_cli.extra_commands.render_error", side_effect=capture_error):
+    with patch("lilith_cli.slash_commands.navigation.render_error", side_effect=capture_error):
         await run_watch_command(session, "events missing_id")
 
     assert any("Watcher no encontrado" in e for e in errors)

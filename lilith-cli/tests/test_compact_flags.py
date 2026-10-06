@@ -21,7 +21,7 @@ def test_compact_dry_run_does_not_modify_history(fake_session, capsys):
     ]
     history_before = list(fake_session.history)
 
-    with patch("lilith_cli.extra_commands._compact_messages", return_value="summary text"):
+    with patch("lilith_cli.slash_commands.conversation._compact_messages", return_value="summary text"):
         _run(run_compact_command(fake_session, "--dry-run"))
 
     out = capsys.readouterr().out
@@ -42,7 +42,7 @@ def test_compact_dry_run_with_count(fake_session, capsys):
         {"role": "user", "content": "e"},
     ]
 
-    with patch("lilith_cli.extra_commands._compact_messages", return_value="sum"):
+    with patch("lilith_cli.slash_commands.conversation._compact_messages", return_value="sum"):
         _run(run_compact_command(fake_session, "2 --dry-run"))
 
     out = capsys.readouterr().out
@@ -56,7 +56,7 @@ def test_compact_force_overrides_warning(fake_session, capsys):
     fake_session.history = [{"role": "user", "content": f"msg {i}"} for i in range(10)]
 
     # Without --force and large N: should warn, not apply
-    with patch("lilith_cli.extra_commands._compact_messages", return_value="sum"):
+    with patch("lilith_cli.slash_commands.conversation._compact_messages", return_value="sum"):
         _run(run_compact_command(fake_session, "7"))
     out = capsys.readouterr().out
     assert "70%" in out or "force" in out.lower()
@@ -64,7 +64,7 @@ def test_compact_force_overrides_warning(fake_session, capsys):
     assert len(fake_session.history) == 10
 
     # With --force: should apply
-    with patch("lilith_cli.extra_commands._compact_messages", return_value="sum"):
+    with patch("lilith_cli.slash_commands.conversation._compact_messages", return_value="sum"):
         _run(run_compact_command(fake_session, "7 --force"))
     out = capsys.readouterr().out
     assert "compactados" in out
@@ -87,7 +87,7 @@ def test_compact_small_count_applies_without_force(fake_session, capsys):
 
     fake_session.history = [{"role": "user", "content": f"msg {i}"} for i in range(10)]
 
-    with patch("lilith_cli.extra_commands._compact_messages", return_value="sum"):
+    with patch("lilith_cli.slash_commands.conversation._compact_messages", return_value="sum"):
         _run(run_compact_command(fake_session, "1"))
 
     out = capsys.readouterr().out
@@ -102,7 +102,7 @@ def test_compact_keep_last_preserves_recent(fake_session, capsys):
         {"role": "user", "content": f"msg {i}"} for i in range(10)
     ]
 
-    with patch("lilith_cli.extra_commands._compact_messages", return_value="summary"):
+    with patch("lilith_cli.slash_commands.conversation._compact_messages", return_value="summary"):
         # Compact 5 of first 7, keep last 3
         _run(run_compact_command(fake_session, "5 --keep-last 3 --force"))
 
@@ -125,7 +125,7 @@ def test_compact_keep_last_no_explicit_n(fake_session, capsys):
         {"role": "user", "content": f"msg {i}"} for i in range(6)
     ]
 
-    with patch("lilith_cli.extra_commands._compact_messages", return_value="summary"):
+    with patch("lilith_cli.slash_commands.conversation._compact_messages", return_value="summary"):
         # No explicit n, so compact 6 - 2 = 4 messages
         _run(run_compact_command(fake_session, "--keep-last 2 --force"))
 
@@ -155,7 +155,7 @@ def test_compact_keep_last_dry_run(fake_session, capsys):
 
     fake_session.history = [{"role": "user", "content": f"m{i}"} for i in range(10)]
 
-    with patch("lilith_cli.extra_commands._compact_messages", return_value="s"):
+    with patch("lilith_cli.slash_commands.conversation._compact_messages", return_value="s"):
         _run(run_compact_command(fake_session, "4 --dry-run --keep-last 3"))
 
     out = capsys.readouterr().out

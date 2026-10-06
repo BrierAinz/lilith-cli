@@ -7,6 +7,11 @@ of the project the IDE was opened in. Files whose name starts with ``_`` are
 ignored. On startup (``LilithIDEApp.on_mount``) the app calls
 ``PluginManager.load_all()`` followed by ``PluginManager.register_all(app)``.
 
+Plugins are arbitrary code shipped inside the project, so they only run for
+projects the user has trusted (``/plugins trust`` in the IDE chat, or
+``LILITH_TRUST_PROJECT_PLUGINS=1``). Opening a cloned repository never
+executes its plugins on its own.
+
 A plugin module can declare its entry point in one of three ways, resolved
 in this order (first match wins):
 
@@ -73,12 +78,36 @@ working examples.
 from __future__ import annotations
 
 import importlib.util
+import json
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from ..config import CONFIG_DIR
+
 logger = logging.getLogger("lilith.plugins")
+
+#: Projects whose ``.yggdrasil/plugins`` the user allowed to run.
+TRUSTED_PROJECTS_FILE = CONFIG_DIR / "trusted_plugin_projects.json"
+TRUST_ALL_ENV = "LILITH_TRUST_PROJECT_PLUGINS"
+
+
+class TrustRegistryError(Exception):
+    """The trusted-projects file exists but cannot be read as a list."""
+
+
+def _trusted_projects() -> set[str]:
+    try:
+        data = json.loads(TRUSTED_PROJECTS_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return set()
+    except (OSError, ValueError) as exc:
+        raise TrustRegistryError(f"{TRUSTED_PROJECTS_FILE}: {exc}") from exc
+    if not isinstance(data, list):
+        raise TrustRegistryError(f"{TRUSTED_PROJECTS_FILE}: expected a JSON list")
+    return {item for item in data if isinstance(item, str)}
 
 #: Version of the plugin API contract described in this module.
 #: Bumped only on breaking changes to the contract.
@@ -207,6 +236,26 @@ class PluginManager:
     def plugin_dir(self) -> Path:
         """Absolute path of the plugin directory for this project."""
         return self.root / self.PLUGIN_DIR
+
+    def is_trusted(self) -> bool:
+        """Whether this project's plugins may run."""
+        if os.environ.get(TRUST_ALL_ENV) == "1":
+            return True
+        try:
+            return str(self.root) in _trusted_projects()
+        except TrustRegistryError:
+            logger.warning("Unreadable plugin trust registry", exc_info=True)
+            return False
+
+    def trust(self) -> None:
+        """Remember that the user allows this project's plugins to run.
+
+        Raises :class:`TrustRegistryError` instead of replacing an unreadable
+        registry, which would drop every project trusted before.
+        """
+        projects = _trusted_projects() | {str(self.root)}
+        TRUSTED_PROJECTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        TRUSTED_PROJECTS_FILE.write_text(json.dumps(sorted(projects), indent=2), encoding="utf-8")
 
     def discover(self) -> list[Path]:
         """Return all plugin candidates under the plugin directory.

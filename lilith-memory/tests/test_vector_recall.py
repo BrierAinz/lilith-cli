@@ -14,15 +14,12 @@ from __future__ import annotations
 
 import math
 import os
-import sqlite3
-import tempfile
 
 import pytest
 
-from lilith_memory.chunker import Chunk, ChunkStrategy, SemanticChunker
+from lilith_memory.chunker import Chunk, SemanticChunker
 from lilith_memory.vector_recall import (
     HashEmbedder,
-    RecallHit,
     VectorRecall,
     chunk_and_recall,
 )
@@ -213,21 +210,9 @@ class TestHashEmbedderSimilarity:
 
 
 @pytest.fixture
-def tmp_db():
-    """File-based DB in a temp dir, cleaned up after the test."""
-    td = tempfile.mkdtemp()
-    p = os.path.join(td, "recall.db")
-    yield p
-    # Best-effort cleanup
-    for f in os.listdir(td):
-        try:
-            os.remove(os.path.join(td, f))
-        except OSError:
-            pass
-    try:
-        os.rmdir(td)
-    except OSError:
-        pass
+def tmp_db(tmp_path):
+    """File-based DB in a temp dir that pytest removes afterwards."""
+    return str(tmp_path / "recall.db")
 
 
 @pytest.fixture
@@ -272,21 +257,13 @@ class TestVectorRecallBasics:
 
     def test_file_based_db_creates_file(self, tmp_db):
         e = HashEmbedder(dim=64)
-        r = VectorRecall(tmp_db, embedder=e)
+        VectorRecall(tmp_db, embedder=e)
         assert os.path.exists(tmp_db)
 
     def test_db_path_creates_parents(self, tmp_db):
         nested = os.path.join(os.path.dirname(tmp_db), "sub", "deep", "x.db")
-        e = HashEmbedder(dim=64)
-        try:
-            r = VectorRecall(nested, embedder=e)
-            assert os.path.exists(nested)
-        finally:
-            try:
-                os.remove(nested)
-                os.removedirs(os.path.dirname(nested))
-            except OSError:
-                pass
+        VectorRecall(nested, embedder=HashEmbedder(dim=64))
+        assert os.path.exists(nested)
 
     def test_default_embedder_and_chunker(self, tmp_db):
         r = VectorRecall(tmp_db)

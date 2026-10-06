@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -734,6 +733,23 @@ class TestAuditLog:
         assert len(evs) == 2
         evs = log.filter(until="2024-01-02T23:59:59")
         assert len(evs) == 2
+
+    def test_filter_by_datetime(self, populated_ygg: Path):
+        """Regression: datetime bounds were parsed as None and ignored."""
+        from datetime import datetime
+
+        log = AuditLog(populated_ygg)
+        assert len(log.filter(since=datetime(2024, 1, 2))) == len(log.filter(since="2024-01-02"))
+        assert len(log.filter(since=datetime(2024, 1, 2))) < len(log.filter())
+
+    def test_filter_by_aware_datetime(self, populated_ygg: Path):
+        """Regression: an aware bound against naive entries raised TypeError."""
+        from datetime import datetime, timezone
+
+        log = AuditLog(populated_ygg)
+        local_midnight = datetime(2024, 1, 2).astimezone()
+        assert len(log.filter(since=local_midnight)) == len(log.filter(since="2024-01-02"))
+        assert log.filter(since=datetime.now(timezone.utc)) == []
 
     def test_filter_with_limit(self, populated_ygg: Path):
         log = AuditLog(populated_ygg)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -38,8 +37,8 @@ async def test_voice_command_status_and_toggle():
     def capture(text: str = ""):
         prints.append(text)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture), \
-         patch("lilith_cli.extra_commands._speak_text"):
+    with patch("lilith_cli.render.console.print", side_effect=capture), \
+         patch("lilith_cli.slash_commands.extras._speak_text"):
         # Status (off)
         await run_voice_command(session, "status")
         assert session._voice_enabled is False

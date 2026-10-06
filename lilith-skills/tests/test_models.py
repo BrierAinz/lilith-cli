@@ -1,5 +1,4 @@
 """Tests for lilith_skills.models (Skill, SkillManifest)."""
-import pytest
 import tempfile
 from pathlib import Path
 

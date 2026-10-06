@@ -1,6 +1,5 @@
 """Tests for the batch_edit multi-file edit coordinator."""
 
-from pathlib import Path
 
 import lilith_tools.filesystem as filesystem
 from lilith_tools.filesystem import BatchEditTool

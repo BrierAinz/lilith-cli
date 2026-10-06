@@ -11,7 +11,6 @@ These tests use a stub executor that records spawn calls and returns a fixed out
 """
 from __future__ import annotations
 
-import asyncio
 import sys
 from pathlib import Path
 

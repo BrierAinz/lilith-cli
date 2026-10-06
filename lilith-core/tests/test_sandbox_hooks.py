@@ -16,7 +16,6 @@ import pytest
 
 from lilith_core.hooks import HookContext, HookType, get_hook_registry
 from lilith_core.sandbox import (
-    AgentSandbox,
     SandboxPolicy,
     SandboxRule,
     SandboxRuleType,
@@ -334,7 +333,6 @@ class TestSandboxLLMHook:
     def test_rate_limit_resets_after_window(
         self, fresh_hooks, fresh_sandbox_registry, llm_ctx
     ):
-        import time
 
         policy = SandboxPolicy(
             name="rate-limited",

@@ -65,15 +65,17 @@ Usage::
 
 from __future__ import annotations
 
+import builtins
+
 import json
 import os
 import re
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable, Iterator
+from typing import Any, Iterator
 
 from lilith_core.persistence_lock import storage_lock
 
@@ -133,13 +135,24 @@ def _now_iso() -> str:
     return datetime.now().isoformat()
 
 
-def _parse_ts(ts: str | float | int | None) -> datetime | None:
-    """Best-effort parse of an ISO timestamp, epoch seconds, or epoch millis.
+def _parse_ts(ts: str | float | int | datetime | None) -> datetime | None:
+    """Best-effort parse of a datetime, ISO timestamp, epoch seconds or millis.
 
-    Returns ``None`` for unparseable inputs so callers can skip them.
+    Returns a naive local datetime, the form ``_now_iso`` writes, so aware
+    and naive values compare; ``None`` for unparseable inputs so callers can
+    skip them.
     """
+    parsed = _parse_ts_any(ts)
+    if parsed is not None and parsed.tzinfo is not None:
+        parsed = parsed.astimezone().replace(tzinfo=None)
+    return parsed
+
+
+def _parse_ts_any(ts: str | float | int | datetime | None) -> datetime | None:
     if ts is None:
         return None
+    if isinstance(ts, datetime):
+        return ts
     if isinstance(ts, (int, float)):
         # Heuristic: > 10^12 → milliseconds, else seconds
         if ts > 1_000_000_000_000:
@@ -614,7 +627,7 @@ class GoalsStore:
             return True
         return False
 
-    def active(self) -> list[Goal]:
+    def active(self) -> builtins.list[Goal]:
         return [g for g in self.list() if g.status == "active"]
 
 
@@ -1227,7 +1240,7 @@ class WorkflowsStore:
             return None
         return Workflow.from_dict(data, source=str(path))
 
-    def names(self) -> list[str]:
+    def names(self) -> builtins.list[str]:
         return [w.name for w in self.list()]
 
 

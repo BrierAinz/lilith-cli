@@ -20,7 +20,7 @@ async def test_redo_resends_last_user_message(fake_session):
     fake_session._last_user_message = "previous prompt"
 
     with patch(
-        "lilith_cli.extra_commands._stream_agent_reply",
+        "lilith_cli.slash_commands.conversation._stream_agent_reply",
         new_callable=AsyncMock,
     ) as mock_stream:
         await run_redo_command(fake_session, "")
@@ -34,7 +34,7 @@ async def test_redo_with_args_reports_error(fake_session, capsys):
     fake_session._last_user_message = "previous prompt"
 
     with patch(
-        "lilith_cli.extra_commands._stream_agent_reply",
+        "lilith_cli.slash_commands.conversation._stream_agent_reply",
         new_callable=AsyncMock,
     ) as mock_stream:
         await run_redo_command(fake_session, "extra")
@@ -50,7 +50,7 @@ async def test_redo_without_last_message_reports_error(fake_session, capsys):
     fake_session._last_user_message = ""
 
     with patch(
-        "lilith_cli.extra_commands._stream_agent_reply",
+        "lilith_cli.slash_commands.conversation._stream_agent_reply",
         new_callable=AsyncMock,
     ) as mock_stream:
         await run_redo_command(fake_session, "")

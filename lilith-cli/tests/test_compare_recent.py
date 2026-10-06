@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from lilith_cli.extra_commands import (
     _compare_recent_paths,
-    _compare_text_stats,
     run_compare_command,
 )
 
@@ -91,7 +89,7 @@ async def test_compare_revent_default_mode_is_text(tmp_path, monkeypatch):
     # Capture what _compare_text_stats prints.
     captured = []
     with patch(
-        "lilith_cli.extra_commands._compare_text_stats",
+        "lilith_cli.slash_commands.navigation._compare_text_stats",
         side_effect=lambda x, y: captured.append((str(x), str(y))),
     ):
         await run_compare_command(sess, "recent")
@@ -111,7 +109,7 @@ async def test_compare_revent_files_mode_uses_diff(tmp_path):
     sess = _Session([_entry(str(a)), _entry(str(b))])
     captured = []
     with patch(
-        "lilith_cli.extra_commands._compare_diff_files",
+        "lilith_cli.slash_commands.navigation._compare_diff_files",
         side_effect=lambda x, y: captured.append((str(x), str(y))),
     ):
         await run_compare_command(sess, "recent files")
@@ -129,7 +127,7 @@ async def test_compare_revent_json_mode_uses_json_diff(tmp_path):
     sess = _Session([_entry(str(a)), _entry(str(b))])
     captured = []
     with patch(
-        "lilith_cli.extra_commands._compare_json_files",
+        "lilith_cli.slash_commands.navigation._compare_json_files",
         side_effect=lambda x, y: captured.append((str(x), str(y))),
     ):
         await run_compare_command(sess, "recent json")

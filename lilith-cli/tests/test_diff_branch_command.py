@@ -5,11 +5,12 @@ stats-mode invocation, file-filter invocation, git-error propagation,
 empty output handling, and the rich-table rendering for numstat.
 
 The command shells out to ``git`` via subprocess; we monkeypatch
-``extra_commands.subprocess.run`` to keep tests hermetic and offline.
+``subprocess.run`` to keep tests hermetic and offline.
 """
 from __future__ import annotations
 
 import asyncio
+import subprocess
 from unittest.mock import patch
 
 import pytest
@@ -30,7 +31,6 @@ class _FakeCompletedProcess:
 @pytest.fixture
 def captured_subprocess(monkeypatch):
     """Replace subprocess.run inside extra_commands; record every call."""
-    import lilith_cli.extra_commands as ec
 
     captured: list[dict[str, object]] = []
 
@@ -38,7 +38,7 @@ def captured_subprocess(monkeypatch):
         captured.append({"args": args, "kwargs": kwargs})
         return _FakeCompletedProcess(returncode=0, stdout="")
 
-    monkeypatch.setattr(ec.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     return captured
 
 
@@ -83,9 +83,8 @@ def test_diff_branch_stats_uses_numstat(fake_session, captured_subprocess, capsy
         captured_subprocess.append({"args": args, "kwargs": kwargs})
         return _FakeCompletedProcess(returncode=0, stdout=numstat_payload)
 
-    import lilith_cli.extra_commands as ec
 
-    with patch.object(ec.subprocess, "run", side_effect=fake_run):
+    with patch.object(subprocess, "run", side_effect=fake_run):
         _run(run_diff_branch_command(fake_session, "main stats"))
 
     # --numstat flag must be present.
@@ -117,7 +116,6 @@ def test_diff_branch_git_error_is_surfaced(
 ):
     """A non-zero git exit must render the stderr without crashing."""
     from lilith_cli.extra_commands import run_diff_branch_command
-    import lilith_cli.extra_commands as ec
 
     def failing_run(*args, **kwargs):
         captured_subprocess.append({"args": args, "kwargs": kwargs})
@@ -127,7 +125,7 @@ def test_diff_branch_git_error_is_surfaced(
             stderr="fatal: unknown revision 'bogus-ref'",
         )
 
-    with patch.object(ec.subprocess, "run", side_effect=failing_run):
+    with patch.object(subprocess, "run", side_effect=failing_run):
         _run(run_diff_branch_command(fake_session, "bogus-ref"))
 
     combined = capsys.readouterr().out
@@ -139,13 +137,12 @@ def test_diff_branch_empty_diff_prints_dim_message(
 ):
     """When git produces no output, /diff-branch prints a dim empty-state line."""
     from lilith_cli.extra_commands import run_diff_branch_command
-    import lilith_cli.extra_commands as ec
 
     def empty_run(*args, **kwargs):
         captured_subprocess.append({"args": args, "kwargs": kwargs})
         return _FakeCompletedProcess(returncode=0, stdout="")
 
-    with patch.object(ec.subprocess, "run", side_effect=empty_run):
+    with patch.object(subprocess, "run", side_effect=empty_run):
         _run(run_diff_branch_command(fake_session, "main"))
 
     out = capsys.readouterr().out
@@ -158,13 +155,12 @@ def test_diff_branch_subprocess_exception_is_handled(
 ):
     """If subprocess.run raises, render_error must be called — no traceback."""
     from lilith_cli.extra_commands import run_diff_branch_command
-    import lilith_cli.extra_commands as ec
 
     def boom(*args, **kwargs):
         captured_subprocess.append({"args": args, "kwargs": kwargs})
         raise OSError("git not found")
 
-    with patch.object(ec.subprocess, "run", side_effect=boom):
+    with patch.object(subprocess, "run", side_effect=boom):
         # Must not raise.
         _run(run_diff_branch_command(fake_session, "main"))
 
@@ -177,7 +173,6 @@ def test_diff_branch_full_diff_prints_unfiltered_output(
 ):
     """Non-stats mode prints the raw git diff payload verbatim."""
     from lilith_cli.extra_commands import run_diff_branch_command
-    import lilith_cli.extra_commands as ec
 
     raw_diff = (
         "diff --git a/foo.py b/foo.py\n"
@@ -193,7 +188,7 @@ def test_diff_branch_full_diff_prints_unfiltered_output(
         captured_subprocess.append({"args": args, "kwargs": kwargs})
         return _FakeCompletedProcess(returncode=0, stdout=raw_diff)
 
-    with patch.object(ec.subprocess, "run", side_effect=full_run):
+    with patch.object(subprocess, "run", side_effect=full_run):
         _run(run_diff_branch_command(fake_session, "feature-branch"))
 
     out = capsys.readouterr().out

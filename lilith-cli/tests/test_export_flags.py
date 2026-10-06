@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
+from lilith_cli.slash_commands import sessions as sessions_cmds
 
 
 def _run(coro):
@@ -16,7 +16,7 @@ def test_export_default_json(fake_session, tmp_path, monkeypatch, capsys):
     from lilith_cli import extra_commands as ec
 
     # Redirect CONFIG_DIR so we don't pollute the real one
-    monkeypatch.setattr(ec, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(sessions_cmds, "CONFIG_DIR", tmp_path)
 
     fake_session.history = [
         {"role": "user", "content": "hello"},
@@ -43,7 +43,7 @@ def test_export_format_md(fake_session, tmp_path, monkeypatch, capsys):
     """/export --format md writes Markdown."""
     from lilith_cli import extra_commands as ec
 
-    monkeypatch.setattr(ec, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(sessions_cmds, "CONFIG_DIR", tmp_path)
 
     fake_session.history = [
         {"role": "user", "content": "first message"},
@@ -52,7 +52,7 @@ def test_export_format_md(fake_session, tmp_path, monkeypatch, capsys):
 
     _run(ec.run_export_command(fake_session, "--format md"))
 
-    out = capsys.readouterr().out
+    capsys.readouterr()
     conversations_dir = tmp_path / "conversations"
     files = list(conversations_dir.glob("*.md"))
     assert len(files) == 1
@@ -98,7 +98,7 @@ def test_export_named_file(fake_session, tmp_path, monkeypatch, capsys):
     """/export <name> uses given name."""
     from lilith_cli import extra_commands as ec
 
-    monkeypatch.setattr(ec, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(sessions_cmds, "CONFIG_DIR", tmp_path)
 
     fake_session.history = [{"role": "user", "content": "z"}]
 

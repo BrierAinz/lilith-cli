@@ -8,9 +8,7 @@ common case in unit tests that bypass ``run_repl``).
 from __future__ import annotations
 
 import asyncio
-import sys
 
-import pytest
 
 
 def _run(coro):

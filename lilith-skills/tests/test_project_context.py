@@ -1,8 +1,6 @@
 """Tests for .ygg project context convention."""
 
-import json
 import pytest
-from pathlib import Path
 
 from lilith_skills.project_context import (
     CONTEXT_FILE,

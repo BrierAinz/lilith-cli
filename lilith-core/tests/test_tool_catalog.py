@@ -17,7 +17,6 @@ These tests protect two contracts:
 from __future__ import annotations
 
 import inspect
-from typing import Iterable
 
 import pytest
 

@@ -108,7 +108,7 @@ def test_todos_command_uses_renderer(fake_session, capsys):
         ],
     )
 
-    with patch("lilith_cli.extra_commands.TodoListTool") as MockTool:
+    with patch("lilith_cli.slash_commands.navigation.TodoListTool") as MockTool:
         MockTool.return_value.execute.return_value = fake_result
         _run(run_todos_command(fake_session, ""))
 

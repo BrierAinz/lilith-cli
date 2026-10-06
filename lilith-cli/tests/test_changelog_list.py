@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 
 
 def _run(coro):
@@ -23,7 +22,7 @@ def test_changelog_list_shows_versions(fake_session, tmp_path, monkeypatch, caps
         "## [4.1.0] - 2026-07-01\r\n### Added\r\n- Initial slash commands.\r\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr("lilith_cli.extra_commands.CHANGELOG_PATH", changelog)
+    monkeypatch.setattr("lilith_cli.slash_commands.git.CHANGELOG_PATH", changelog)
 
     _run(ec.run_changelog_command(fake_session, "--list"))
 
@@ -46,7 +45,7 @@ def test_changelog_list_alias(fake_session, tmp_path, monkeypatch, capsys):
         "# Changelog\r\n\r\n## [1.0.0]\r\n- Initial.\r\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr("lilith_cli.extra_commands.CHANGELOG_PATH", changelog)
+    monkeypatch.setattr("lilith_cli.slash_commands.git.CHANGELOG_PATH", changelog)
 
     _run(ec.run_changelog_command(fake_session, "list"))
 
@@ -61,7 +60,7 @@ def test_changelog_list_empty_changelog(fake_session, tmp_path, monkeypatch, cap
 
     changelog = tmp_path / "CHANGELOG.md"
     changelog.write_text("# Changelog\r\n", encoding="utf-8")
-    monkeypatch.setattr("lilith_cli.extra_commands.CHANGELOG_PATH", changelog)
+    monkeypatch.setattr("lilith_cli.slash_commands.git.CHANGELOG_PATH", changelog)
 
     _run(ec.run_changelog_command(fake_session, "--list"))
 

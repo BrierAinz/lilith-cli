@@ -12,6 +12,7 @@ from textual.screen import Screen, ModalScreen
 from textual.widgets import Button, Checkbox, DirectoryTree, Input, Label, OptionList, RichLog, Select, Static, TabbedContent, TabPane, TextArea
 from textual.widgets.option_list import Option
 
+from textual.css.query import NoMatches
 from .task_workspace import TaskSpec, TaskRun, TEMPLATES
 from .ui_widgets import FollowLog
 from .ui_quality import themed_css, read_state, update_state, safe_display
@@ -19,7 +20,6 @@ from .ui_quality import themed_css, read_state, update_state, safe_display
 STATUS_LABELS = {"verified": "Pruebas aprobadas", "responded": "Respuesta sin verificación",
                  "paused": "En pausa", "cancelled": "Cancelada", "interrupted": "Resultado desconocido",
                  "blocked": "Bloqueada", "running": "En curso"}
-
 
 class WorkspaceTree(DirectoryTree):
     """Keep the picker inside source directories, without following junctions."""
@@ -169,7 +169,7 @@ class TaskScreen(Screen):
         self.set_class(event.size.width < 90 or event.size.height < 35, "compact")
 
     def update_clock(self):
-        if self.busy:
+        if self.busy and self._ui_ready():
             self.query_one("#live-status", Static).update(Text(f"{self.current_action} · {time.monotonic()-self.started:.0f}s · tokens: {self.reported_tokens} · {self.changed_count} cambios"))
 
     @on(Select.Changed, "#template")
@@ -208,7 +208,25 @@ class TaskScreen(Screen):
             return
         self.launch()
 
+    def _ui_ready(self):
+        """Teardown can remove individual controls before is_mounted changes."""
+        if not self.is_mounted:
+            return False
+        try:
+            for selector in (
+                "#execute", "#template", "#execution-profile", "#objective",
+                "#task-files", "#verify-command", "#allow-edit", "#browse",
+                "#pause", "#cancel", "#accept", "#resume-task",
+                "#activity", "#live-status", "#diff-view", "#checks",
+            ):
+                self.query_one(selector)
+        except NoMatches:
+            return False
+        return True
+
     def activity(self, line):
+        if not self._ui_ready():
+            return
         if self.run is not None:
             self.changed_count = sum(self.run._read(name) != before for name, before in self.run.before.items())
         if line.startswith("[Lilith] tokens: "):
@@ -218,6 +236,8 @@ class TaskScreen(Screen):
 
     def set_busy(self, value):
         self.busy = value
+        if not self._ui_ready():
+            return
         for selector in ("#execute", "#template", "#execution-profile", "#objective", "#task-files", "#verify-command", "#allow-edit", "#browse"):
             self.query_one(selector).disabled = value
         self.query_one("#pause", Button).disabled = not value
@@ -232,6 +252,8 @@ class TaskScreen(Screen):
         self.started = time.monotonic()
         try:
             result = await self.run.execute(self.activity, resume=resume)
+            if not self._ui_ready():
+                return
             self.query_one("#diff-view", TextArea).load_text(self.run.diff())
             checks = result.get("progress", {}).get("verification") or {}
             self.query_one("#checks", RichLog).write(Text(checks.get("output") or checks.get("error") or "No se ejecutó una verificación."))
@@ -241,11 +263,15 @@ class TaskScreen(Screen):
             status_label = STATUS_LABELS.get(result.get("status"), "Estado desconocido")
             self.query_one("#live-status", Static).update(Text(f"{status_label} · tokens: {tokens} · {time.monotonic()-self.started:.1f}s"))
         except Exception as exc:
+            self.run.result = {"status": "blocked", "error": str(exc)}
+            if not self._ui_ready():
+                return
             self.activity(type(exc).__name__ + ": " + str(exc))
             self.query_one("#live-status", Static).update(Text("Error: " + str(exc)))
-            self.run.result = {"status": "blocked", "error": str(exc)}
         finally:
             self.set_busy(False)
+        if not self._ui_ready():
+            return
         status = self.run.result.get("status")
         self.query_one("#resume-task", Button).disabled = status != "paused"
         self.query_one("#accept", Button).disabled = status not in ("responded", "verified") or not self.review_seen

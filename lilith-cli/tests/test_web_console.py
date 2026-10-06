@@ -53,6 +53,49 @@ def test_websocket_rejects_missing_token(tmp_path: Path) -> None:
     assert caught.value.code == 4401
 
 
+def _tokenless_loopback_client(tmp_path: Path, monkeypatch, host: str) -> TestClient:
+    monkeypatch.delenv("LILITH_AUTH_TOKEN", raising=False)
+    return TestClient(
+        create_app(workspace=str(tmp_path), allowed_origins=["http://localhost:12356"]),
+        headers={"host": host},
+        client=("127.0.0.1", 50000),
+    )
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1:12356", "localhost:12356", "[::1]:12356"])
+def test_tokenless_loopback_accepts_local_host_header(
+    tmp_path: Path, monkeypatch, host: str
+) -> None:
+    client = _tokenless_loopback_client(tmp_path, monkeypatch, host)
+    assert client.get("/api/files").status_code == 200
+    response = client.get("/api/files", headers={"origin": "http://localhost:5173"})
+    assert response.status_code == 200
+
+
+def test_tokenless_loopback_rejects_dns_rebinding_host(tmp_path: Path, monkeypatch) -> None:
+    """A rebinding page reaches 127.0.0.1, but its Host header is foreign."""
+    (tmp_path / "source.py").write_text("secret = 1\n", encoding="utf-8")
+    client = _tokenless_loopback_client(tmp_path, monkeypatch, "attacker.example:12356")
+    assert client.get("/api/files").status_code == 401
+    assert client.get("/api/files/source.py").status_code == 401
+
+
+def test_tokenless_loopback_rejects_foreign_origin(tmp_path: Path, monkeypatch) -> None:
+    client = _tokenless_loopback_client(tmp_path, monkeypatch, "127.0.0.1:12356")
+    response = client.get("/api/files", headers={"origin": "https://attacker.example"})
+    assert response.status_code == 401
+
+
+def test_tokenless_websocket_rejects_dns_rebinding_host(tmp_path: Path, monkeypatch) -> None:
+    client = _tokenless_loopback_client(tmp_path, monkeypatch, "attacker.example:12356")
+    with (
+        pytest.raises(WebSocketDisconnect) as caught,
+        client.websocket_connect("/api/terminal"),
+    ):
+        pass
+    assert caught.value.code == 4401
+
+
 def test_web_dev_reload_uses_an_import_string_factory(tmp_path: Path, monkeypatch) -> None:
     """Regression: uvicorn exits when ``reload=True`` gets an app object."""
     import uvicorn

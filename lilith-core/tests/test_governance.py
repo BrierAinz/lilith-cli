@@ -327,3 +327,24 @@ class TestWithRealTrail:
             entry = json.loads(f.readline())
         assert entry["tool"] == "read_file"
         assert entry["agent"] == "Odin"
+
+
+def test_evaluate_reports_sandbox_violations_without_crashing() -> None:
+    """Regression: evaluate() read ``violation.description``, which does not
+    exist, so any recorded sandbox violation raised AttributeError."""
+    from lilith_core.sandbox import SandboxAction, SandboxError
+
+    surface = GovernanceSurface(agent="Odin")
+    sandbox = surface.bind_sandbox(
+        "Odin",
+        SandboxPolicy(
+            name="read-only",
+            rules=[SandboxRule(SandboxRuleType.ALLOWED_TOOLS, ["read_file"], SandboxAction.BLOCK)],
+        ),
+    )
+    assert sandbox.agent_name == "Odin"
+    with sandbox, pytest.raises(SandboxError):
+        sandbox.check_tool("terminal")
+
+    decision = surface.evaluate(tool="terminal", data={})
+    assert decision.sandbox_violations == ["Tool 'terminal' not in allowed list"]

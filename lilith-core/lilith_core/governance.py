@@ -292,7 +292,7 @@ class GovernanceSurface:
             flagged=flagged,
             reason=reason,
             matched_policies=matched,
-            sandbox_violations=[v.description for v in sandbox_violations],
+            sandbox_violations=[v.message for v in sandbox_violations],
             session=session_id,
             tool=tool,
         )
@@ -310,11 +310,7 @@ class GovernanceSurface:
         agent. That is intentional: revocation should be cheap.
         """
         effective = policy or self.default_sandbox_policy
-        sandbox = AgentSandbox(policy=effective)
-        # Track the agent name alongside the sandbox so callers can tell
-        # which sandbox belongs to whom — ``AgentSandbox.__init__``
-        # currently accepts ``policy`` only.
-        sandbox.agent_name = agent
+        sandbox = AgentSandbox(policy=effective, agent_name=agent)
         self._per_agent_sandboxes[agent] = sandbox
         self._known_agents.add(agent)
         return sandbox

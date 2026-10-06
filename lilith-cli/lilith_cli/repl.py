@@ -56,7 +56,6 @@ from .tool_progress import (
     DelegationLive,
     DelegationStreamBuffer,
     ToolProgressTracker,
-    render_tool_progress,
     set_tool_panels,
 )
 from .slash_router import dispatch as dispatch_slash

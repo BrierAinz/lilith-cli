@@ -4,7 +4,6 @@ from __future__ import annotations
 import os
 import subprocess
 
-import pytest
 
 from lilith_tools import local_context
 from lilith_tools.local_context import (

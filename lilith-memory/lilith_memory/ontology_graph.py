@@ -14,7 +14,6 @@ Features:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import sqlite3
 import time
@@ -163,7 +162,6 @@ class OntologyGraph:
     """
 
     def __init__(self, db_path: str | Any = ":memory:") -> None:
-        from pathlib import Path
         self._db_path = str(db_path) if not isinstance(db_path, str) else db_path
         self._init_db()
 

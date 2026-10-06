@@ -79,10 +79,9 @@ def _build_diff(original_path: Path, backup_path: Path) -> tuple[str, bool]:
         n=_MAX_DIFF_CONTEXT,
     )
     text = "".join(diff)
-    truncated = False
     if len(text.encode("utf-8")) > _MAX_DIFF_BYTES:
         text = text.encode("utf-8")[:_MAX_DIFF_BYTES].decode("utf-8", errors="replace")
-        truncated = True
+        text += f"\n… diff truncado a {_MAX_DIFF_BYTES // 1024} KB\n"
     return text, True
 
 

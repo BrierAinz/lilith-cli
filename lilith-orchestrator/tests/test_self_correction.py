@@ -1,18 +1,15 @@
 """Tests for self_correction module (SEAL-inspired reflect-judge loop)."""
 
-import pytest
 
 from lilith_orchestrator.self_correction import (
     JudgeVerdict,
     FailurePattern,
     JudgeCriteria,
-    JudgeResult,
     ExecutionResult,
     Reflector,
     Judge,
     SelfCorrectionLoop,
     LoopConfig,
-    LoopOutcome,
 )
 
 
@@ -262,6 +259,6 @@ class TestIntegration:
             response="This is a comprehensive response that meets all criteria.",
             original_goal="Write essay",
         )
-        patterns2 = reflector.reflect(result2, criteria)
+        reflector.reflect(result2, criteria)
         judge_result2 = judge.judge(result2)
         assert judge_result2.verdict == JudgeVerdict.APPROVED

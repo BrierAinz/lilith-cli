@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from lilith_cli.config import CONFIG_DIR
 from lilith_cli.extra_commands import (
-    _PYTEST_SUMMARY_RE,
     _parse_pytest_summary,
     _render_test_summary,
     _render_test_usage,

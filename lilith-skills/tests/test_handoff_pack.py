@@ -10,10 +10,7 @@ Covers:
 
 from __future__ import annotations
 
-import json
 import time
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -250,7 +247,7 @@ class TestHandoffPackManager:
 
     def test_storage_dir_created(self, tmp_path):
         dir_path = tmp_path / "new_handoffs"
-        manager = HandoffPackManager(storage_dir=dir_path)
+        HandoffPackManager(storage_dir=dir_path)
         assert dir_path.exists()
 
     def test_capture_logs_quality_issues(self, tmp_manager, caplog):

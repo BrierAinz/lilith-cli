@@ -31,6 +31,23 @@ dev = [
 [tool.hatch.build.targets.wheel]
 bypass-selection = true
 
+[tool.ruff]
+target-version = "py311"
+extend-exclude = ["lilith-cli/lilith_cli/web_console/frontend"]
+
+[tool.ruff.lint]
+# Pyflakes (unused/undefined names), bugbear and syntax errors. Style rules
+# are left out on purpose: this gate is for defects, not formatting.
+select = ["E9", "F", "B"]
+ignore = [
+    "B905",  # zip() without strict=: the default is intended in this codebase
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Facades re-export names on purpose.
+"lilith-cli/lilith_cli/extra_commands.py" = ["F401"]
+"**/__init__.py" = ["F401"]
+
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib"
 asyncio_mode = "auto"

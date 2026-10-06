@@ -1057,11 +1057,8 @@ class LilithEngine:
                 - steps_completed: int
                 - total_duration_ms: float
         """
-        from lilith_orchestrator.dispatch import TaskDispatcher
         from lilith_orchestrator.workflow import (
             WorkflowEngine,
-            WorkflowResult,
-            WorkflowStatus,
         )
 
         session_id = uuid.uuid4().hex[:12]

@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
 from lilith_cli.extra_commands import (
-    _ENV_SNAPSHOT_PATH,
     _env_diff_snapshot,
     _env_snapshot_save,
     _print_env_diff,

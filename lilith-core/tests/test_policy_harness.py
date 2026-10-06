@@ -18,7 +18,6 @@ from lilith_core.policy_engine import (
 from lilith_core.policy_harness import (
     Decision,
     Expectation,
-    HarnessReport,
     PolicyHarness,
     Scenario,
     ScenarioResult,

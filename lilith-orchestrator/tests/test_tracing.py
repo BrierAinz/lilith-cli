@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import threading
 import time
 from pathlib import Path
@@ -183,7 +182,7 @@ class TestTracerBasics:
         self, clean_tracer: Tracer
     ) -> None:
         with clean_tracer.trace_request("req") as root:
-            with clean_tracer.span(SpanKind.AGENT, "odin.dispatch") as agent:
+            with clean_tracer.span(SpanKind.AGENT, "odin.dispatch"):
                 with clean_tracer.span(SpanKind.TOOL, "search_files") as tool:
                     tool.set_attribute("q", "hello")
 
@@ -218,7 +217,7 @@ class TestTracerBasics:
     def test_span_with_exception_marks_status(self, clean_tracer: Tracer) -> None:
         with pytest.raises(RuntimeError, match="boom"):
             with clean_tracer.trace_request("req") as root:
-                with clean_tracer.span(SpanKind.TOOL, "fail") as span:
+                with clean_tracer.span(SpanKind.TOOL, "fail"):
                     raise RuntimeError("boom")
 
         # The root should have observed the exception.
@@ -246,7 +245,7 @@ class TestTracerBasics:
 
     def test_persists_trace_via_store(self, tmp_store: TraceStore) -> None:
         tracer = Tracer(service_name="test", enabled=True, store=tmp_store)
-        with tracer.trace_request("persisted") as root:
+        with tracer.trace_request("persisted"):
             with tracer.span(SpanKind.AGENT, "odin") as agent:
                 agent.set_attribute("intent", "code")
 
@@ -398,7 +397,7 @@ class TestGlobalTracer:
     ) -> None:
         tracer = configure_tracing(store=tmp_store, enabled=True)
         assert tracer is get_tracer()
-        with tracer.trace_request("configured") as root:
+        with tracer.trace_request("configured"):
             with tracer.span(SpanKind.AGENT, "a") as agent:
                 agent.set_attribute("k", "v")
 

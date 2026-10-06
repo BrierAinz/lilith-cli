@@ -1,11 +1,10 @@
 """Offline behavioral acceptance for Lilith's shared visual workspace."""
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
 from textual.app import App
-from textual.widgets import Button, Checkbox, Input, ListView, TextArea
+from textual.widgets import Button, Checkbox, Input, TextArea
 
 from lilith_cli.hearth_ui import HearthApp
 from lilith_cli.hearth_screens import TaskScreen
@@ -120,7 +119,7 @@ async def test_follow_log_does_not_jump(fake_session, tmp_path):
 async def test_draft_persists_but_context_does_not_auto_attach(fake_session, tmp_path):
     (tmp_path / "readme.md").write_text("public fixture", encoding="utf-8")
     app = LilithIDEApp(fake_session, root=tmp_path, show_splash=False)
-    async with app.run_test(size=(120, 40)) as pilot:
+    async with app.run_test(size=(120, 40)):
         app.query_one("#chat-input", MessageInput).value = "first\nsecond"
         app._set_context(["readme.md"])
         app._save_draft()
@@ -129,13 +128,13 @@ async def test_draft_persists_but_context_does_not_auto_attach(fake_session, tmp
         assert app._context_files == []
     restored = LilithIDEApp(fake_session, root=tmp_path, show_splash=False)
     assert restored._context_files == []
-    async with restored.run_test() as pilot:
+    async with restored.run_test():
         assert restored.query_one("#chat-input", MessageInput).text == "first\nsecond"
 
 
 async def test_busy_keeps_draft(fake_session, tmp_path):
     app = LilithIDEApp(fake_session, root=tmp_path, show_splash=False)
-    async with app.run_test() as pilot:
+    async with app.run_test():
         field = app.query_one("#chat-input", MessageInput)
         field.value = "retain me"
         app._thinking = True

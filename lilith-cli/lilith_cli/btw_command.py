@@ -62,7 +62,7 @@ async def run_btw_command(session: SessionRuntime, args: str) -> None:
         {"role": "user", "content": question},
     ]
 
-    console.print(f"\n[dim]┌─ BTW ─[/]")
+    console.print("\n[dim]┌─ BTW ─[/]")
     try:
         response = await session.provider.complete(messages)
     except Exception as exc:

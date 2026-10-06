@@ -457,3 +457,29 @@ def test_spawn_app_default_command_is_spawn():
 
     # Cyclopts stores the @default-decorated function on ``default_command``.
     assert ops_spawn.spawn_app.default_command is ops_spawn.spawn
+
+
+def test_spawn_status_reads_the_bus_of_the_given_repo_root(tmp_path: Path, monkeypatch):
+    """``repo_root`` used to be ignored in favour of the resolved hub root."""
+    from lilith_cli import ops_spawn
+
+    monkeypatch.setenv("YGGDRASIL_ROOT", str(tmp_path / "elsewhere"))
+    repo = tmp_path / "repo"
+    seen = []
+
+    class FakeBus:
+        def __init__(self, path):
+            seen.append(Path(path))
+
+        def poll(self, *args, **kwargs):
+            return []
+
+        def close(self):
+            pass
+
+    (repo / ".ygg").mkdir(parents=True)
+    (repo / ".ygg" / "lilith_bus.db").write_text("", encoding="utf-8")
+    monkeypatch.setattr(ops_spawn, "LilithBus", FakeBus)
+
+    assert ops_spawn.run_spawn_status(repo_root=repo) == []
+    assert seen == [(repo / ".ygg" / "lilith_bus.db").resolve()]

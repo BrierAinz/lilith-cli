@@ -15,7 +15,6 @@ into the WorkflowEngine so state is fully isolated.
 
 from __future__ import annotations
 
-import pytest
 
 from lilith_core.hooks import HookContext, HookRegistry, HookType
 

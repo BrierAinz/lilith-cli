@@ -10,10 +10,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from lilith_cli.extra_commands import (
-    _deserialize_session,
     _fork_path,
     _list_forks,
-    _serialize_session,
     run_fork_command,
 )
 from lilith_cli.slash_commands import sessions as sessions_cmds

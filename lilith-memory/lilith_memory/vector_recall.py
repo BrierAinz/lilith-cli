@@ -59,11 +59,11 @@ import math
 import re
 import sqlite3
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-from lilith_memory.chunker import Chunk, SemanticChunker, chunk_text
+from lilith_memory.chunker import Chunk, SemanticChunker
 from lilith_memory.read_guard import ReadPolicy, guard
 
 

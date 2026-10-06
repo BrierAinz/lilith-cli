@@ -1,13 +1,10 @@
 import pytest
-from rich.console import Console
-from rich.text import Text
 from rich.console import Group
 
 from lilith_cli.render import (
     render_diff,
     summarize_tool_result,
-    render_tool_line,
-    _extract_data
+    render_tool_line
 )
 
 def test_render_diff_normal():

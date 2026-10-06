@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -11,7 +9,6 @@ import pytest
 from lilith_cli.render import get_theme, set_theme
 from lilith_cli.extra_commands import (
     _DEFAULT_PROFILES,
-    _ensure_profiles,
     _load_profiles,
     _profiles_path,
     _save_profiles,

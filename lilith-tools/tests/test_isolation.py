@@ -403,6 +403,6 @@ class TestEdgeCases:
                 ChainStep(tool_name="terminal", params={"cmd": "ls"}),  # Blocked for Odin
             ],
         )
-        result = router.execute_chain(chain, agent_name="Odin")
+        router.execute_chain(chain, agent_name="Odin")
         # The chain executor doesn't use hooks per-step in the same way,
         # but the pre_tool_call hooks should fire for each step

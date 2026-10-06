@@ -12,11 +12,9 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 import sys
-import types
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -578,7 +576,6 @@ class TestDoctorCommand:
 
     def test_doctor_command_exits_0_when_all_ok(self, monkeypatch, tmp_path):
         from lilith_cli import config as cli_config
-        from lilith_cli import main as cli_main
         from lilith_cli import providers as cli_providers
         from lilith_cli.main import app
 
@@ -600,7 +597,6 @@ class TestDoctorCommand:
 
     def test_doctor_command_exits_1_when_error_row(self, monkeypatch, tmp_path):
         from lilith_cli import config as cli_config
-        from lilith_cli import main as cli_main
         from lilith_cli import providers as cli_providers
         from lilith_cli.main import app
 

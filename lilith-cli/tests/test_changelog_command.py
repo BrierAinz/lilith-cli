@@ -9,7 +9,6 @@ from unittest.mock import patch
 import pytest
 
 from lilith_cli.extra_commands import (
-    CHANGELOG_PATH,
     _parse_changelog_entries,
     run_changelog_command,
 )
@@ -32,7 +31,6 @@ class DummySession:
 @pytest.fixture
 def changelog(tmp_path: Path, monkeypatch):
     """Create a temporary CHANGELOG.md and point the command at it."""
-    original = CHANGELOG_PATH
     changelog_file = tmp_path / "CHANGELOG.md"
     changelog_file.write_text(
         "# Changelog\n\n"

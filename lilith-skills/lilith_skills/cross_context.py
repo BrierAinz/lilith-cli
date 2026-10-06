@@ -71,9 +71,9 @@ import re
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable, Iterator
+from typing import Any, Iterator
 
 from lilith_core.persistence_lock import storage_lock
 

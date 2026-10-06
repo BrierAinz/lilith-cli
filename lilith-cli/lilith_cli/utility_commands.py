@@ -65,7 +65,7 @@ async def run_now_command(session: SessionRuntime, args: str) -> None:  # noqa: 
         /now --json
         /now --unix --iso --json
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     tokens = args.split()
     show_unix = "--unix" in tokens
@@ -133,7 +133,6 @@ def _now_rfc_value(now_utc) -> str:
 
 async def run_hash_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Compute hashes of text or file (/hash <algo> <text|file>)."""
-    import hashlib
 
     text = args.strip()
     if not text:
@@ -204,7 +203,6 @@ async def run_lines_command(session: SessionRuntime, args: str) -> None:  # noqa
 
 async def run_base64_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Base64 encode or decode text (/base64 <encode|decode> <text>)."""
-    import base64
 
     text = args.strip()
     if not text:
@@ -242,7 +240,6 @@ async def run_base64_command(session: SessionRuntime, args: str) -> None:  # noq
 
 async def run_uuid_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Generate UUIDs (/uuid [N] [--v1|--v4|--v7])."""
-    import uuid
 
     tokens = args.split()
     count = 1
@@ -301,7 +298,7 @@ async def run_reverse_command(session: SessionRuntime, args: str) -> None:  # no
         console.print(f"[info]Líneas invertidas ({len(lines)}):[/info]")
     else:
         result = text[::-1]
-        console.print(f"[info]Reverso:[/info]")
+        console.print("[info]Reverso:[/info]")
 
     console.print(f"[bold cyan]{result}[/bold cyan]")
     console.print()
@@ -476,7 +473,7 @@ async def run_epoch_command(session: SessionRuntime, args: str) -> None:  # noqa
         /epoch 2024-01-15          — convierte la fecha a timestamp (medianoche local)
         /epoch 2024-01-15 08:30:00 --utc — interpreta la fecha como UTC
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     text = args.strip()
     utc_mode = "--utc" in text.split()
@@ -538,7 +535,6 @@ def _render_random_usage() -> None:
 
 async def run_random_command(session: SessionRuntime, args: str) -> None:  # noqa: ARG001
     """Comando /random: genera valores aleatorios criptográficamente seguros."""
-    import secrets
     import uuid
 
     try:

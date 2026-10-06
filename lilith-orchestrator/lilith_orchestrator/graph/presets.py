@@ -107,7 +107,6 @@ def pipeline_preset() -> ConversationGraph:
     """
     from lilith_orchestrator.graph.pipeline import (
         PipelinePhase,
-        DEFAULT_GATES,
         DEFAULT_NODES,
     )
 

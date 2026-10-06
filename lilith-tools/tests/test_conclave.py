@@ -11,22 +11,15 @@ survive" contract.
 
 from __future__ import annotations
 
-import sys
 import threading
 import time
-import types
-from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
-import pytest
 
 import lilith_tools.conclave as conclave_mod
 from lilith_tools.conclave import (
-    DEFAULT_PRESET_TIMEOUT_SECONDS,
     ConclaveTool,
 )
-from lilith_tools.delegate import DelegateSubagentTool
 
 
 # ── Stubs ───────────────────────────────────────────────────────────────

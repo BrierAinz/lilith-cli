@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -90,5 +88,5 @@ async def test_editor_opens_file_at_line(tmp_path, monkeypatch, reset_editor):
     assert len(popen_calls) == 1
     cmd = popen_calls[0]
     assert "vim" in cmd[0]
-    assert f"+2" in cmd
+    assert "+2" in cmd
     assert str(target) in cmd

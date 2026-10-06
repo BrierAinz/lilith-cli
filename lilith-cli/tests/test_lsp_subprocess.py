@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from lilith_cli.ide.lsp.client import LSPClient
-from lilith_cli.ide.lsp.languages import detect_language_server, language_server_command
+from lilith_cli.ide.lsp.languages import detect_language_server
 from lilith_cli.ide.lsp.manager import LSPManager
 
 

@@ -30,7 +30,7 @@ def storage_lock(path: Path, timeout: float = 10.0) -> Iterator[None]:
                     break
                 except OSError:
                     if time.monotonic() >= deadline:
-                        raise TimeoutError(f"Timed out locking {path.name}")
+                        raise TimeoutError(f"Timed out locking {path.name}") from None
                     time.sleep(0.01)
             try:
                 yield
@@ -47,7 +47,7 @@ def storage_lock(path: Path, timeout: float = 10.0) -> Iterator[None]:
                     break
                 except BlockingIOError:
                     if time.monotonic() >= deadline:
-                        raise TimeoutError(f"Timed out locking {path.name}")
+                        raise TimeoutError(f"Timed out locking {path.name}") from None
                     time.sleep(0.01)
             try:
                 yield

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import subprocess
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest

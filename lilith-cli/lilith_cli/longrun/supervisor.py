@@ -17,7 +17,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..task_workspace import atomic_json
-from ..provider_health import ProviderHealthRegistry
 from ..hooks import run_hook as _run_hook
 
 
@@ -198,7 +197,6 @@ def classify(payload: dict) -> str:
 
 def run_leg(contract, consumed, session_id, directory) -> LegResult:
     """Launch ONE leg of the saga as a subprocess and return its normalised result."""
-    from .contract import RunContract  # type: ignore[attr-defined]
 
     request = {
         "text": contract.goal,

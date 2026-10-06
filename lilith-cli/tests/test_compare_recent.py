@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from lilith_cli.extra_commands import (
     _compare_recent_paths,
-    _compare_text_stats,
     run_compare_command,
 )
 

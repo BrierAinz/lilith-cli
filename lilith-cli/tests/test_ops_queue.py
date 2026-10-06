@@ -400,7 +400,6 @@ def test_work_once_with_pinned_agent_acks_on_success(
     the bus message gets acked, exit 0.
     """
     from lilith_cli import ops_queue
-    from lilith_core.bus import LilithBus
 
     bus_db = _bus_path(fake_repo_root)
 
@@ -451,7 +450,6 @@ def test_work_once_releases_on_subprocess_failure(
     subprocess's exit code.
     """
     from lilith_cli import ops_queue
-    from lilith_core.bus import LilithBus
 
     bus_db = _bus_path(fake_repo_root)
 

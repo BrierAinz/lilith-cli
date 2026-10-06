@@ -2,7 +2,6 @@
 
 from pathlib import Path
 import time
-import asyncio
 
 from rich.text import Text
 from textual import on, work

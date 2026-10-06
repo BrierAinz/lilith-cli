@@ -10,7 +10,6 @@ from pathlib import Path
 from lilith_skills.agent_card_loader import (
     AgentCard,
     AgentCardLoader,
-    AgentRegistry,
 )
 
 

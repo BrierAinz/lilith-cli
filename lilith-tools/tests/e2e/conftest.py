@@ -146,7 +146,6 @@ def require_provider_keys():
             require_provider_keys("ejecutor-kimi")
             ...  # real network call to the kimi provider
     """
-    from ._providers import missing_keys_for
 
     missing: list[str] = []
 

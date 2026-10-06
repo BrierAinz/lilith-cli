@@ -14,15 +14,13 @@ from __future__ import annotations
 
 import math
 import os
-import sqlite3
 import tempfile
 
 import pytest
 
-from lilith_memory.chunker import Chunk, ChunkStrategy, SemanticChunker
+from lilith_memory.chunker import Chunk, SemanticChunker
 from lilith_memory.vector_recall import (
     HashEmbedder,
-    RecallHit,
     VectorRecall,
     chunk_and_recall,
 )
@@ -272,14 +270,14 @@ class TestVectorRecallBasics:
 
     def test_file_based_db_creates_file(self, tmp_db):
         e = HashEmbedder(dim=64)
-        r = VectorRecall(tmp_db, embedder=e)
+        VectorRecall(tmp_db, embedder=e)
         assert os.path.exists(tmp_db)
 
     def test_db_path_creates_parents(self, tmp_db):
         nested = os.path.join(os.path.dirname(tmp_db), "sub", "deep", "x.db")
         e = HashEmbedder(dim=64)
         try:
-            r = VectorRecall(nested, embedder=e)
+            VectorRecall(nested, embedder=e)
             assert os.path.exists(nested)
         finally:
             try:

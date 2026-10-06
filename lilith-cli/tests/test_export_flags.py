@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 from lilith_cli.slash_commands import sessions as sessions_cmds
 
 
@@ -53,7 +52,7 @@ def test_export_format_md(fake_session, tmp_path, monkeypatch, capsys):
 
     _run(ec.run_export_command(fake_session, "--format md"))
 
-    out = capsys.readouterr().out
+    capsys.readouterr()
     conversations_dir = tmp_path / "conversations"
     files = list(conversations_dir.glob("*.md"))
     assert len(files) == 1

@@ -366,7 +366,7 @@ def _print_env_list(result) -> None:
         console.print("[dim]No hay variables de entorno" + (f" con prefijo '{prefix}'" if prefix else "") + ".[/]")
         return
 
-    console.print(f"\n[bold realm]᛭ Variables de entorno[/]" + (f" — prefijo '{prefix}'" if prefix else ""))
+    console.print("\n[bold realm]᛭ Variables de entorno[/]" + (f" — prefijo '{prefix}'" if prefix else ""))
     for name, value in sorted(variables.items()):
         console.print(f"  [tool.name]{name}[/]=[tool.result]{value!r}[/]")
     if total > returned:

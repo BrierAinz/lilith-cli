@@ -1,5 +1,4 @@
 """Tests for lilith_orchestrator.engine (EngineUsage, basic engine)."""
-import pytest
 
 from lilith_orchestrator.engine import EngineUsage
 

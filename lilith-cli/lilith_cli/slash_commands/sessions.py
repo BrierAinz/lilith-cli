@@ -342,7 +342,7 @@ def _capture_positive_int(value: str) -> int:
     except ValueError:
         raise argparse.ArgumentTypeError(
             f"debe ser entero positivo, recibí: {value!r}"
-        )
+        ) from None
     if n < 1:
         raise argparse.ArgumentTypeError(
             f"debe ser entero positivo, recibí: {value!r}"
@@ -956,10 +956,7 @@ async def run_history_command(session: SessionRuntime, args: str) -> None:
         return
 
     console.print("[info]᛭ Historial[/info]")
-    for i, msg in enumerate(
-        selected_messages,
-        start=max(0, len(history) - len(selected_messages)) + 1,
-    ):
+    for msg in selected_messages:
         role = msg.get("role", "?")
         content = str(msg.get("content", ""))[:200]
         if len(content) == 200:

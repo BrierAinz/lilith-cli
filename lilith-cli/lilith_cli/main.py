@@ -494,11 +494,10 @@ def delegate(
 
     try:
         from lilith_tools.delegate import DelegateSubagentTool  # type: ignore[import-not-found]
-        from lilith_tools.base import ToolResult  # type: ignore[import-not-found]
     except Exception as exc:
         from .render import render_error
         render_error(f"No se pudo cargar DelegateSubagentTool: {exc}")
-        raise SystemExit(2)
+        raise SystemExit(2) from exc
 
     kwargs: dict[str, Any] = {
         "preset": preset_name,

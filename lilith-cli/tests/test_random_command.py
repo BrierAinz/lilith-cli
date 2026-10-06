@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import uuid
 
 from lilith_cli.slash_router import route, slash_commands

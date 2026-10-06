@@ -83,12 +83,8 @@ from lilith_core.audit_trail import (
 )
 from lilith_core.hooks import HookContext, HookType
 from lilith_core.policy_engine import (
-    Policy,
-    PolicyAction,
     PolicyEngine,
     PolicyResult,
-    PolicyScope,
-    ToolDenylistRule,
 )
 from lilith_core.sandbox import (
     AgentSandbox,
@@ -318,7 +314,7 @@ class GovernanceSurface:
         # Track the agent name alongside the sandbox so callers can tell
         # which sandbox belongs to whom — ``AgentSandbox.__init__``
         # currently accepts ``policy`` only.
-        setattr(sandbox, "agent_name", agent)
+        sandbox.agent_name = agent
         self._per_agent_sandboxes[agent] = sandbox
         self._known_agents.add(agent)
         return sandbox

@@ -591,7 +591,7 @@ async def run_tree_command(session: SessionRuntime, args: str) -> None:  # noqa:
         render_error(f"Permiso denegado al recorrer: {target.resolve()}")
         return
 
-    console.print(f"\n[bold realm]᛭ Árbol de archivos[/]")
+    console.print("\n[bold realm]᛭ Árbol de archivos[/]")
     console.print(tree)
     console.print(f"\n[dim]Directorios: {dirs_count} | Archivos: {files_count} | Profundidad: {max_depth}[/]")
 

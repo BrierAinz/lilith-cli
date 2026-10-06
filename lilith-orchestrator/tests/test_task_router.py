@@ -16,7 +16,7 @@ def _router(tmp_path: Path, **kwargs):
 def test_router_routes_dependencies_and_completes(tmp_path: Path) -> None:
     router, store = _router(tmp_path)
     first = router.submit("Prepare inputs", task_id="prepare")
-    second = router.submit(
+    router.submit(
         "Implement broad risky ambiguous migration",
         task_id="implement",
         dependencies=["prepare"],

@@ -16,7 +16,7 @@ import sys
 import time
 from typing import TYPE_CHECKING
 
-from .render import console, get_theme, render_error, set_theme
+from .render import console, render_error
 
 if TYPE_CHECKING:
     from .session_runtime import SessionRuntime
@@ -33,11 +33,7 @@ async def run_metrics_command(session, args: str) -> None:
         /metrics json          — machine-readable JSON
         /metrics all           — alias for no-subcommand
     """
-    import json
-    import sys
 
-    from rich.panel import Panel
-    from rich.table import Table
 
     subcmd = args.strip().lower()
     if subcmd == "json":
@@ -111,8 +107,6 @@ async def run_usage_command(session, args: str) -> None:
         /usage         — full statistics grid panel
         /usage json    — machine-readable JSON
     """
-    import json
-    import sys
 
     from .providers import estimate_cost
     from rich.panel import Panel
@@ -232,7 +226,6 @@ async def run_bench_command(session: SessionRuntime, args: str) -> None:  # noqa
         /bench --turns 3
         /bench --provider openai --model gpt-4o
     """
-    import argparse
 
     parser = argparse.ArgumentParser(prog="/bench", add_help=False)
     parser.add_argument("--turns", type=int, default=1)
@@ -290,7 +283,7 @@ async def run_bench_command(session: SessionRuntime, args: str) -> None:  # noqa
 
     avg_latency = sum(latencies) / len(latencies) if latencies else 0
     avg_ttft = sum(ttft_values) / len(ttft_values) if ttft_values else None
-    console.print(f"\n[bold]Resumen:[/]")
+    console.print("\n[bold]Resumen:[/]")
     console.print(f"  Latencia promedio: {avg_latency:.3f}s")
     if avg_ttft is not None:
         console.print(f"  TTFT promedio: {avg_ttft:.3f}s")
@@ -348,7 +341,6 @@ def _format_duration_short(seconds: float) -> str:
 
 def _metrics_emit_json(session, stream) -> None:
     """Emit machine-readable JSON via stream (bypasses Rich markup)."""
-    import json
 
     counts, avg, total = _tool_metrics(session)
     data = {

@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import json
-import os
 import threading
 import time
 from pathlib import Path
 
-import pytest
 
 from lilith_core.audit_trail import (
     AuditEntry,
@@ -16,7 +14,7 @@ from lilith_core.audit_trail import (
     make_default_trail,
     summarize_entries,
 )
-from lilith_core.hooks import HookContext, HookType, get_hook_registry
+from lilith_core.hooks import HookContext, HookType
 from lilith_core.policy_engine import (
     Policy,
     PolicyAction,

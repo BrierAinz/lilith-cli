@@ -10,7 +10,6 @@ import pytest
 
 from lilith_cli.pipeline_command import (
     _DEFAULT_PIPELINES,
-    _PIPELINE_STORE,
     _PipelineStore,
     _parse_steps,
     run_pipeline_command,

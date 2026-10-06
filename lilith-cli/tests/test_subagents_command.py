@@ -9,11 +9,8 @@ Sub-agents are real LLM-backed presets, so the heavy lifting is mocked:
 from __future__ import annotations
 
 import asyncio
-import sys
-import types
 from typing import Any
 
-import pytest
 
 
 def _run(coro):
@@ -43,7 +40,6 @@ class _FakeProvider:
 
 def _make_cfg(providers: dict[str, Any] | None = None) -> Any:
     """Build a YggdrasilConfig-like object that SubagentsCommand accepts."""
-    from types import SimpleNamespace
 
     from lilith_cli.config import YggdrasilConfig
 

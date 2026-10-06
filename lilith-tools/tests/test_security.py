@@ -4,7 +4,6 @@ import json
 import pytest
 from unittest.mock import MagicMock, patch
 
-from lilith_tools.base import ToolResult
 from lilith_tools.security import (
     OSV_QUERY_URL,
     SecurityScannerTool,

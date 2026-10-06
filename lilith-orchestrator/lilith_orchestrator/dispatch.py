@@ -21,7 +21,6 @@ Usage::
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from lilith_skills.agent_cards import AgentCard

@@ -239,7 +239,7 @@ def test_bus_publish_rejects_invalid_json(bus_db: Path, capsys):
 
 def test_bus_tail_against_published_messages(bus_db: Path, capsys):
     """tail should show previously published messages and respect the topic pattern."""
-    from lilith_cli.ops import publish, tail
+    from lilith_cli.ops import tail
     from lilith_core.bus import LilithBus
 
     bus = LilithBus(bus_db)

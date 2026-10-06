@@ -11,7 +11,6 @@ import json
 from typing import Any
 from unittest.mock import patch
 
-import pytest
 
 from lilith_tools.base import ToolResult
 from lilith_tools.package_guard import (

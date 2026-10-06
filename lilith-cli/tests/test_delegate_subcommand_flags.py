@@ -29,8 +29,6 @@ These tests cover the routing decisions and the rendered output contract:
 from __future__ import annotations
 
 import json
-import os
-import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -417,7 +415,6 @@ def test_delegate_tool_path_records_in_orchestration_state(
     import types
 
     import lilith_cli.main as main_mod
-    import lilith_tools.delegate as delegate_mod
 
     state_file = tmp_path / "orchestration.json"
     monkeypatch.setenv("YGGDRASIL_ORCHESTRATION_STATE", str(state_file))

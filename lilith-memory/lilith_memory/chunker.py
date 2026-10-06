@@ -328,7 +328,7 @@ def _code_chunks(text: str, target_size: int, overlap: int) -> list[Chunk]:
     def _line_to_offset(line_no: int) -> int:
         """Convert 1-indexed line number to character offset."""
         off = 0
-        for i, ln in enumerate(lines[: max(0, line_no - 1)]):
+        for ln in lines[: max(0, line_no - 1)]:
             off += len(ln)
         return off
 
@@ -515,7 +515,6 @@ def _markdown_chunks(text: str, target_size: int, overlap: int) -> list[Chunk]:
     ) -> Chunk:
         # Rebuild markdown with headers for each section
         pieces: list[str] = []
-        last_level = 0
         for path, body in buf:
             level = min(len(path), 6)
             header = "#" * level + " " + " / ".join(path) + "\n\n"

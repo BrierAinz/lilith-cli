@@ -7,7 +7,6 @@ structured results so the LLM can reason about failures and next steps.
 
 from __future__ import annotations
 
-import json
 import os
 import shlex
 import shutil
@@ -256,10 +255,7 @@ class RunTestTool(BaseTool):
                 error="No se pudo detectar un comando de test para el proyecto",
             )
 
-        shell = bool(subprocess.run is not None)  # always use shell for flexible commands
         try:
-            # Use the shell so compound commands like "python -m pytest" work without
-            # us needing to parse quoted strings.
             stdout, stderr, rc = _run_command(cmd, cwd, timeout)
             return ToolResult(
                 success=True,

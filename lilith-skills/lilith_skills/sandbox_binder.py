@@ -720,7 +720,6 @@ def _trace_from_policy(
     ``BoundSandbox`` regardless of whether ``extra_rules`` were
     passed.
     """
-    tools_lower = {t.lower() for t in card.tools}
     trace: list[tuple[str, str]] = []
     for rule in policy.rules:
         if rule.type == SandboxRuleType.ALLOWED_TOOLS:

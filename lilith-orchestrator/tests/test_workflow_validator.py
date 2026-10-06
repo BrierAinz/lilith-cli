@@ -6,7 +6,6 @@ Covers the 8 semantic rules (R01-R08) + the ValidationReport/Issue DTOs
 
 from __future__ import annotations
 
-import pytest
 
 from lilith_orchestrator.workflow import (
     GateType,

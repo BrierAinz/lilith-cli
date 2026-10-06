@@ -13,7 +13,6 @@ from textual.widgets import Button, Input, Label, OptionList, Static
 from textual.widgets.option_list import Option
 import yaml
 
-from . import config as config_module
 from .ui_quality import configure_visual, read_state, update_state, themed_css
 
 

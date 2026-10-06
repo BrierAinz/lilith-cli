@@ -1,17 +1,15 @@
-import asyncio
 import json
-from pathlib import Path
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 import yaml
-from textual.widgets import Input, TextArea, Checkbox, Button, TabbedContent, OptionList, Select
+from textual.widgets import Input, TextArea, Checkbox, Button, TabbedContent, Select
 
 from lilith_cli.hearth_ui import HearthApp
 from lilith_cli.hearth_screens import TaskScreen, MemoryScreen
-from lilith_cli.task_workspace import TaskRun, TaskSpec, atomic_json
+from lilith_cli.task_workspace import TaskRun, TaskSpec
 
 
 @pytest.mark.asyncio
@@ -119,7 +117,7 @@ async def test_memory_screen_edits_and_forgets_in_selected_scope(tmp_path, monke
     from lilith_cli.work_memory import records
     monkeypatch.setenv("LILITH_PREFERENCES_DB", str(tmp_path / "memory.sqlite3"))
     app = HearthApp(tmp_path, sessions=[], preferences=tmp_path / "prefs.yaml")
-    async with app.run_test(size=(100, 36)) as pilot:
+    async with app.run_test(size=(100, 36)):
         screen = MemoryScreen(tmp_path)
         await app.push_screen(screen)
         screen.query_one("#memory-scope", Select).value = "project"

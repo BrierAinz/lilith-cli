@@ -5,15 +5,9 @@ including hook lifecycle, error handling, and agent dispatch.
 """
 import os
 
-import pytest
 from unittest.mock import MagicMock, patch
 
 from lilith_orchestrator.engine import LilithEngine, EngineUsage
-from lilith_orchestrator.workflow import (
-    WorkflowStatus,
-    StepStatus,
-    GateType,
-)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -300,7 +294,7 @@ class TestProcessWorkflowHooks:
 
         engine._hooks.register(HookType.PRE_LLM_CALL, abort_hook)
 
-        result = engine.process_workflow(SIMPLE_WORKFLOW)
+        engine.process_workflow(SIMPLE_WORKFLOW)
 
         # At least the first step should have been aborted by hook
         assert len(abort_calls) >= 1

@@ -11,7 +11,6 @@ _PKG_DIR = str(Path(__file__).resolve().parent.parent)
 if _PKG_DIR not in sys.path:
     sys.path.insert(0, _PKG_DIR)
 
-from textual.widgets import Input
 from lilith_cli.ui_widgets import MessageInput
 
 from lilith_cli.ide import (
@@ -85,7 +84,7 @@ class TestIDEApp:
     async def test_app_compose(self, fake_session, tmp_path):
         """The app should compose its widget tree without errors."""
         app = LilithIDEApp(fake_session, root=tmp_path)
-        async with app.run_test(size=(120, 40)) as pilot:
+        async with app.run_test(size=(120, 40)):
             # Basic widgets exist.
             assert app.query_one("#file-tree")
             assert app.query_one("#chat-log")

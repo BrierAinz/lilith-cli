@@ -447,7 +447,7 @@ class TestBindVanaheim:
         before = set(registry.list_agents())
         bound = bind_vanaheim(str(self.REPO_ROOT), registry=registry)
         after = set(registry.list_agents())
-        new_agents = after - before
+        after - before
         # Every newly-bound agent should appear in the registry
         for b in bound:
             assert b.agent_name.lower() in {a.lower() for a in after}

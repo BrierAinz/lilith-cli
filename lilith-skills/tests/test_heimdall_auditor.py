@@ -1,6 +1,5 @@
 """Tests for Heimdall Auditor."""
 
-import pytest
 
 from lilith_skills.heimdall_auditor import (
     AuditResult,

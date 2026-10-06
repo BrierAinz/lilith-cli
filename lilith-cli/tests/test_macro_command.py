@@ -77,7 +77,6 @@ async def test_macro_record_stop_and_play(
 @pytest.mark.asyncio
 async def test_macro_delete_and_registry(fake_session) -> None:
     """MacroCommand should delete macros and be discoverable by registry."""
-    from lilith_cli.commands import _load_macros, _save_macros
 
     tmp_macros_path = Path.home() / "tmp_macros_for_test.json"
     tmp_macros_path.write_text(

@@ -10,7 +10,6 @@ import pytest
 
 from lilith_cli.workflow_command import (
     _DEFAULT_WORKFLOWS,
-    _WORKFLOW_STORE,
     run_workflow_command,
 )
 

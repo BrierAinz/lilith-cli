@@ -622,7 +622,7 @@ class TestEdgeCases:
     """Edge case tests."""
 
     def test_empty_workflow_run(self):
-        engine = WorkflowEngine()
+        WorkflowEngine()
         wf = WorkflowDefinition(name="empty", steps=[])
         # Should not crash during validation
         errors = wf.validate()

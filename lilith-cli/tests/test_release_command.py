@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
 
 import pytest
 
@@ -10,7 +9,6 @@ from lilith_cli.extra_commands import (
     _bump_version,
     _format_version,
     _parse_version,
-    _prepend_changelog,
     _read_package_version,
     _write_package_version,
     run_release_command,
@@ -223,7 +221,6 @@ async def test_release_command_does_not_use_git_add_dot_a(monkeypatch, tmp_path)
     Rule #7 forbids `git add -A` / `git add .` — they would scoop up
     unrelated dirty worktree state into the release commit.
     """
-    from pathlib import Path
 
     # Force _prepend_changelog to return True so the changelog path is staged.
     monkeypatch.setattr(

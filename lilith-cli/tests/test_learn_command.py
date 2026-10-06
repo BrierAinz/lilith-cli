@@ -118,7 +118,6 @@ def test_save_suggestion_writes_yaml(tmp_path):
 
 
 def test_learn_is_wired_into_the_repl():
-    import lilith_cli.repl as repl_mod
 
     assert "/learn" in slash_commands()
     from lilith_cli.extra_commands import run_learn_command  # noqa: F401

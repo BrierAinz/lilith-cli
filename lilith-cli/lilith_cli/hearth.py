@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from contextlib import contextmanager
 from datetime import datetime, timezone
-import json
 import os
 from pathlib import Path
 import re

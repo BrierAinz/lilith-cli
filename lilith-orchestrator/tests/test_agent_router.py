@@ -17,7 +17,6 @@ import pytest
 from lilith_orchestrator.agent_router import (
     STOP_WORDS,
     TOOL_HINTS,
-    AgentRoute,
     AgentRouter,
     RouterWeights,
     extract_tokens,

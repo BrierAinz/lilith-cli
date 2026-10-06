@@ -686,7 +686,7 @@ async def run_changelog_command(session: SessionRuntime, args: str) -> None:  # 
         console.print()
         return
 
-    console.print(f"\n[bold realm]᛭ Changelog[/]")
+    console.print("\n[bold realm]᛭ Changelog[/]")
     for entry in entries:
         console.print(f"\n[bold cyan]v{entry['version']}[/]")
         for line in entry["lines"]:

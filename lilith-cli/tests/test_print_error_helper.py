@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
 
 from lilith_cli.extra_commands import _ERROR_TIPS, _print_error
 

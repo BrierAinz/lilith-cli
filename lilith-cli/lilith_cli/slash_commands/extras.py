@@ -1349,7 +1349,7 @@ async def run_timer_command(session: SessionRuntime, args: str) -> None:  # noqa
         if label:
             msg += f"  [dim]Etiqueta: {label}[/dim]"
         console.print(f"[success]{msg}[/success]")
-        console.print(f"[dim]Usa /timer stop para detenerlo y ver el total.[/dim]")
+        console.print("[dim]Usa /timer stop para detenerlo y ver el total.[/dim]")
         return
 
     if sub == "stop":

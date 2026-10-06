@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from lilith_core.hooks import HookContext, HookType, get_hook_registry
-from lilith_orchestrator.engine import EngineUsage, LilithEngine
+from lilith_orchestrator.engine import LilithEngine
 
 
 @pytest.fixture(autouse=True)
@@ -122,7 +122,7 @@ class TestOnSessionEnd:
             return ctx
 
         engine._hooks.register(HookType.ON_SESSION_END, end_hook, name="capture")
-        result = engine.process("Hello")
+        engine.process("Hello")
 
         assert len(results) == 1
         assert results[0] is not None

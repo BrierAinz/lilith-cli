@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
-import platform
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any

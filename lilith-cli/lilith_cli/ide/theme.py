@@ -1,5 +1,7 @@
 """Shared Nordic themes and IDE layout CSS."""
-from ..ui_quality import NORDIC_DARK as _NORSE_THEME, NORDIC_LIGHT as _NORSE_LIGHT_THEME
+# Re-exported: the IDE registers these themes under their historical names.
+from ..ui_quality import NORDIC_DARK as _NORSE_THEME  # noqa: F401
+from ..ui_quality import NORDIC_LIGHT as _NORSE_LIGHT_THEME  # noqa: F401
 
 _NORSE_CSS = """
 Screen {

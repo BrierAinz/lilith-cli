@@ -33,9 +33,7 @@ from typing import Any
 from lilith_core.hooks import HookContext, HookType, get_hook_registry
 from lilith_core.sandbox import (
     AgentSandbox,
-    SandboxAction,
     SandboxError,
-    SandboxPolicy,
     SandboxRuleType,
     get_sandbox_registry,
 )

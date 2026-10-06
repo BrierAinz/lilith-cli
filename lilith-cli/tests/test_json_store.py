@@ -48,3 +48,11 @@ def test_wrong_json_shape_is_preserved_too(tmp_path, monkeypatch):
 
     assert settings._load_aliases() == {}
     assert list(tmp_path.glob("aliases.json.corrupt-*"))
+
+
+def test_warning_survives_markup_in_paths(tmp_path, capsys):
+    store = tmp_path / "[bold]notes.json"
+    store.write_text("{", encoding="utf-8")
+    json_store.preserve_corrupt(store, ValueError("[red]bad"))
+    out = capsys.readouterr().out
+    assert "[bold]notes.json" in out and "[red]bad" in out

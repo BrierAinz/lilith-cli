@@ -43,6 +43,8 @@ from .metrics_commands import (
 from .notes_command import run_note_command
 from .paste_command import run_paste_command
 from .pipeline_command import run_pipeline_command
+from rich.markup import escape
+
 from .render import console
 from .slash_commands.conversation import (
     run_compact_command,
@@ -414,7 +416,7 @@ async def dispatch(
     recording = _macro_recording.get(id(session))
     if recording is not None and name != "macro":
         recording.append(text)
-        console.print(f"[dim]  + grabado: {text}[/]")
+        console.print(f"[dim]  + grabado: {escape(text)}[/]")
         return True
 
     found = route(name)

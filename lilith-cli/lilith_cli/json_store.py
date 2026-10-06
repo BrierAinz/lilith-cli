@@ -40,12 +40,14 @@ def preserve_corrupt(path: Path, error: BaseException) -> Path | None:
         logger.warning("Could not preserve unreadable %s: %s", path, exc)
         return None
     _preserved.add(key)
+    from rich.markup import escape
+
     from .render import console
 
     console.print(
-        f"[warning]{path.name} no se pudo leer ({type(error).__name__}: {error}). "
-        f"Se guardó una copia en {backup} antes de que se sobrescriba.[/]",
-        markup=True,
+        f"[warning]{escape(path.name)} no se pudo leer "
+        f"({type(error).__name__}: {escape(str(error))}). "
+        f"Se guardó una copia en {escape(str(backup))} antes de que se sobrescriba.[/]",
         highlight=False,
     )
     return backup

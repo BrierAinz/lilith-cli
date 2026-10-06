@@ -149,8 +149,8 @@ from .slash_commands.navigation import (  # noqa: F401
     run_whereami_command,
 )
 from .slash_commands.quality import (  # noqa: F401
-    _DEFAULT_TEST_SUITE,
     _PYTEST_SUMMARY_RE,
+    _default_test_target,
     _parse_pytest_summary,
     _render_test_summary,
     _render_test_usage,

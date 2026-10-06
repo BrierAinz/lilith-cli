@@ -219,6 +219,7 @@ def fake_repo_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     fake_main = fake_root / "Asgard" / "lilith-cli" / "lilith_cli" / "main.py"
     fake_main.parent.mkdir(parents=True)
     fake_main.write_text("", encoding="utf-8")
+    (fake_root / "ygg.py").write_text("", encoding="utf-8")
     monkeypatch.setattr(cli_main, "__file__", str(fake_main))
     # _resolve_yggdrasil_root prefers YGGDRASIL_ROOT over __file__, so unset
     # it during tests so the relocated tmp_path root is authoritative.

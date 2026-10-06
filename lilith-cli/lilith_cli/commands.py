@@ -11,7 +11,6 @@ import asyncio
 import contextlib
 import json
 import logging
-import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -828,12 +827,9 @@ class StatusCommand(BaseCommand):
     async def execute(self, _args: str) -> None:
         # Try importing from ygg (hub CLI) for realm status.
         try:
-            # Add root to sys.path if needed.
-            from lilith_cli.main import _resolve_yggdrasil_root
+            from lilith_cli.main import _lazy_import_ygg
 
-            root = str(_resolve_yggdrasil_root())
-            if root not in sys.path:
-                sys.path.insert(0, root)
+            _lazy_import_ygg()
             from ygg import (
                 REALMS,
                 SERVICES,
@@ -916,10 +912,9 @@ class BifrostCommand(BaseCommand):
             return
 
         try:
-            # Try to load BifrostIPC
-            import sys
+            from lilith_cli.main import add_hub_to_sys_path
 
-            sys.path.insert(0, str(root / "Vanaheim" / "bifrost"))
+            add_hub_to_sys_path(root / "Vanaheim" / "bifrost")
             from bifrost.bifrost.ipc import BifrostIPC
 
             ipc = BifrostIPC(root=root / ".bifrost")

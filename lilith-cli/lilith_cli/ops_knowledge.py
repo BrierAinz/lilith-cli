@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -86,17 +85,12 @@ def load_mimir_cli() -> object:
         raise RuntimeError(f"Could not build importlib spec for {cli_path}")
     mod = importlib.util.module_from_spec(spec)
 
-    # Mimir's cli.py does ``from lilith_memory.chunker import ...`` etc.,
-    # so the workspace root must be on sys.path before exec_module runs.
-    workspace_root = str(_resolve_yggdrasil_root())
-    if workspace_root not in sys.path:
-        sys.path.insert(0, workspace_root)
+    # Mimir's cli.py imports ``lilith_memory`` (installed with this
+    # workspace) and may import siblings from the hub root, which is
+    # appended so it cannot shadow installed packages.
+    from lilith_cli.main import add_hub_to_sys_path
 
-    # Also make sure the Asgard workspace (where lilith_memory lives) is
-    # importable.  Falls back gracefully when run from non-Asgard hosts.
-    asgard_root = str(_resolve_yggdrasil_root() / "Asgard")
-    if asgard_root not in sys.path:
-        sys.path.insert(0, asgard_root)
+    add_hub_to_sys_path(_resolve_yggdrasil_root())
 
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
     return mod

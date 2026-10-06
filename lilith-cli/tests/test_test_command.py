@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 from lilith_cli.config import CONFIG_DIR
 from lilith_cli.extra_commands import (
-    _DEFAULT_TEST_SUITE,
     _PYTEST_SUMMARY_RE,
     _parse_pytest_summary,
     _render_test_summary,
@@ -17,6 +17,7 @@ from lilith_cli.extra_commands import (
     run_test_command,
 )
 from lilith_cli.slash_commands import quality as quality_cmds
+from lilith_cli.slash_commands.quality import _default_test_target
 
 
 class DummyConfig:
@@ -115,7 +116,7 @@ async def test_test_command_no_args_runs_default_suite():
         "duration": 1.23,
         "last_failure": None,
         "returncode": 0,
-        "command": ["python", "-m", "pytest", _DEFAULT_TEST_SUITE],
+        "command": ["python", "-m", "pytest", _default_test_target()],
     }
     prints, stop = _capture_prints()
     try:
@@ -130,7 +131,7 @@ async def test_test_command_no_args_runs_default_suite():
     run_mock.assert_called_once()
     args, kwargs = run_mock.call_args
     # first positional arg = target
-    assert args[0] == _DEFAULT_TEST_SUITE
+    assert args[0] == _default_test_target()
     assert kwargs.get("keyword") in (None, "")
     output = "".join(str(p) for p in prints)
     assert "5 passed" in output
@@ -227,7 +228,7 @@ async def test_test_command_with_keyword_flag():
     args, kwargs = run_mock.call_args
     assert kwargs.get("keyword") == "hello"
     # No path tokens → default target
-    assert args[0] == _DEFAULT_TEST_SUITE
+    assert args[0] == _default_test_target()
 
 
 @pytest.mark.asyncio
@@ -439,3 +440,28 @@ def test_render_test_summary_includes_exit_code_when_nonzero():
 
 def test_render_test_usage_contains_help():
     _render_test_usage()  # only checks no exception; smoke test
+
+def test_test_runs_in_the_working_directory_with_its_venv(monkeypatch, tmp_path):
+    """/test used to run from a hard-coded private monorepo layout."""
+    ec = quality_cmds
+
+    (tmp_path / "tests").mkdir()
+    monkeypatch.chdir(tmp_path)
+    assert ec._default_test_target() == "tests"
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs["cwd"]))
+        return subprocess.CompletedProcess(cmd, 0, "1 passed in 0.01s", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    ec._run_pytest_subprocess("tests")
+    (cmd, cwd), = calls
+    assert cwd == str(tmp_path.resolve())
+    assert cmd[0] == sys.executable  # no project .venv here
+    assert cmd[1:4] == ["-m", "pytest", "tests"]
+
+
+def test_default_target_without_tests_dir_is_discovery(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    assert _default_test_target() == "."

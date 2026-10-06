@@ -175,11 +175,10 @@ def _set_test_last_failed_path(path: Path) -> None:
 
 
 # ── /test (subprocess pytest runner) ────────────────────────────────────────
-# Defaults to the Lilith test suite. Pure subprocess wrapper — does NOT mutate
-# the repo. Adds a -k keyword filter and parses the pytest summary line into
-# a small dict so the REPL can render a clean overview.
-
-_DEFAULT_TEST_SUITE = "lilith-stack/lilith-cli/tests/"
+# Runs pytest in the working directory (the project /cd points at). Pure
+# subprocess wrapper — does NOT mutate the repo. Adds a -k keyword filter and
+# parses the pytest summary line into a small dict so the REPL can render a
+# clean overview.
 _PYTEST_SUMMARY_RE = re.compile(
     r"(?P<passed>\d+)\s+passed|"
     r"(?P<failed>\d+)\s+failed|"
@@ -190,12 +189,26 @@ _DURATION_RE = re.compile(r"in\s+(?P<seconds>[0-9]+(?:\.[0-9]+)?)s", re.IGNORECA
 
 
 def _test_repo_root() -> Path:
-    """Devuelve la raíz desde la que se ejecuta el runner de pytest."""
-    return Path(__file__).resolve().parent.parents[3]
+    """Devuelve la raíz desde la que se ejecuta pytest: el directorio de trabajo."""
+    return Path.cwd().resolve()
+
+
+def _default_test_target() -> str:
+    """``tests`` cuando el proyecto lo tiene; si no, pytest descubre desde ``.``."""
+    return "tests" if (_test_repo_root() / "tests").is_dir() else "."
+
+
+def _test_python(cwd: Path) -> str:
+    """El intérprete del ``.venv`` del proyecto, o el que ejecuta Lilith."""
+    if sys.platform == "win32":
+        venv_py = cwd / ".venv" / "Scripts" / "python.exe"
+    else:
+        venv_py = cwd / ".venv" / "bin" / "python"
+    return str(venv_py) if venv_py.is_file() else sys.executable
 
 
 def _validate_test_target(target: str) -> str | None:
-    """Valida que el objetivo de pytest permanezca dentro de Asgard.
+    """Valida que el objetivo de pytest permanezca dentro del directorio de trabajo.
 
     El objetivo puede incluir un node-id (``archivo.py::test_nombre``), pero
     nunca se ejecutan rutas absolutas o traversal fuera de la raíz del repo.
@@ -304,8 +317,8 @@ def _run_pytest_subprocess(
             ``tests/test_plan.py::test_x``).
         keyword: Optional ``-k`` expression. ``None`` means no filter.
         extra_args: Extra pytest flags (e.g. ``["--maxfail=1"]``).
-        cwd: Working directory for the subprocess. ``None`` falls back to
-            the Asgard repo root (parent of the ``lilith-stack`` suite).
+        cwd: Working directory for the subprocess. ``None`` uses the
+            current working directory.
 
     Returns:
         ``{"passed": int, "failed": int, "error": int, "duration": float,
@@ -314,7 +327,6 @@ def _run_pytest_subprocess(
         the dict also carries a ``run_error`` message.
     """
     if cwd is None:
-        # Asgard root sits two levels above lilith-stack/lilith-cli
         cwd = _test_repo_root()
 
     target_error = _validate_test_target(target)
@@ -330,11 +342,7 @@ def _run_pytest_subprocess(
             "run_error": target_error,
         }
 
-    venv_py = cwd / ".venv" / "Scripts" / "python.exe"
-    if sys.platform != "win32":
-        venv_py = cwd / ".venv" / "bin" / "python"
-
-    cmd: list[str] = [str(venv_py), "-m", "pytest", target, "-q", "--no-header", "--tb=line"]
+    cmd: list[str] = [_test_python(cwd), "-m", "pytest", target, "-q", "--no-header", "--tb=line"]
     if keyword:
         cmd.extend(["-k", keyword])
     if extra_args:
@@ -396,7 +404,7 @@ def _render_test_usage() -> None:
     console.print("\n[bold realm]᛭ Uso de /test[/]")
     console.print(
         "  [cyan]/test[/]                              — corre la suite por defecto "
-        f"({_DEFAULT_TEST_SUITE})"
+        "(tests/ del proyecto, o descubrimiento desde .)"
     )
     console.print(
         "  [cyan]/test <ruta>[/]                       — corre pytest sobre la ruta dada"
@@ -418,11 +426,11 @@ async def run_test_command(session: SessionRuntime, args: str) -> None:  # noqa:
     """Ejecuta /test como wrapper directo de pytest.
 
     Descripción:
-        Lanza pytest en un subproceso desde la raíz de Asgard usando el
-        intérprete ``.venv/Scripts/python.exe``. Por defecto corre la suite
-        de Lilith (``lilith-stack/lilith-cli/tests/``). Imprime un resumen
-        corto: passed/failed/error, duración y la última línea ``FAILED``
-        si hubo fallos. Nunca modifica archivos del repo.
+        Lanza pytest en un subproceso desde el directorio de trabajo con el
+        intérprete del ``.venv`` del proyecto (o el de Lilith si no hay uno).
+        Por defecto corre ``tests/`` si existe. Imprime un resumen corto:
+        passed/failed/error, duración y la última línea ``FAILED`` si hubo
+        fallos. Nunca modifica archivos del repo.
 
     Uso:
         /test
@@ -434,9 +442,9 @@ async def run_test_command(session: SessionRuntime, args: str) -> None:  # noqa:
 
     Ejemplos:
         /test
-        /test lilith-stack/lilith-cli/tests/test_plan.py
+        /test tests/test_plan.py
         /test -k hello
-        /test lilith-stack/lilith-cli/tests/ -k smoke
+        /test tests/ -k smoke
         /test last
     """
     text = (args or "").strip()
@@ -466,7 +474,7 @@ async def run_test_command(session: SessionRuntime, args: str) -> None:  # noqa:
         # convert last-failed list into a single -k expression
         pattern = " or ".join(failed)
         summary = _run_pytest_subprocess(
-            _DEFAULT_TEST_SUITE, keyword=pattern
+            _default_test_target(), keyword=pattern
         )
         if summary.get("run_error"):
             _render_test_run_error(summary["run_error"])
@@ -476,7 +484,7 @@ async def run_test_command(session: SessionRuntime, args: str) -> None:  # noqa:
         return
 
     # Split args into a target path and an optional -k keyword.
-    target: str = _DEFAULT_TEST_SUITE
+    target: str = _default_test_target()
     keyword: str | None = None
     tokens = text.split()
     i = 0

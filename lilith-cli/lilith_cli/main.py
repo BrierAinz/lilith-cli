@@ -116,10 +116,10 @@ def _is_wsl() -> bool:
 def _resolve_yggdrasil_root() -> Path:
     """Find the Yggdrasil workspace root.
 
-    Order: ``YGGDRASIL_ROOT`` env var, then the nearest ancestor that
-    contains the hub's ``ygg.py``. The fixed-depth fallback only holds for
-    the historical ``Asgard/lilith-cli`` layout, not for standalone
-    checkouts of lilith-stack.
+    Order: ``YGGDRASIL_ROOT`` env var, then the nearest ancestor of this
+    package that contains the hub's ``ygg.py``. A standalone checkout has no
+    hub, so the fallback is Lilith's own state directory (``CONFIG_DIR``),
+    never a guessed parent directory.
     """
     env_root = os.environ.get("YGGDRASIL_ROOT")
     if env_root:
@@ -127,14 +127,28 @@ def _resolve_yggdrasil_root() -> Path:
     for parent in Path(__file__).resolve().parents:
         if (parent / "ygg.py").is_file():
             return parent
-    return Path(__file__).resolve().parents[3]
+    return CONFIG_DIR
+
+
+def add_hub_to_sys_path(path: Path) -> None:
+    """Make an optional hub directory importable without shadowing anything.
+
+    Appending (instead of inserting first) keeps the standard library and
+    installed packages ahead of whatever the directory contains.
+    """
+    entry = str(path)
+    if entry not in sys.path:
+        sys.path.append(entry)
 
 
 def _lazy_import_ygg() -> types.ModuleType:
-    """Import the hub's ygg module, adding the root to sys.path."""
-    root = str(_resolve_yggdrasil_root())
-    if root not in sys.path:
-        sys.path.insert(0, root)
+    """Import the Yggdrasil hub's ``ygg`` module from the workspace root."""
+    root = _resolve_yggdrasil_root()
+    if not (root / "ygg.py").is_file():
+        raise ImportError(
+            f"No Yggdrasil hub (ygg.py) in {root}; set YGGDRASIL_ROOT to use hub commands."
+        )
+    add_hub_to_sys_path(root)
     import ygg
 
     return ygg
@@ -324,10 +338,12 @@ def status() -> None:
     try:
         ygg_cli = _lazy_import_ygg()
         ygg_cli.status()
-    except (ImportError, ModuleNotFoundError):
+    except ImportError as exc:
+        from rich.markup import escape
+
         from .render import console
 
-        console.print("[error]No se pudo importar ygg. Verifica la instalación.[/]")
+        console.print(f"[error]No se pudo importar ygg: {escape(str(exc))}[/]")
 
 
 @app.command
@@ -339,10 +355,12 @@ def launch() -> None:
     try:
         ygg_cli = _lazy_import_ygg()
         ygg_cli.status()
-    except (ImportError, ModuleNotFoundError):
+    except ImportError as exc:
+        from rich.markup import escape
+
         from .render import console
 
-        console.print("[error]No se pudo importar ygg. Verifica la instalación.[/]")
+        console.print(f"[error]No se pudo importar ygg: {escape(str(exc))}[/]")
 
 
 @app.command

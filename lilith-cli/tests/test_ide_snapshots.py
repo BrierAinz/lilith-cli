@@ -307,13 +307,7 @@ def test_ide_splash_screen(snap_compare, fake_session, project_root):
 
 
 def test_ide_file_search_modal(snap_compare, fake_session, project_root):
-    """Ctrl+P file search modal filtered by a typed query.
-
-    A query is typed because the modal's initial ``on_mount`` population is
-    racy (its ``clear()`` is scheduled after the ``append()`` calls and wipes
-    them), so the just-opened list renders empty. Typing goes through the
-    ``Input.Changed`` repopulation path, which is what users actually see.
-    """
+    """Ctrl+P file search modal filtered by a typed query, first row selected."""
     app = LilithIDEApp(fake_session, root=project_root, show_splash=False)
 
     async def run_before(pilot) -> None:
@@ -326,6 +320,27 @@ def test_ide_file_search_modal(snap_compare, fake_session, project_root):
         _stop_workers(pilot.app)
 
     assert snap_compare(app, terminal_size=TERMINAL_SIZE, run_before=run_before)
+
+
+@pytest.mark.asyncio
+async def test_ide_file_search_lists_files_as_soon_as_it_opens(fake_session, project_root):
+    """Regression: clear() removed the rows appended after it, so Ctrl+P opened empty."""
+    from textual.widgets import ListView
+
+    from lilith_cli.ide.screens.modals import FileSearchScreen
+
+    app = LilithIDEApp(fake_session, root=project_root, show_splash=False)
+    async with app.run_test(size=TERMINAL_SIZE) as pilot:
+        await _settle(pilot)
+        await pilot.press("ctrl+p")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, FileSearchScreen)
+        rows = screen.query_one("#file-search-results", ListView)
+        assert screen._filtered
+        assert len(rows.children) == len(screen._filtered)
+        assert rows.index == 0
+        _stop_workers(app)
 
 
 def test_ide_command_palette_modal(snap_compare, snapshot, fake_session, project_root):

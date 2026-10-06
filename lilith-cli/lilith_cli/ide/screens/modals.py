@@ -62,10 +62,11 @@ class FileSearchScreen(ModalScreen[Path | None]):
             yield Input(placeholder="Buscar archivo…", id="file-search-input", classes="modal-input")
             yield ListView(id="file-search-results", classes="modal-results")
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         self._all_files = self._collect_files()
-        self._update_results("")
         self.query_one("#file-search-input", Input).focus()
+        self._update_results("")
+        await self._render_results()
 
     def _collect_files(self) -> list[Path]:
         files: list[Path] = []
@@ -88,20 +89,22 @@ class FileSearchScreen(ModalScreen[Path | None]):
         else:
             self._filtered = self._all_files[:250]
 
-        if not self.is_mounted:
-            return
-
+    async def _render_results(self) -> None:
+        # clear() only schedules the removal; appending before it completes
+        # lets the removal take the new rows too, which left the list empty.
         list_view = self.query_one("#file-search-results", ListView)
-        list_view.clear()
-        for path in self._filtered:
-            rel = _shorten_path(path, self.root)
-            list_view.append(ListItem(Label(rel, classes="file-search-item")))
+        await list_view.clear()
+        await list_view.extend(
+            ListItem(Label(_shorten_path(path, self.root), classes="file-search-item"))
+            for path in self._filtered
+        )
         if list_view.children:
             list_view.index = 0
 
-    def on_input_changed(self, event: Input.Changed) -> None:
+    async def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "file-search-input":
             self._update_results(event.value)
+            await self._render_results()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "file-search-input":

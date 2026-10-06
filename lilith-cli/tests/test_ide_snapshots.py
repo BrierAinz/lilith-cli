@@ -42,7 +42,7 @@ _PKG_DIR = str(Path(__file__).resolve().parent.parent)
 if _PKG_DIR not in sys.path:
     sys.path.insert(0, _PKG_DIR)
 
-from textual.widgets import Input, RichLog, TextArea
+from textual.widgets import Input, OptionList, RichLog, TextArea
 
 from lilith_cli.ide import IDEConfig, LilithIDEApp
 from lilith_cli.ide.lsp.manager import LSPManager
@@ -380,6 +380,44 @@ async def test_ide_command_palette_semantics(fake_session, project_root):
         assert disabled["Formatear archivo"] == "No hay archivo activo"
         assert disabled["Buscar archivo"] == ""
         assert disabled["Archivos recientes"] == ""
+        _stop_workers(app)
+
+
+@pytest.mark.asyncio
+async def test_ide_command_palette_late_first_refresh_keeps_filter(
+    fake_session, project_root, monkeypatch
+):
+    """Regression: a slow first refresh repopulated the list with every command.
+
+    The palette fills its list after the first refresh. On a loaded machine
+    that can come after the user started typing, and the list went back to
+    all commands while the input still held the query.
+    """
+    deferred = []
+    monkeypatch.setattr(
+        CommandPaletteScreen,
+        "call_after_refresh",
+        lambda self, callback, *args: deferred.append((callback, args)) or True,
+    )
+    app = LilithIDEApp(fake_session, root=project_root, show_splash=False)
+    async with app.run_test(size=TERMINAL_SIZE) as pilot:
+        await _settle(pilot)
+        await pilot.press("ctrl+shift+p")
+        await pilot.pause()
+        await pilot.press(*"archivo")
+        await pilot.pause()
+        for callback, args in deferred:
+            callback(*args)
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, CommandPaletteScreen)
+        assert [item.label for item in screen._filtered] == [
+            "Guardar archivo",
+            "Buscar archivo",
+            "Archivos recientes",
+            "Formatear archivo",
+        ]
+        assert screen.query_one("#palette-results", OptionList).option_count == 4
         _stop_workers(app)
 
 

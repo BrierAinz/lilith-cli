@@ -27,6 +27,8 @@ from datetime import UTC, datetime
 from importlib.metadata import entry_points
 from typing import TYPE_CHECKING, Any
 
+from rich.markup import escape
+
 from .batch_command import run_batch_command
 from .bg_command import run_bg_command
 from .btw_command import run_btw_command
@@ -43,8 +45,6 @@ from .metrics_commands import (
 from .notes_command import run_note_command
 from .paste_command import run_paste_command
 from .pipeline_command import run_pipeline_command
-from rich.markup import escape
-
 from .render import console
 from .slash_commands.conversation import (
     run_compact_command,

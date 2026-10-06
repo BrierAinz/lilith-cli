@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import os
 import shlex
 import subprocess
@@ -11,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ..config import CONFIG_DIR
+from ..json_store import preserve_corrupt
 from ..render import console, get_theme, render_error, set_theme
 from ._shared import _get_editor, _set_editor
 
@@ -119,9 +119,9 @@ def _load_aliases() -> dict[str, str]:
         data = json.loads(_ALIAS_FILE.read_text(encoding="utf-8"))
         if isinstance(data, dict):
             return data
-    except Exception as exc:  # pragma: no cover
-        logger = logging.getLogger(__name__)
-        logger.warning("Error cargando alias: %s", exc)
+        raise ValueError("se esperaba un dict JSON")
+    except Exception as exc:
+        preserve_corrupt(_ALIAS_FILE, exc)
     return {}
 
 
@@ -171,9 +171,9 @@ def _load_stream_config() -> dict[str, Any]:
         data = json.loads(_STREAM_CONFIG_FILE.read_text(encoding="utf-8"))
         if isinstance(data, dict):
             return data
-    except Exception as exc:  # pragma: no cover
-        logger = logging.getLogger(__name__)
-        logger.warning("Error cargando stream config: %s", exc)
+        raise ValueError("se esperaba un dict JSON")
+    except Exception as exc:
+        preserve_corrupt(_STREAM_CONFIG_FILE, exc)
     return {}
 
 
@@ -985,13 +985,10 @@ def _load_profiles() -> dict[str, dict[str, Any]]:
         data = _json.loads(_PROFILES_PATH.read_text(encoding="utf-8"))
         if isinstance(data, dict):
             return data
+        raise ValueError("se esperaba un dict JSON")
     except Exception as exc:
-        # Don't hide corruption: a broken profiles.json silently falling
-        # back to defaults makes /profile save look broken on next launch.
-        console.print(
-            f"[warning]profiles.json corrupto o ilegible ({exc}); "
-            f"usando defaults. Borrá {_PROFILES_PATH} para regenerar.[/]"
-        )
+        # Don't hide corruption: keep a copy before the next save replaces it.
+        preserve_corrupt(_PROFILES_PATH, exc)
     return dict(_DEFAULT_PROFILES)
 
 

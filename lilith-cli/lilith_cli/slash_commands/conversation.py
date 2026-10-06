@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import os
 import re
 import shlex
@@ -18,6 +17,7 @@ from lilith_tools.registry import ToolRegistry
 from rich.syntax import Syntax
 
 from ..config import CONFIG_DIR
+from ..json_store import preserve_corrupt
 from ..render import console, render_error
 
 if TYPE_CHECKING:
@@ -358,9 +358,9 @@ def _load_bookmarks() -> dict[str, str]:
         data = json.loads(_BOOKMARKS_PATH.read_text(encoding="utf-8"))
         if isinstance(data, dict):
             return data
-    except Exception as exc:  # pragma: no cover
-        logger = logging.getLogger(__name__)
-        logger.warning("Error cargando bookmarks: %s", exc)
+        raise ValueError("se esperaba un dict JSON")
+    except Exception as exc:
+        preserve_corrupt(_BOOKMARKS_PATH, exc)
     return {}
 
 

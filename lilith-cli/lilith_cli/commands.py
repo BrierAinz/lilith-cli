@@ -21,6 +21,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from .config import CONFIG_DIR, CONFIG_FILE, find_project_config, load_config
+from .json_store import preserve_corrupt
 from .render import (
     console,
     get_theme,
@@ -43,9 +44,9 @@ def _load_feedback() -> list[dict[str, Any]]:
         data = json.loads(_FEEDBACK_PATH.read_text(encoding="utf-8"))
         if isinstance(data, list):
             return data
-    except Exception as exc:  # pragma: no cover — defensive
-        logger = logging.getLogger(__name__)
-        logger.warning("Error cargando feedback: %s", exc)
+        raise ValueError("se esperaba un list JSON")
+    except Exception as exc:
+        preserve_corrupt(_FEEDBACK_PATH, exc)
     return []
 
 
@@ -76,9 +77,9 @@ def _load_bookmarks() -> list[dict[str, Any]]:
         data = json.loads(_BOOKMARKS_PATH.read_text(encoding="utf-8"))
         if isinstance(data, list):
             return data
-    except Exception as exc:  # pragma: no cover — defensive
-        logger = logging.getLogger(__name__)
-        logger.warning("Error cargando bookmarks: %s", exc)
+        raise ValueError("se esperaba un list JSON")
+    except Exception as exc:
+        preserve_corrupt(_BOOKMARKS_PATH, exc)
     return []
 
 
@@ -2907,9 +2908,9 @@ def _load_macros() -> dict[str, list[str]]:
         data = json.loads(_MACROS_PATH.read_text(encoding="utf-8"))
         if isinstance(data, dict):
             return {k: v for k, v in data.items() if isinstance(v, list)}
-    except Exception as exc:  # pragma: no cover — defensive
-        logger = logging.getLogger(__name__)
-        logger.warning("Error cargando macros: %s", exc)
+        raise ValueError("se esperaba un dict JSON")
+    except Exception as exc:
+        preserve_corrupt(_MACROS_PATH, exc)
     return {}
 
 

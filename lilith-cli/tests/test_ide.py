@@ -518,3 +518,34 @@ class TestDebuggerIntegration:
                 assert len(started) == 1
             finally:
                 monkeypatch.setattr(app, "run_worker", original_run_worker)
+
+
+def test_auto_save_reports_files_it_could_not_write(tmp_path):
+    """Auto-save used to swallow write errors, so edits looked saved."""
+    from types import SimpleNamespace
+
+    from lilith_cli.ide.views.editor import EditorMixin
+
+    target = tmp_path / "a.py"
+    target.mkdir()  # reading or writing a directory raises OSError everywhere
+    notices = []
+
+    class Host(EditorMixin):
+        def __init__(self):
+            self._modified = {"t1"}
+            self._tab_paths = {"t1": target}
+
+        def query_one(self, selector, _type=None):
+            return SimpleNamespace(text="new\n")
+
+        def notify(self, message, severity="information"):
+            notices.append((severity, message))
+
+        def _update_editor_info(self):
+            pass
+
+    host = Host()
+    host._auto_save_modified_files()
+
+    assert any(sev == "error" and "a.py" in msg for sev, msg in notices)
+    assert host._modified == {"t1"}

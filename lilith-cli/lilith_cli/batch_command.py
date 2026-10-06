@@ -24,8 +24,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
+from .json_store import preserve_corrupt
 from .render import console, render_error
 
 if TYPE_CHECKING:
@@ -61,8 +62,9 @@ class _BatchStore:
             data = json.loads(self.batch_file.read_text(encoding="utf-8"))
             if isinstance(data, dict):
                 return {str(k): [str(p) for p in v] for k, v in data.items()}
-        except Exception:
-            pass
+            raise ValueError("se esperaba un dict JSON")
+        except Exception as exc:
+            preserve_corrupt(self.batch_file, exc)
         return {}
 
     def save(self, batches: dict[str, list[str]]) -> None:

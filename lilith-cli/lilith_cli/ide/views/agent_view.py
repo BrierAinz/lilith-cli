@@ -409,8 +409,8 @@ class AgentMixin:
                 ),
                 encoding="utf-8",
             )
-        except Exception:
-            pass
+        except (OSError, TypeError, ValueError) as exc:
+            self.notify(f"No se pudo guardar la conversación: {exc}", severity="warning")  # type: ignore[attr-defined]
 
     # ── Thinking animation (status bar rune cycle) ───────────────
 

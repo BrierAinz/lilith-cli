@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ast
 import json
-import logging
 import re
 import shutil
 import subprocess
@@ -30,6 +29,7 @@ from rich.syntax import Syntax
 from rich.tree import Tree as RichTree
 
 from ..config import CONFIG_DIR
+from ..json_store import preserve_corrupt
 from ..render import console, render_error
 from ._shared import _print_tool_result
 
@@ -1961,9 +1961,9 @@ def _load_snippets() -> dict[str, dict]:
         data = json.loads(_SNIPPETS_PATH.read_text(encoding="utf-8"))
         if isinstance(data, dict):
             return data
-    except Exception as exc:  # pragma: no cover
-        logger = logging.getLogger(__name__)
-        logger.warning("Error cargando snippets: %s", exc)
+        raise ValueError("se esperaba un dict JSON")
+    except Exception as exc:
+        preserve_corrupt(_SNIPPETS_PATH, exc)
     return {}
 
 

@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .config import CONFIG_DIR
+from .json_store import preserve_corrupt
 from .render import console, render_error
 
 if TYPE_CHECKING:
@@ -62,16 +63,16 @@ def _load_notes() -> list[dict[str, Any]]:
     """Return notes from ``~/.yggdrasil/notes.json``, or ``[]`` if missing.
 
     Malformed files are treated as empty so a corrupted store cannot break
-    the REPL — the user can ``/note clear`` to recover.
+    the REPL; a copy is kept so the next save does not destroy the notes.
     """
     if not _NOTES_PATH.exists():
         return []
     try:
         data = json.loads(_NOTES_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("Error cargando notes: %s", exc)
-        return []
-    if not isinstance(data, list):
+        if not isinstance(data, list):
+            raise ValueError("se esperaba una lista JSON")
+    except (OSError, ValueError) as exc:
+        preserve_corrupt(_NOTES_PATH, exc)
         return []
     return [n for n in data if isinstance(n, dict) and "text" in n]
 

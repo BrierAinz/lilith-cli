@@ -9,10 +9,10 @@ its result, without requiring an LLM round-trip.
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .json_store import preserve_corrupt
 from .render import console, render_error
 
 if TYPE_CHECKING:
@@ -70,8 +70,9 @@ class _PipelineStore:
                     ]
                     for k, v in data.items()
                 }
-        except Exception:
-            pass
+            raise ValueError("se esperaba un dict JSON")
+        except Exception as exc:
+            preserve_corrupt(self.pipeline_file, exc)
         return {
             k: [{"name": step["name"], "args": dict(step.get("args", {}))} for step in v]
             for k, v in _DEFAULT_PIPELINES.items()

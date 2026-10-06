@@ -5,7 +5,8 @@ Al arrancar el IDE recorre el proyecto, cuenta marcadores pendientes
 resumen en el chat con los archivos más cargados.
 
 Instalación: copiá este archivo a ``.yggdrasil/plugins/`` en la raíz de tu
-proyecto y reiniciá el IDE. Verificá con el comando ``/plugins`` en el chat.
+proyecto, escribí ``/plugins trust`` en el chat del IDE (los plugins del
+proyecto no se ejecutan sin esa confirmación) y verificá con ``/plugins``.
 
 Este ejemplo usa la forma class-based del contrato: una clase ``Plugin``
 que hereda de :class:`lilith_cli.ide.plugins.LilithPlugin` e implementa

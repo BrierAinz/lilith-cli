@@ -195,7 +195,10 @@ class AgentMixin:
         elif cmd == "/diagnostics":
             self.action_show_diagnostics()  # type: ignore[attr-defined]
         elif cmd == "/plugins":
-            self._show_plugins()
+            if arg.strip() == "trust":
+                self._trust_project_plugins()
+            else:
+                self._show_plugins()
         elif cmd == "/delegate":
             if not arg:
                 self._chat_system("Uso: /delegate <preset>")  # type: ignore[attr-defined]
@@ -347,8 +350,16 @@ class AgentMixin:
                 lines.append(f"  • {plugin.name}")
         else:
             lines.append("  [dim]No hay plugins cargados.[/]")
+        if self.plugin_manager.discover() and not self.plugin_manager.is_trusted():  # type: ignore[attr-defined]
+            lines.append("[warning]Proyecto sin confianza: /plugins trust para ejecutar sus plugins.[/]")
         lines.append("\nColocá archivos .py en esa carpeta con una función ``register(app)``.")
         log.write("\n" + "\n".join(lines))
+
+    def _trust_project_plugins(self) -> None:
+        """Trust this project's plugins and load them now."""
+        self.plugin_manager.trust()  # type: ignore[attr-defined]
+        self._chat_system("Plugins de este proyecto marcados como confiables.")  # type: ignore[attr-defined]
+        self._load_plugins()  # type: ignore[attr-defined]
 
     # ── Conversation persistence ──────────────────────────────────
 

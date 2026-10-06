@@ -6,6 +6,7 @@ import asyncio
 import dataclasses
 import difflib
 import json
+import logging
 import re
 import shutil
 from collections.abc import Callable
@@ -89,6 +90,8 @@ from .views.file_tree import FileTreeMixin
 from .views.terminal import TerminalMixin
 from .views.git_view import GitMixin
 from .views.court_panel import CourtPanelMixin
+
+logger = logging.getLogger(__name__)
 
 class LilithIDEApp(
     QualityMixin,
@@ -345,14 +348,25 @@ class LilithIDEApp(
             # Already available text appears immediately.
 
     def _load_plugins(self) -> None:
-        """Discover and register plugins from .yggdrasil/plugins/."""
+        """Register plugins from .yggdrasil/plugins/ if the project is trusted."""
+        candidates = self.plugin_manager.discover()
+        if not candidates:
+            return
+        if not self.plugin_manager.is_trusted():
+            names = ", ".join(path.name for path in candidates)
+            self._chat_system(
+                f"[warning]Este proyecto trae plugins en .yggdrasil/plugins ({names}). "
+                "No se ejecutaron: son código del repositorio. Si confías en él, "
+                "escribe /plugins trust.[/]"
+            )
+            return
         try:
             self.plugin_manager.load_all()
             loaded = self.plugin_manager.register_all(self)
             if loaded:
                 self._chat_system(f"[dim]Plugins cargados: {', '.join(loaded)}[/]")
         except Exception:
-            pass
+            logger.exception("Plugin startup failed")
 
     def notify(
         self,

@@ -173,6 +173,7 @@ inside `lilith_cli/ide/app.py` (not yet centralised in `keymaps.py`):
 | `/delegate <preset>` | Delegate the last chat message to a Hlidskjalf preset via the Yggdrasil queue. |
 | `/undo-last` | Revert the last agent-proposed changes (uses backups). |
 | `/new <template> <path>` | Create a new file from a snippet (`py`, `test`, `class`, `md`). |
+| `/plugins [trust]` | List project plugins; `trust` allows this project's `.yggdrasil/plugins/*.py` to run (they never run in an untrusted project). |
 | `/clear` | Clear the chat log. |
 | `/theme` | Toggle theme. |
 | `/save` | Save the active file (triggers run-on-save if configured). |

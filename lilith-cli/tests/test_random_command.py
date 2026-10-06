@@ -6,6 +6,8 @@ import asyncio
 import inspect
 import uuid
 
+from lilith_cli.slash_router import route, slash_commands
+
 
 def _run(coro):
     return asyncio.run(coro)
@@ -89,9 +91,7 @@ def test_random_invalid_inputs_and_help(fake_session, capsys):
 
 
 def test_random_is_wired_in_repl():
-    import lilith_cli.repl as repl_module
+    from lilith_cli.extra_commands import run_random_command
 
-    assert "/random" in repl_module._SLASH_COMMANDS
-    source = inspect.getsource(repl_module.run_repl)
-    assert 'cmd_name == "random"' in source
-    assert "run_random_command(session, cmd_args)" in source
+    assert "/random" in slash_commands()
+    assert route("random").handler is run_random_command

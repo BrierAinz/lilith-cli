@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from lilith_cli import agent_console
 from lilith_cli.config import YggdrasilConfig
 from lilith_cli.mission import presentation
+from lilith_cli.slash_router import slash_commands
 from rich.console import Console
 
 
@@ -102,9 +103,8 @@ def test_mission_court_and_compute_are_human_readable(tmp_path) -> None:
 
 
 def test_repl_discovers_mission_command() -> None:
-    from lilith_cli.repl import _SLASH_COMMANDS
 
-    assert "/mission" in _SLASH_COMMANDS
+    assert "/mission" in slash_commands()
 
 
 def test_mission_activity_uses_court_identity_not_internal_tool_name() -> None:
@@ -146,6 +146,5 @@ def test_court_is_canonical_local_surface(tmp_path) -> None:
 
 
 def test_repl_discovers_court_command() -> None:
-    from lilith_cli.repl import _SLASH_COMMANDS
 
-    assert "/court" in _SLASH_COMMANDS
+    assert "/court" in slash_commands()

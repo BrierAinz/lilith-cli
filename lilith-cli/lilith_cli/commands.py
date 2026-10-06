@@ -3113,7 +3113,9 @@ class MacroCommand(BaseCommand):
                     },
                 )
             try:
-                await registry.dispatch(cmd)
+                from .slash_router import dispatch as dispatch_slash
+
+                await dispatch_slash(self.session, cmd, registry)
             except SystemExit:
                 raise
             except Exception as exc:  # pragma: no cover — defensive
@@ -3478,12 +3480,9 @@ class MacroCommand(BaseCommand):
             render_error(f"Macro no encontrada: [model]{name}[/]")
             return
 
-        registry = CommandRegistry(self.session)
-        registry.discover()
-        valid_names = set(registry._commands.keys())
-        for alias, target in registry._aliases.items():
-            valid_names.add(alias)
-            valid_names.add(target)
+        from .slash_router import slash_commands
+
+        valid_names = {word[1:] for word in slash_commands()}
 
         valid_lines: list[tuple[int, str]] = []
         invalid_lines: list[tuple[int, str, str]] = []

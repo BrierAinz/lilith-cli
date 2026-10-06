@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import re
+
 from lilith_cli.slash_commands import extras as extras_cmds
+from lilith_cli.slash_router import route, slash_commands
 
 
 def _run(coro):
@@ -157,16 +159,11 @@ def test_timer_help_shows_subcommands(fake_session, capsys):
 
 
 def test_timer_is_in_slash_commands_list():
-    """/timer debe aparecer en _SLASH_COMMANDS de repl.py para autocompletar."""
-    import lilith_cli.repl as repl_module
-
-    assert "/timer" in repl_module._SLASH_COMMANDS
-
+    """/timer debe aparecer en el autocompletado."""
+    assert "/timer" in slash_commands()
 
 def test_timer_is_in_dispatcher():
-    """El dispatcher de repl.py debe tener una rama para 'timer'."""
-    import lilith_cli.repl as repl_module
+    """El router debe despachar /timer a su handler."""
+    from lilith_cli.extra_commands import run_timer_command
 
-    source = open(repl_module.__file__, encoding="utf-8").read()
-    assert 'cmd_name == "timer"' in source
-    assert "run_timer_command" in source
+    assert route("timer").handler is run_timer_command

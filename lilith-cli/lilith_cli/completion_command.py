@@ -19,7 +19,7 @@ Usage inside the REPL::
 
 The generated snippets are static and small (<3 KB each) — they list
 the canonical ``lilith`` subcommands plus every slash command that
-``repl._SLASH_COMMANDS`` advertises.
+``slash_router.slash_commands()`` advertises.
 """
 
 from __future__ import annotations
@@ -66,17 +66,16 @@ _FALLBACK_SLASH: list[str] = [
 
 
 def _collect_slash_commands() -> list[str]:
-    """Return the canonical slash-command list advertised by the REPL.
+    """Return every slash-command spelling the REPL accepts.
 
-    Importing ``repl`` is intentionally deferred so this module stays
-    cheap to import even when the REPL never runs (e.g. from the
-    sandbox router).  We snapshot the list at call time so any future
-    additions to ``_SLASH_COMMANDS`` are reflected automatically.
+    The router import is deferred so this module stays cheap to import
+    even when the REPL never runs (e.g. from the sandbox router).
     """
 
     try:
-        from .repl import _SLASH_COMMANDS
-        return list(_SLASH_COMMANDS)
+        from .slash_router import slash_commands
+
+        return slash_commands()
     except Exception:
         return list(_FALLBACK_SLASH)
 

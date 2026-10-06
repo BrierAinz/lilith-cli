@@ -13,8 +13,8 @@ from pathlib import Path
 from typing import Any, Iterator
 
 import pytest
-
 from lilith_cli import undo_command
+from lilith_cli.slash_router import route, slash_commands
 from lilith_cli.undo_command import (
     _build_diff,
     _format_entry,
@@ -234,8 +234,9 @@ class TestRunUndoPeek:
 class TestReplDispatch:
     """Make sure ``repl.py`` recognises the new command names."""
 
-    def test_command_is_importable(self) -> None:
-        from lilith_cli.repl import run_undo_peek_command  # noqa: F401
+    def test_command_is_routed(self) -> None:
+        assert route("undo-peek").handler is run_undo_peek_command
+        assert route("undo-diff") is route("peeks") is route("undo-peek")
 
     def test_command_is_in_slash_list(self) -> None:
         from lilith_cli import repl
@@ -243,7 +244,7 @@ class TestReplDispatch:
         # The slash-command list is built lazily on module import; ensure
         # our three names were added (also includes /undo-peek itself).
         # We re-import to be safe in case the list is mutated by other tests.
-        names = repl._SLASH_COMMANDS
+        names = slash_commands()
         assert "/undo-peek" in names
         assert "/undo-diff" in names
         assert "/peeks" in names

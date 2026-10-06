@@ -15,6 +15,7 @@ import sys
 from unittest.mock import MagicMock
 
 import pytest
+from lilith_cli.slash_router import route, slash_commands
 
 
 def _run(coro):
@@ -258,15 +259,7 @@ def test_reindex_failure_still_says_doc_was_saved(fake_session, monkeypatch, cap
 
 def test_command_module_is_wired_in_repl() -> None:
     """El handler está realmente agregado al REPL (no solo existe el archivo)."""
-    import lilith_cli.repl as repl_module
+    from lilith_cli.ingest_command import run_ingest_command
 
-    assert hasattr(repl_module, "run_ingest_command"), (
-        "run_ingest_command no está importado en repl.py"
-    )
-    assert "/ingest" in repl_module._SLASH_COMMANDS, (
-        "/ingest no figura en _SLASH_COMMANDS"
-    )
-    src = open(repl_module.__file__, encoding="utf-8").read()
-    assert 'cmd_name == "ingest"' in src, (
-        "el dispatch de /ingest no está cableado en repl.py"
-    )
+    assert "/ingest" in slash_commands(), "/ingest no figura en el autocompletado"
+    assert route("ingest").handler is run_ingest_command

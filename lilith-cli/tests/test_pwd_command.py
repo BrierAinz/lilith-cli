@@ -6,8 +6,8 @@ import inspect
 from pathlib import Path
 
 import pytest
-
 from lilith_cli.extra_commands import run_pwd_command
+from lilith_cli.slash_router import route, slash_commands
 
 
 @pytest.mark.asyncio
@@ -45,13 +45,10 @@ async def test_pwd_rejects_arguments(
 
 
 def test_pwd_is_wired_in_repl_and_help() -> None:
-    import lilith_cli.extra_commands as extra_commands
-    import lilith_cli.repl as repl_module
+    from lilith_cli.extra_commands import run_pwd_command
+    from lilith_cli.slash_commands.help import HELP_CATALOG
 
-    assert "/pwd" in repl_module._SLASH_COMMANDS
-    repl_source = inspect.getsource(repl_module.run_repl)
-    assert 'cmd_name == "pwd"' in repl_source
-    assert "run_pwd_command(session, cmd_args)" in repl_source
-
-    help_source = inspect.getsource(extra_commands.run_help_command)
-    assert '("pwd", "Mostrar el directorio de trabajo actual")' in help_source
+    assert "/pwd" in slash_commands()
+    assert route("pwd").handler is run_pwd_command
+    entries = [entry for family in HELP_CATALOG.values() for entry in family]
+    assert ("pwd", "Mostrar el directorio de trabajo actual") in entries

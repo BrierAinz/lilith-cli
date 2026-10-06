@@ -15,12 +15,12 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from lilith_cli.extra_commands import (
     _security_scan_file,
     _security_walk,
     run_security_command,
 )
+from lilith_cli.slash_router import route, slash_commands
 
 
 def _run(coro):
@@ -272,21 +272,15 @@ async def test_command_invalid_max_reports_error(
 
 
 def test_security_review_is_a_slash_command() -> None:
-    from lilith_cli.repl import _SLASH_COMMANDS
 
-    assert "/security-review" in _SLASH_COMMANDS
+    assert "/security-review" in slash_commands()
 
 
 def test_security_review_dispatch_block_uses_alias() -> None:
-    import inspect
+    from lilith_cli.extra_commands import run_security_command
 
-    from lilith_cli import repl as repl_module
-
-    src = inspect.getsource(repl_module.run_repl)
-    assert '"security-review"' in src
-    assert '"sec"' in src
-    assert "run_security_command" in src
-
+    assert route("security-review").handler is run_security_command
+    assert route("sec") is route("security-review")
 
 # ── helpers ─────────────────────────────────────────────────────────
 

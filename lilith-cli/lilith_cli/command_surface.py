@@ -1,7 +1,8 @@
 """Discovery metadata shared by help, completion and spelling suggestions.
 
-Routing remains in the REPL and CommandRegistry: aliases retain their existing
-handlers, including legacy handlers that differ from their long spelling.
+Names come from :mod:`lilith_cli.slash_router` (REPL routes and command
+plugins) and :class:`~lilith_cli.commands.CommandRegistry`. Routes take
+precedence over registry aliases, so ``/rev`` stays ``/reverse``.
 """
 
 from __future__ import annotations
@@ -10,26 +11,15 @@ from difflib import get_close_matches
 
 from rich.markup import escape
 
-# REPL routes take precedence over registry aliases.
-REPL_ALIASES = {
-    "h": "help", "?": "help", "diffstaged": "diff-staged",
-    "diffunstaged": "diff-unstaged", "diffbranch": "diff-branch",
-    "s": "search", "undo-diff": "undo-peek", "peeks": "undo-peek",
-    "w": "watch", "rev": "reverse", "p": "pin",
-    "cls": "clear-screen", "temp": "temperature", "notes": "note",
-    "note-add": "note", "aside": "btw", "side": "btw",
-    "cap": "capture", "l": "log", "sec": "security-review",
-    "tr": "transcript",
-}
-
 
 def aliases() -> dict[str, str]:
     from .commands import CommandRegistry
+    from .slash_router import route_aliases
 
     registry = CommandRegistry(None)
     registry.discover()
     result = {a: c for a, c in registry._aliases.items() if a != c}
-    result.update(REPL_ALIASES)
+    result.update(route_aliases())
     return result
 
 
@@ -41,10 +31,10 @@ def completion_words(words: list[str]) -> list[str]:
 
 
 def unknown_command(name: str) -> str:
-    from .repl import _SLASH_COMMANDS
+    from .slash_router import slash_commands
 
     mapping = aliases()
-    names = {word[1:] for word in completion_words(_SLASH_COMMANDS)}
+    names = {word[1:] for word in completion_words(slash_commands())}
     candidates = get_close_matches(name, sorted(names), n=3, cutoff=0.6)
     suggestions = list(dict.fromkeys(mapping.get(n, n) for n in candidates))
     hint = ""
@@ -73,23 +63,17 @@ def render_help(catalog: dict[str, list[tuple[str, str]]], args: str) -> None:
 
     # Fail closed on discovery drift: every accepted REPL spelling must be
     # represented, even before someone adds a curated description to /help.
-    from .repl import _SLASH_COMMANDS
+    # Catalog entries for commands that are not routable (a disabled command
+    # plugin) are dropped.
+    from .slash_router import slash_commands
 
-    for word in _SLASH_COMMANDS:
+    accepted = slash_commands()
+    routable = {mapping.get(word[1:], word[1:]) for word in accepted}
+    entries = {name: entry for name, entry in entries.items() if name in routable}
+    for word in accepted:
         name = word[1:]
         canonical = mapping.get(name, name)
         entries.setdefault(canonical, ("Other", "Comando disponible"))
-
-    # These catalog descriptions previously contradicted the active handlers.
-    entries["agent"] = ("Configuration", "Modo del agente [list | nombre]")
-    entries["status"] = ("Information", "Estado del ecosistema y proveedor/modelo de sesión")
-    entries["mission"] = ("Orchestration", "Estado local de Mission Kernel, corte y recursos de cómputo")
-    entries["court"] = ("Orchestration", "Corte canónica de Lilith, health de compute y aprendizaje")
-    entries["clear-screen"] = ("Session", "Limpiar terminal sin borrar historial")
-    entries["resume"] = ("Session", "Restaurar una conversación guardada")
-    entries["continue"] = ("Session", "Pedir al agente que continúe su respuesta anterior")
-    entries["redo"] = ("Session", "Reenviar el último mensaje al modelo; no rehace archivos")
-    entries["diff"] = ("Files & Git", "Previsualizar escritura/edición [write | edit], sin aplicar")
 
     query = args.strip().lower().lstrip("/")
     if not query:

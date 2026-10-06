@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import pytest
-from lilith_cli import repl
 from lilith_cli.command_surface import aliases, completion_words, unknown_command
 from lilith_cli.commands import CommandRegistry
 from lilith_cli.extra_commands import run_help_command
+from lilith_cli.slash_router import slash_commands
 
 
 def test_alias_catalog_covers_registry_and_repl_aliases() -> None:
@@ -26,7 +26,7 @@ def test_alias_catalog_covers_registry_and_repl_aliases() -> None:
 
 def test_completion_is_unique_and_prioritizes_canonical_names() -> None:
     mapping = aliases()
-    words = completion_words(repl._SLASH_COMMANDS)
+    words = completion_words(slash_commands())
     assert len(words) == len(set(words))
     assert all(f"/{alias}" in words for alias in mapping)
     alias_flags = [word[1:] in mapping for word in words]
@@ -53,7 +53,7 @@ async def test_full_help_covers_every_repl_command(fake_session, capsys) -> None
     await run_help_command(fake_session, "all")
     output = capsys.readouterr().out
     mapping = aliases()
-    canonical = {mapping.get(word[1:], word[1:]) for word in repl._SLASH_COMMANDS}
+    canonical = {mapping.get(word[1:], word[1:]) for word in slash_commands()}
     missing = sorted(name for name in canonical if f"/{name}" not in output)
     assert not missing
     assert "Comando disponible" not in output

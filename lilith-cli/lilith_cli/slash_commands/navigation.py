@@ -1545,9 +1545,8 @@ def _compare_recent_paths(session: SessionRuntime, count: int = 2) -> list[str]:
 Added in 2026-07-11 round N. Replicates the Rich Panel+Table.grid pattern
 used by /whereami, /system_info and /cost. Migrated from legacy classes
 MetricsCommand / TokensCommand / UsageCommand in commands.py to async
-run_X_command functions so the dispatcher in repl.py picks them up
-BEFORE the registry.dispatch fallback (which still works but is
-considered legacy-only).
+run_X_command functions so slash_router picks them up before the
+CommandRegistry fallback.
 """
 
 

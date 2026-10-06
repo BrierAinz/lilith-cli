@@ -14,6 +14,32 @@ Terminal interface for the Lilith ecosystem — part of the Yggdrasil monorepo.
 Inside the REPL, `/help` shows the compact discovery guide, `/help <query>` searches
 families, names and aliases, and `/commands` shows the complete canonical catalog.
 
+### Slash commands and command plugins
+
+Slash commands are declared once, in `lilith_cli/slash_router.py`, as
+`SlashRoute(name, handler, aliases)`; their handlers live in
+`lilith_cli/slash_commands/` grouped by domain. The REPL, `/macro play`, Tab
+completion, `/help` and `/how` all read that table, and commands it does not know
+fall through to `CommandRegistry` (`commands.py`). A new command needs a route and
+a `HELP_CATALOG` entry in `slash_commands/help.py`; `tests/test_help_catalog.py`
+and `tests/test_slash_router.py` fail if either is missing.
+
+Small utilities (`/calc`, `/uuid`, `/hash`, `/base64`, `/epoch`, `/now`, `/random`,
+`/quote`, `/reverse`, `/lines`, `/qr`, `/timer`, `/voice`) ship as the bundled
+`utilities` command plugin. Turn it off with
+`LILITH_DISABLED_COMMAND_PLUGINS=utilities`.
+
+Installed packages can add commands through the `lilith_cli.slash_commands` entry
+point group; the entry point resolves to a sequence of `SlashRoute` objects:
+
+```toml
+[project.entry-points."lilith_cli.slash_commands"]
+greetings = "my_package.lilith_commands:ROUTES"
+```
+
+Plugin commands cannot replace built-in names, and a plugin that fails to load is
+skipped with a warning.
+
 ## IDE mode
 
 Launch the Norse-themed terminal IDE:

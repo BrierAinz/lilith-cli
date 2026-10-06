@@ -76,14 +76,12 @@ def test_help_unknown_category_shows_error(fake_session, capsys):
 
 
 def test_help_aliases_work(fake_session, capsys):
-    """Both 'h' and '?' are registered as aliases for /help."""
-    # We just verify the aliases are in the dispatcher (can't easily test REPL)
-    # Read the source
-    import inspect
+    """Both 'h' and '?' are routed to /help."""
+    from lilith_cli.extra_commands import run_help_command
+    from lilith_cli.slash_router import route
 
-    from lilith_cli.repl import run_repl
-    src = inspect.getsource(run_repl)
-    assert 'cmd_name in ("help", "h", "?")' in src
+    assert route("h") is route("?") is route("help")
+    assert route("help").handler is run_help_command
 
 
 def test_help_includes_recent_commands(fake_session, capsys):

@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from lilith_cli.slash_router import slash_commands
 
 
 def test_costs_accumulate_by_preset_provider_session_and_history(tmp_path: Path) -> None:
@@ -47,7 +48,6 @@ def session():
 @pytest.mark.asyncio
 async def test_costs_command_renders_and_requires_confirmation(session, monkeypatch, tmp_path: Path) -> None:
     from lilith_cli.commands import CommandRegistry
-    from lilith_cli.repl import _SLASH_COMMANDS
     from lilith_tools.orchestration_state import OrchestrationStateStore
 
     path = tmp_path / "state.json"
@@ -58,7 +58,7 @@ async def test_costs_command_renders_and_requires_confirmation(session, monkeypa
     registry.discover()
     command = registry.get("costs")
     assert command is not None
-    assert "/costs" in _SLASH_COMMANDS
+    assert "/costs" in slash_commands()
     with command.session_console_capture() as capture:
         await command.execute("")
     output = capture.get()

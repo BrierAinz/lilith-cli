@@ -17,6 +17,7 @@ from lilith_cli._learn_section import (  # noqa: E402
     suggest_from_post_mortems,
     suggest_from_state_path,
 )
+from lilith_cli.slash_router import slash_commands
 
 
 def _pm(preset: str, *, success: bool = True, task_id: str = "", **extra) -> dict:
@@ -119,7 +120,7 @@ def test_save_suggestion_writes_yaml(tmp_path):
 def test_learn_is_wired_into_the_repl():
     import lilith_cli.repl as repl_mod
 
-    assert "/learn" in repl_mod._SLASH_COMMANDS
+    assert "/learn" in slash_commands()
     from lilith_cli.extra_commands import run_learn_command  # noqa: F401
 
 

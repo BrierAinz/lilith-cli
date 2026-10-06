@@ -232,3 +232,29 @@ from .utility_commands import (  # noqa: F401
     run_reverse_command,
     run_uuid_command,
 )
+
+# Anything else the old module defined now lives in one of the domain
+# modules; resolve it on first access so existing imports keep working.
+_DOMAIN_MODULES = (
+    "git",
+    "quality",
+    "navigation",
+    "sessions",
+    "conversation",
+    "settings",
+    "environment",
+    "extras",
+    "help",
+    "utilities",
+    "_shared",
+)
+
+
+def __getattr__(name: str) -> object:
+    import importlib
+
+    for domain in _DOMAIN_MODULES:
+        module = importlib.import_module(f"{__package__}.slash_commands.{domain}")
+        if name in vars(module):
+            return vars(module)[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

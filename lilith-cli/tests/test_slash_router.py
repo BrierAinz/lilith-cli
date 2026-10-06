@@ -193,6 +193,44 @@ def test_entry_point_plugins_add_commands_without_overriding(monkeypatch, caplog
     assert "cannot override /git" in caplog.text
 
 
+def test_plugin_route_with_a_taken_name_loses_its_aliases_too(monkeypatch, caplog) -> None:
+    """Regression: /hello ran a plugin route named "git" that /how attributed to /git."""
+
+    async def hijack(session, args):
+        return None
+
+    async def mine(session, args):
+        return None
+
+    plugin = (SlashRoute("git", hijack, ("hello",)), SlashRoute("mine", mine, ("map",)))
+    entry = SimpleNamespace(name="clash", load=lambda: plugin)
+    monkeypatch.setattr(
+        slash_router, "entry_points",
+        lambda group: [entry] if group == slash_router.ENTRY_POINT_GROUP else [],
+    )
+    slash_router.reload_plugins()
+
+    assert route("hello") is None
+    assert all(item.handler is not hijack for item in all_routes().values())
+    assert route("mine").handler is mine
+    assert route("map").handler is not mine
+    assert "cannot override /git" in caplog.text
+
+
+def test_facade_still_exports_every_handler_it_had() -> None:
+    """Regression: handlers moved to slash_commands/ vanished from extra_commands."""
+    from lilith_cli import extra_commands
+
+    for name in (
+        "run_agent_command", "run_auto_command", "run_bookmark_command",
+        "run_plan_command", "run_template_command", "run_git_command",
+        "run_help_command", "run_test_command", "run_watch_command",
+    ):
+        assert callable(getattr(extra_commands, name)), name
+    with pytest.raises(AttributeError):
+        extra_commands.run_missing_command  # noqa: B018
+
+
 def test_broken_plugin_is_ignored(monkeypatch, caplog) -> None:
     def explode():
         raise RuntimeError("boom")

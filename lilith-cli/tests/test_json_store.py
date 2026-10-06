@@ -56,3 +56,17 @@ def test_warning_survives_markup_in_paths(tmp_path, capsys):
     json_store.preserve_corrupt(store, ValueError("[red]bad"))
     out = capsys.readouterr().out
     assert "[bold]notes.json" in out and "[red]bad" in out
+
+
+def test_second_preservation_in_the_same_second_keeps_the_first(tmp_path):
+    """Regression: the backup name had one-second resolution and was overwritten."""
+    store = tmp_path / "notes.json"
+    store.write_text("{first", encoding="utf-8")
+    first = json_store.preserve_corrupt(store, ValueError())
+
+    store.write_text("{second, longer", encoding="utf-8")
+    second = json_store.preserve_corrupt(store, ValueError())
+
+    assert first is not None and second is not None and first != second
+    assert first.read_text(encoding="utf-8") == "{first"
+    assert second.read_text(encoding="utf-8") == "{second, longer"

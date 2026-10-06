@@ -312,8 +312,15 @@ def _load_plugins() -> dict[str, SlashRoute]:
         except Exception:  # a broken plugin must not take the REPL down
             logger.warning("Ignoring command plugin %r", plugin, exc_info=True)
             continue
+        taken = _BUILTIN.keys() | loaded.keys()
         for name, item in plugin_index.items():
-            if name in _BUILTIN or name in loaded:
+            if item.name in taken:
+                # The canonical name is what /how, /help and telemetry report;
+                # an alias whose route lost its name would run under it.
+                if name == item.name:
+                    logger.warning("Command plugin %r cannot override /%s", plugin, name)
+                continue
+            if name in taken:
                 logger.warning("Command plugin %r cannot override /%s", plugin, name)
                 continue
             loaded[name] = item

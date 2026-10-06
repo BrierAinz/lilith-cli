@@ -5,6 +5,8 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+import pytest
+
 from lilith_cli.ide.plugins import LilithPlugin, PluginManager
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples" / "plugins"
@@ -390,3 +392,18 @@ class TestProjectTrust:
         project, _ = self._setup(tmp_path, monkeypatch)
         monkeypatch.setenv(plugins.TRUST_ALL_ENV, "1")
         assert PluginManager(project).is_trusted()
+
+    @pytest.mark.parametrize("content", ["{not json", '{"a": 1}'])
+    def test_unreadable_registry_is_not_overwritten(self, tmp_path, monkeypatch, content):
+        """Regression: a malformed registry read as empty and the next trust replaced it."""
+        from lilith_cli.ide import plugins
+
+        project, _ = self._setup(tmp_path, monkeypatch)
+        registry = plugins.TRUSTED_PROJECTS_FILE
+        registry.parent.mkdir(parents=True)
+        registry.write_text(content, encoding="utf-8")
+
+        assert PluginManager(project).is_trusted() is False
+        with pytest.raises(plugins.TrustRegistryError):
+            PluginManager(project).trust()
+        assert registry.read_text(encoding="utf-8") == content

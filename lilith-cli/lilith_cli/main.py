@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import importlib.util
 import os
 import platform
 import subprocess
@@ -148,10 +149,25 @@ def _lazy_import_ygg() -> types.ModuleType:
         raise ImportError(
             f"No Yggdrasil hub (ygg.py) in {root}; set YGGDRASIL_ROOT to use hub commands."
         )
+    hub_file = (root / "ygg.py").resolve()
+    loaded = sys.modules.get("ygg")
+    if loaded is not None and Path(getattr(loaded, "__file__", "") or ".").resolve() == hub_file:
+        return loaded
+    # Load the checked file itself: a plain ``import ygg`` would pick any
+    # other ``ygg`` earlier on sys.path. The directory is still appended so
+    # the hub can import its own sibling modules.
     add_hub_to_sys_path(root)
-    import ygg
-
-    return ygg
+    spec = importlib.util.spec_from_file_location("ygg", hub_file)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load {hub_file}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["ygg"] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop("ygg", None)
+        raise
+    return module
 
 
 def _apply_overrides(

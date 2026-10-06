@@ -356,7 +356,16 @@ class AgentMixin:
 
     def _trust_project_plugins(self) -> None:
         """Trust this project's plugins and load them now."""
-        self.plugin_manager.trust()  # type: ignore[attr-defined]
+        from ..plugins import TrustRegistryError
+
+        try:
+            self.plugin_manager.trust()  # type: ignore[attr-defined]
+        except TrustRegistryError as exc:
+            self._chat_system(  # type: ignore[attr-defined]
+                f"No se pudo leer la lista de proyectos confiables ({exc}). "
+                "Corrígela o bórrala y vuelve a intentarlo; no se modificó."
+            )
+            return
         self._chat_system("Plugins de este proyecto marcados como confiables.")  # type: ignore[attr-defined]
         self._load_plugins()  # type: ignore[attr-defined]
 

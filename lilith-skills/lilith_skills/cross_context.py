@@ -138,8 +138,17 @@ def _now_iso() -> str:
 def _parse_ts(ts: str | float | int | datetime | None) -> datetime | None:
     """Best-effort parse of a datetime, ISO timestamp, epoch seconds or millis.
 
-    Returns ``None`` for unparseable inputs so callers can skip them.
+    Returns a naive local datetime, the form ``_now_iso`` writes, so aware
+    and naive values compare; ``None`` for unparseable inputs so callers can
+    skip them.
     """
+    parsed = _parse_ts_any(ts)
+    if parsed is not None and parsed.tzinfo is not None:
+        parsed = parsed.astimezone().replace(tzinfo=None)
+    return parsed
+
+
+def _parse_ts_any(ts: str | float | int | datetime | None) -> datetime | None:
     if ts is None:
         return None
     if isinstance(ts, datetime):

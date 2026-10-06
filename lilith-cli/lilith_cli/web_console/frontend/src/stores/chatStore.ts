@@ -24,6 +24,12 @@ interface ChatState {
 
 let socket: WebSocket | null = null;
 let nextId = 1;
+let retryDelay = 1000;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+// Close code the server uses when the token is missing or wrong.
+const UNAUTHORIZED = 4401;
+const MAX_RETRY_DELAY = 15000;
 
 export const useChatStore = create<ChatState>((set, get) => {
   const push = (message: Omit<ChatMessage, 'id'>) =>
@@ -35,11 +41,24 @@ export const useChatStore = create<ChatState>((set, get) => {
     connected: false,
     connect: () => {
       if (socket && socket.readyState <= WebSocket.OPEN) return;
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
       socket = openSocket('/api/chat');
-      socket.onopen = () => set({ connected: true });
+      socket.onopen = () => {
+        retryDelay = 1000;
+        set({ connected: true });
+      };
       socket.onclose = (event) => {
         set({ connected: false, running: false });
-        if (event.code === 4401) push({ role: 'error', content: 'Token ausente o inválido.' });
+        if (event.code === UNAUTHORIZED) {
+          push({ role: 'error', content: 'Token ausente o inválido.' });
+          return;
+        }
+        // Network drops and server restarts (lilith web --dev) come back on their own.
+        retryTimer = setTimeout(() => get().connect(), retryDelay);
+        retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
       };
       socket.onmessage = (event) => {
         const data = JSON.parse(event.data) as ServerEvent;

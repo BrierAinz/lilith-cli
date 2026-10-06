@@ -94,12 +94,20 @@ TRUSTED_PROJECTS_FILE = CONFIG_DIR / "trusted_plugin_projects.json"
 TRUST_ALL_ENV = "LILITH_TRUST_PROJECT_PLUGINS"
 
 
+class TrustRegistryError(Exception):
+    """The trusted-projects file exists but cannot be read as a list."""
+
+
 def _trusted_projects() -> set[str]:
     try:
         data = json.loads(TRUSTED_PROJECTS_FILE.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except FileNotFoundError:
         return set()
-    return {item for item in data if isinstance(item, str)} if isinstance(data, list) else set()
+    except (OSError, ValueError) as exc:
+        raise TrustRegistryError(f"{TRUSTED_PROJECTS_FILE}: {exc}") from exc
+    if not isinstance(data, list):
+        raise TrustRegistryError(f"{TRUSTED_PROJECTS_FILE}: expected a JSON list")
+    return {item for item in data if isinstance(item, str)}
 
 #: Version of the plugin API contract described in this module.
 #: Bumped only on breaking changes to the contract.
@@ -233,10 +241,18 @@ class PluginManager:
         """Whether this project's plugins may run."""
         if os.environ.get(TRUST_ALL_ENV) == "1":
             return True
-        return str(self.root) in _trusted_projects()
+        try:
+            return str(self.root) in _trusted_projects()
+        except TrustRegistryError:
+            logger.warning("Unreadable plugin trust registry", exc_info=True)
+            return False
 
     def trust(self) -> None:
-        """Remember that the user allows this project's plugins to run."""
+        """Remember that the user allows this project's plugins to run.
+
+        Raises :class:`TrustRegistryError` instead of replacing an unreadable
+        registry, which would drop every project trusted before.
+        """
         projects = _trusted_projects() | {str(self.root)}
         TRUSTED_PROJECTS_FILE.parent.mkdir(parents=True, exist_ok=True)
         TRUSTED_PROJECTS_FILE.write_text(json.dumps(sorted(projects), indent=2), encoding="utf-8")

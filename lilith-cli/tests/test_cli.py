@@ -103,6 +103,24 @@ def test_resolve_yggdrasil_root_without_hub_uses_config_dir(tmp_path, monkeypatc
         cli_main._lazy_import_ygg()
 
 
+def test_lazy_import_ygg_loads_the_hub_file_not_a_shadowing_module(tmp_path, monkeypatch):
+    """Regression: ``import ygg`` ran whichever ygg came first on sys.path."""
+    from lilith_cli import main as cli_main
+
+    shadow = tmp_path / "shadow"
+    shadow.mkdir()
+    (shadow / "ygg.py").write_text("WHO = 'shadow'\n", encoding="utf-8")
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    (hub / "ygg.py").write_text("WHO = 'hub'\n", encoding="utf-8")
+    monkeypatch.setenv("YGGDRASIL_ROOT", str(hub))
+    monkeypatch.setattr(sys, "path", [str(shadow), *sys.path])
+    monkeypatch.delitem(sys.modules, "ygg", raising=False)
+
+    assert cli_main._lazy_import_ygg().WHO == "hub"
+    assert cli_main._lazy_import_ygg() is sys.modules["ygg"]
+
+
 def test_hub_paths_are_appended_after_installed_packages(tmp_path, monkeypatch):
     from lilith_cli import main as cli_main
 

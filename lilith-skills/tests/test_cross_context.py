@@ -742,6 +742,15 @@ class TestAuditLog:
         assert len(log.filter(since=datetime(2024, 1, 2))) == len(log.filter(since="2024-01-02"))
         assert len(log.filter(since=datetime(2024, 1, 2))) < len(log.filter())
 
+    def test_filter_by_aware_datetime(self, populated_ygg: Path):
+        """Regression: an aware bound against naive entries raised TypeError."""
+        from datetime import datetime, timezone
+
+        log = AuditLog(populated_ygg)
+        local_midnight = datetime(2024, 1, 2).astimezone()
+        assert len(log.filter(since=local_midnight)) == len(log.filter(since="2024-01-02"))
+        assert log.filter(since=datetime.now(timezone.utc)) == []
+
     def test_filter_with_limit(self, populated_ygg: Path):
         log = AuditLog(populated_ygg)
         evs = log.filter(limit=2)

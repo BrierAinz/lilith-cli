@@ -20,6 +20,10 @@ function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+// Bumped on every openFile call; a response for an older call is dropped so
+// a slow file cannot replace the one the user picked after it.
+let openRequest = 0;
+
 export const useFileStore = create<FileState>((set) => ({
   files: [],
   currentFile: null,
@@ -35,11 +39,14 @@ export const useFileStore = create<FileState>((set) => ({
     }
   },
   openFile: async (path) => {
+    const request = ++openRequest;
     try {
       const encoded = path.split('/').map(encodeURIComponent).join('/');
       const { content } = await apiGet<{ content: string }>(`/api/files/${encoded}`);
+      if (request !== openRequest) return;
       set({ currentFile: path, content, error: null });
     } catch (error) {
+      if (request !== openRequest) return;
       set({ error: describe(error), unauthorized: error instanceof UnauthorizedError });
     }
   },

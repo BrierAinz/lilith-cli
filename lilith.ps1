@@ -1,7 +1,9 @@
 <#! Launch the installed workspace without changing the user's project directory. !#>
 $ErrorActionPreference = 'Stop'
-$env:LILITH_PROVIDER_OVERRIDE = 'fabric'
-foreach ($name in @('YGGDRASIL_FABRIC_TOKEN','MIMIR_EXPERIENTIAL_API_KEY')) {
+# Pick up user-level variables saved after this terminal was opened. The
+# provider comes from config.yaml unless LILITH_PROVIDER_OVERRIDE is set
+# (for example to "fabric"); this launcher never forces one.
+foreach ($name in @('LILITH_PROVIDER_OVERRIDE','YGGDRASIL_FABRIC_TOKEN','MIMIR_EXPERIENTIAL_API_KEY')) {
     if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name, 'Process'))) {
         $userValue = [Environment]::GetEnvironmentVariable($name, 'User')
         if (-not [string]::IsNullOrWhiteSpace($userValue)) { Set-Item -Path ("env:" + $name) -Value $userValue }

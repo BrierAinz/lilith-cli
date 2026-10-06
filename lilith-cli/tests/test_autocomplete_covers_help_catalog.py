@@ -24,7 +24,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 REPL = REPO_ROOT / "lilith_cli" / "repl.py"
-EXTRA_COMMANDS = REPO_ROOT / "lilith_cli" / "extra_commands.py"
+EXTRA_COMMANDS = REPO_ROOT / "lilith_cli" / "slash_commands" / "help.py"
 
 
 def _catalog_names() -> set[str]:

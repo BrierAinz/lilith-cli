@@ -31,7 +31,7 @@ def snap_path(tmp_path, monkeypatch):
     """Redirect _ENV_SNAPSHOT_PATH to a temp file so tests don't touch
     the user's real ~/.yggdrasil/env_snapshot.json."""
     p = tmp_path / "env_snapshot.json"
-    monkeypatch.setattr("lilith_cli.extra_commands._ENV_SNAPSHOT_PATH", p)
+    monkeypatch.setattr("lilith_cli.slash_commands.environment._ENV_SNAPSHOT_PATH", p)
     return p
 
 
@@ -61,7 +61,7 @@ def test_env_snapshot_handles_write_error(snap_path, monkeypatch, capsys):
     blocker.write_text("x")
     # Now redirect to a path under the blocker — mkdir will fail.
     bad_path = blocker / "nested" / "snap.json"
-    monkeypatch.setattr("lilith_cli.extra_commands._ENV_SNAPSHOT_PATH", bad_path)
+    monkeypatch.setattr("lilith_cli.slash_commands.environment._ENV_SNAPSHOT_PATH", bad_path)
 
     _env_snapshot_save()
 

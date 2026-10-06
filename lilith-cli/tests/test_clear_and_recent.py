@@ -28,7 +28,7 @@ async def test_cls_invokes_os_system_when_tty(_Sess_tty=True):
     argument without actually clearing the user's screen."""
     sess = _Sess()
 
-    with patch("lilith_cli.extra_commands.os") as mock_os:
+    with patch("lilith_cli.slash_commands.environment.os") as mock_os:
         mock_os.name = "nt"
         mock_os.system = __import__("os").system  # but we override below
         # Patch sys.stdout.isatty as well.

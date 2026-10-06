@@ -76,7 +76,7 @@ async def test_run_map_command_sigue_invocado_directamente(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    with patch("lilith_cli.extra_commands.console.print"):
+    with patch("lilith_cli.render.console.print"):
         await run_map_command(session, str(tmp_path))
 
     # Sin assert sobre el output (mockeamos console.print); basta con

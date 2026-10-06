@@ -58,7 +58,7 @@ async def test_last_tool_default_shows_most_recent_call():
     session = DummySession(_make_history())
     prints: list[Any] = []
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=prints.append):
+    with patch("lilith_cli.render.console.print", side_effect=prints.append):
         await run_last_tool_command(session, "")
 
     output = _printed_text(prints)
@@ -73,7 +73,7 @@ async def test_last_tool_by_index():
     session = DummySession(_make_history())
     prints: list[Any] = []
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=prints.append):
+    with patch("lilith_cli.render.console.print", side_effect=prints.append):
         await run_last_tool_command(session, "2")
 
     output = _printed_text(prints)
@@ -87,7 +87,7 @@ async def test_last_tool_by_name_finds_most_recent_match():
     session = DummySession(_make_history())
     prints: list[Any] = []
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=prints.append):
+    with patch("lilith_cli.render.console.print", side_effect=prints.append):
         await run_last_tool_command(session, "file_read")
 
     output = _printed_text(prints)
@@ -100,7 +100,7 @@ async def test_last_tool_empty_history():
     session = DummySession([])
     prints: list[Any] = []
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=prints.append):
+    with patch("lilith_cli.render.console.print", side_effect=prints.append):
         await run_last_tool_command(session, "")
 
     output = _printed_text(prints)
@@ -113,7 +113,7 @@ async def test_last_tool_index_out_of_range():
     session = DummySession(_make_history())
     errors = []
 
-    with patch("lilith_cli.extra_commands.render_error", side_effect=errors.append):
+    with patch("lilith_cli.slash_commands.conversation.render_error", side_effect=errors.append):
         await run_last_tool_command(session, "10")
 
     assert any("fuera de rango" in e for e in errors)

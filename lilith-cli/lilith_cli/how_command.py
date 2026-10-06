@@ -71,11 +71,11 @@ def _resolve_extra_command(name: str) -> dict[str, Any] | None:
     Returns a dict with keys ``name``, ``aliases``, ``summary``, ``doc``,
     ``origin`` (str) and ``callable``, or ``None`` if ``name`` is not
     found among the ``run_X_command`` coroutines exposed by
-    ``extra_commands`` and the standalone ``<name>_command.py`` files.
+    ``slash_commands`` and the standalone ``<name>_command.py`` files.
 
     The result is cached on the module-level ``_EXTRA_INDEX`` after the
-    first call to avoid re-parsing the 422 KB ``extra_commands.py`` every
-    time ``/how`` is invoked.
+    first call to avoid re-parsing every handler module each time ``/how``
+    is invoked.
     """
     global _EXTRA_INDEX
     if _EXTRA_INDEX is None:
@@ -102,9 +102,16 @@ def _build_extra_index() -> dict[str, dict[str, Any]]:
     index: dict[str, dict[str, Any]] = {}
     aliases_by_name = _extract_repl_aliases()
 
-    # 1) extra_commands.py — the 422 KB monolith.
-    extra_path = _LILITH_CLI_DIR / "extra_commands.py"
-    _harvest_module(extra_path, index, aliases_by_name, module_name="extra_commands")
+    # 1) slash_commands/ — the handlers grouped by domain.
+    for module_path in sorted((_LILITH_CLI_DIR / "slash_commands").glob("*.py")):
+        if module_path.name == "__init__.py":
+            continue
+        _harvest_module(
+            module_path,
+            index,
+            aliases_by_name,
+            module_name=f"slash_commands.{module_path.stem}",
+        )
 
     # 2) Módulos propios: tanto `<name>_command.py` (batch, notes, pipeline,
     # workflow, completion, temperature) como los `<dominio>_commands.py` que
@@ -284,7 +291,7 @@ def _harvest_module(
         doc = (inspect.getdoc(func) or "") if func else ast.get_docstring(node) or ""
         summary = _first_meaningful_line(doc)
         aliases = list(dict.fromkeys(aliases_by_name.get(cmd_name, [])))
-        origin = f"lilith_cli/{module_name}.py" if module_name != "extra_commands" else "lilith_cli/extra_commands.py"
+        origin = f"lilith_cli/{module_name.replace('.', '/')}.py"
 
         index[cmd_name] = {
             "name": cmd_name,

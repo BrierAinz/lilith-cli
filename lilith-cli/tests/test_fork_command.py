@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from lilith_cli.extra_commands import (
     _deserialize_session,
     _fork_path,
@@ -16,6 +16,7 @@ from lilith_cli.extra_commands import (
     _serialize_session,
     run_fork_command,
 )
+from lilith_cli.slash_commands import sessions as sessions_cmds
 
 
 class DummyConfig:
@@ -80,7 +81,7 @@ async def test_fork_save_and_list(tmp_path, monkeypatch):
     def capture(*args, **kwargs):
         prints.append(args[0] if args else "")
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_fork_command(session, "alternativa")
         await run_fork_command(session, "list")
 
@@ -109,7 +110,7 @@ async def test_fork_switch_and_delete(tmp_path, monkeypatch):
         prints.append(args[0] if args else "")
 
     prints = []
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_fork_command(session, "switch prueba")
 
     assert len(session.history) == 2
@@ -123,10 +124,9 @@ async def test_fork_switch_and_delete(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_fork_edit_rewrites_copy_without_mutating_active_session(tmp_path, monkeypatch):
     """--edit abre un JSON temporal y guarda los mensajes editados solo en el fork."""
-    from lilith_cli import extra_commands as ec
 
-    monkeypatch.setattr(ec, "_FORKS_DIR", tmp_path)
-    monkeypatch.setattr(ec, "_get_editor", lambda: "code")
+    monkeypatch.setattr(sessions_cmds, "_FORKS_DIR", tmp_path)
+    monkeypatch.setattr(sessions_cmds, "_get_editor", lambda: "code")
     session = DummySession()
     original_history = list(session.history)
 
@@ -138,7 +138,7 @@ async def test_fork_edit_rewrites_copy_without_mutating_active_session(tmp_path,
         draft_path.write_text(json.dumps(draft), encoding="utf-8")
         return SimpleNamespace(returncode=0)
 
-    monkeypatch.setattr(ec.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     await run_fork_command(session, "alternativa --edit")
 
@@ -151,16 +151,15 @@ async def test_fork_edit_rewrites_copy_without_mutating_active_session(tmp_path,
 @pytest.mark.asyncio
 async def test_fork_edit_rejects_invalid_json_and_cleans_draft(tmp_path, monkeypatch, capsys):
     """Un borrador inválido no crea el fork ni deja el archivo temporal."""
-    from lilith_cli import extra_commands as ec
 
-    monkeypatch.setattr(ec, "_FORKS_DIR", tmp_path)
-    monkeypatch.setattr(ec, "_get_editor", lambda: "vim")
+    monkeypatch.setattr(sessions_cmds, "_FORKS_DIR", tmp_path)
+    monkeypatch.setattr(sessions_cmds, "_get_editor", lambda: "vim")
 
     def fake_run(command, **kwargs):
         Path(command[-1]).write_text("JSON inválido", encoding="utf-8")
         return SimpleNamespace(returncode=0)
 
-    monkeypatch.setattr(ec.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     await run_fork_command(DummySession(), "fallido --edit")
 

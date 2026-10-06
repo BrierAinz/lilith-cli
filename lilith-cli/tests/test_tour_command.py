@@ -42,7 +42,7 @@ def _capture_prints():
     def capture(text: str = ""):
         prints.append(str(text))
 
-    return prints, patch("lilith_cli.extra_commands.console.print", side_effect=capture)
+    return prints, patch("lilith_cli.render.console.print", side_effect=capture)
 
 
 @pytest.mark.asyncio

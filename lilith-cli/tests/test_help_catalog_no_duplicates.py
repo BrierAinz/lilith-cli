@@ -17,7 +17,7 @@ import ast
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-EXTRA_COMMANDS = REPO_ROOT / "lilith_cli" / "extra_commands.py"
+EXTRA_COMMANDS = REPO_ROOT / "lilith_cli" / "slash_commands" / "help.py"
 
 
 def _catalog_by_category() -> dict[str, list[str]]:

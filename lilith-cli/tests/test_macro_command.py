@@ -134,7 +134,7 @@ async def test_run_macro_record_shows_rec_indicator(
         prints.append(args)
 
     with patch(
-        "lilith_cli.extra_commands.console.print", side_effect=capture
+        "lilith_cli.render.console.print", side_effect=capture
     ):
         from lilith_cli.extra_commands import run_macro_command
 
@@ -166,7 +166,7 @@ async def test_run_macro_stop_shows_stop_indicator(
         prints.append(args)
 
     with patch(
-        "lilith_cli.extra_commands.console.print", side_effect=capture
+        "lilith_cli.render.console.print", side_effect=capture
     ):
         from lilith_cli.extra_commands import run_macro_command
 
@@ -195,7 +195,7 @@ async def test_run_macro_play_no_status_indicator(
         prints.append(args)
 
     with patch(
-        "lilith_cli.extra_commands.console.print", side_effect=capture
+        "lilith_cli.render.console.print", side_effect=capture
     ):
         from lilith_cli.extra_commands import run_macro_command
 

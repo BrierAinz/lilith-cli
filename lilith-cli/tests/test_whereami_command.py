@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import asyncio
 from unittest.mock import patch
 
@@ -36,7 +38,7 @@ def test_whereami_no_git(fake_session, capsys):
         import subprocess as sp
         return sp.run(*args, **kwargs)
 
-    with patch("lilith_cli.extra_commands.subprocess.run", side_effect=fake_run) if hasattr(__import__("lilith_cli.extra_commands", fromlist=["subprocess"]), "subprocess") else patch.dict("os.environ", {}):
+    with patch("subprocess.run", side_effect=fake_run):
         try:
             _run(run_whereami_command(fake_session, ""))
         except FileNotFoundError:
@@ -61,13 +63,12 @@ def test_whereami_with_args_ignored(fake_session, capsys):
 
 def test_whereami_shows_pyproject_when_present(fake_session, capsys, tmp_path):
     """/whereami notes pyproject.toml presence when in a Python project."""
-    from lilith_cli import extra_commands as ec
     from lilith_cli.extra_commands import run_whereami_command
 
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text("[project]\nname = 'test'\n")
 
-    with patch.object(ec.Path, "cwd", return_value=tmp_path):
+    with patch.object(Path, "cwd", return_value=tmp_path):
         _run(run_whereami_command(fake_session, ""))
 
     out = capsys.readouterr().out
@@ -76,11 +77,10 @@ def test_whereami_shows_pyproject_when_present(fake_session, capsys, tmp_path):
 
 def test_whereami_no_pyproject(fake_session, capsys, tmp_path):
     """/whereami shows '(no pyproject.toml)' when none exists."""
-    from lilith_cli import extra_commands as ec
     from lilith_cli.extra_commands import run_whereami_command
 
     # tmp_path has NO pyproject.toml
-    with patch.object(ec.Path, "cwd", return_value=tmp_path):
+    with patch.object(Path, "cwd", return_value=tmp_path):
         _run(run_whereami_command(fake_session, ""))
 
     out = capsys.readouterr().out

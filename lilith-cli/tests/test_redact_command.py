@@ -42,7 +42,7 @@ async def test_redact_command_prints_to_stdout(tmp_path, monkeypatch):
     def capture(text: str = ""):
         prints.append(text)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_redact_command(session, "secrets.env")
 
     output = "\n".join(str(p) for p in prints)
@@ -68,7 +68,7 @@ async def test_redact_command_writes_to_output_file(tmp_path, monkeypatch):
     def capture(text: str = ""):
         prints.append(text)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_redact_command(session, "config.env --out config.env.redacted")
 
     assert output.exists()

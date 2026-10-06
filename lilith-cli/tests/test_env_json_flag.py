@@ -24,7 +24,7 @@ def test_env_json_outputs_valid_json(fake_session, capsys):
     fake_data = {"PATH": "/usr/bin:/bin", "HOME": "/home/user"}
     fake_result = _make_env_result(fake_data)
 
-    with patch("lilith_cli.extra_commands.EnvListTool") as MockTool:
+    with patch("lilith_cli.slash_commands.environment.EnvListTool") as MockTool:
         MockTool.return_value.execute.return_value = fake_result
         _run(run_env_command(fake_session, "--json"))
 
@@ -40,7 +40,7 @@ def test_env_json_handles_string_data(fake_session, capsys):
     # Some EnvListTool variants return string output
     fake_result = SimpleNamespace(data="KEY=value\n", success=True, error=None)
 
-    with patch("lilith_cli.extra_commands.EnvListTool") as MockTool:
+    with patch("lilith_cli.slash_commands.environment.EnvListTool") as MockTool:
         MockTool.return_value.execute.return_value = fake_result
         _run(run_env_command(fake_session, "--json"))
 
@@ -56,7 +56,7 @@ def test_env_json_prefix(fake_session, capsys):
     fake_data = {"PYTHON_HOME": "/usr/local", "PYTHONPATH": "/lib"}
     fake_result = _make_env_result(fake_data)
 
-    with patch("lilith_cli.extra_commands.EnvListTool") as MockTool:
+    with patch("lilith_cli.slash_commands.environment.EnvListTool") as MockTool:
         MockTool.return_value.execute.return_value = fake_result
         _run(run_env_command(fake_session, "prefix PYTHON --json"))
 
@@ -72,7 +72,7 @@ def test_env_default_no_json(fake_session, capsys):
     fake_data = {"FOO": "bar"}
     fake_result = _make_env_result(fake_data)
 
-    with patch("lilith_cli.extra_commands.EnvListTool") as MockTool:
+    with patch("lilith_cli.slash_commands.environment.EnvListTool") as MockTool:
         MockTool.return_value.execute.return_value = fake_result
         _run(run_env_command(fake_session, ""))
 
@@ -93,7 +93,7 @@ def test_env_json_bypasses_rich_markup(fake_session, capsys):
     fake_data = {"X": "y"}
     fake_result = _make_env_result(fake_data)
 
-    with patch("lilith_cli.extra_commands.EnvListTool") as MockTool:
+    with patch("lilith_cli.slash_commands.environment.EnvListTool") as MockTool:
         MockTool.return_value.execute.return_value = fake_result
         _run(run_env_command(fake_session, "--json"))
 

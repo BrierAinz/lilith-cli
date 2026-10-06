@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import subprocess
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from lilith_cli.slash_commands import git as git_cmds
 
 
 def _tool_result(success: bool = True, data=None, error: str | None = None):
@@ -17,7 +19,6 @@ def _tool_result(success: bool = True, data=None, error: str | None = None):
 @pytest.fixture
 def patched_review_tool(monkeypatch):
     """Patch the hardened review runner so tests never spawn git."""
-    from lilith_cli import extra_commands as ec
 
     captured: list[dict[str, object]] = []
     pending_result: list = []
@@ -28,7 +29,7 @@ def patched_review_tool(monkeypatch):
             return pending_result.pop(0)
         return _tool_result(success=True, data={"output": "diff --git a/x b/x"})
 
-    monkeypatch.setattr(ec, "_run_review_git", fake_run_review_git)
+    monkeypatch.setattr(git_cmds, "_run_review_git", fake_run_review_git)
     return {"captured": captured, "pending_result": pending_result}
 
 
@@ -37,7 +38,7 @@ async def test_review_default_uses_diff_subcommand(fake_session, patched_review_
     """/review with no args must invoke GitOperationTool with op='diff'."""
     from lilith_cli.extra_commands import run_review_command
 
-    with patch("lilith_cli.extra_commands.console.print"):
+    with patch("lilith_cli.render.console.print"):
         await run_review_command(fake_session, "")
 
     assert len(patched_review_tool["captured"]) == 1
@@ -50,7 +51,7 @@ async def test_review_with_subcommand_passes_it_through(fake_session, patched_re
     """/review status must forward 'status' to GitOperationTool.op."""
     from lilith_cli.extra_commands import run_review_command
 
-    with patch("lilith_cli.extra_commands.console.print"):
+    with patch("lilith_cli.render.console.print"):
         await run_review_command(fake_session, "status")
 
     assert len(patched_review_tool["captured"]) == 1
@@ -100,7 +101,7 @@ def test_review_git_disables_repo_controlled_execution(monkeypatch):
         observed["kwargs"] = kwargs
         return SimpleNamespace(returncode=0, stdout="safe diff", stderr="")
 
-    monkeypatch.setattr(ec.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     result = ec._run_review_git(op="diff", args="--cached --name-only")
 

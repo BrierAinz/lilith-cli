@@ -19,7 +19,7 @@ async def test_pwd_shows_resolved_current_directory(
     monkeypatch.chdir(work)
     printed: list[str] = []
     monkeypatch.setattr(
-        "lilith_cli.extra_commands.console.print",
+        "lilith_cli.render.console.print",
         lambda *objects, **_kwargs: printed.extend(str(obj) for obj in objects),
     )
 

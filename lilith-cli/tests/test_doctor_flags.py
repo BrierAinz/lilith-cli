@@ -34,7 +34,7 @@ def test_doctor_json_status_values(fake_session, capsys):
         {"check": "C", "status": "error", "message": "broken"},
     ]
 
-    with patch("lilith_cli.extra_commands.run_diagnostics", return_value=fake_results):
+    with patch("lilith_cli.slash_commands.environment.run_diagnostics", return_value=fake_results):
         _run(run_doctor_command(fake_session, "--json"))
 
     out = capsys.readouterr().out
@@ -51,7 +51,7 @@ def test_doctor_quiet_suppresses_summary(fake_session, capsys):
         {"check": "Test", "status": "ok", "message": "fine"},
     ]
 
-    with patch("lilith_cli.extra_commands.run_diagnostics", return_value=fake_results):
+    with patch("lilith_cli.slash_commands.environment.run_diagnostics", return_value=fake_results):
         _run(run_doctor_command(fake_session, "--quiet"))
 
     out = capsys.readouterr().out
@@ -67,7 +67,7 @@ def test_doctor_json_quiet_combined(fake_session, capsys):
 
     fake_results = [{"check": "X", "status": "ok", "message": "ok"}]
 
-    with patch("lilith_cli.extra_commands.run_diagnostics", return_value=fake_results):
+    with patch("lilith_cli.slash_commands.environment.run_diagnostics", return_value=fake_results):
         _run(run_doctor_command(fake_session, "--json --quiet"))
 
     out = capsys.readouterr().out
@@ -86,8 +86,8 @@ def test_doctor_deep_runs_extra_checks(fake_session, capsys):
         {"check": "Network DNS", "status": "ok", "message": "resolved in 5ms"},
     ]
 
-    with patch("lilith_cli.extra_commands.run_diagnostics", return_value=base_results), \
-         patch("lilith_cli.extra_commands._run_deep_checks", return_value=deep_results):
+    with patch("lilith_cli.slash_commands.environment.run_diagnostics", return_value=base_results), \
+         patch("lilith_cli.slash_commands.environment._run_deep_checks", return_value=deep_results):
         _run(run_doctor_command(fake_session, "--deep"))
 
     out = capsys.readouterr().out
@@ -103,8 +103,8 @@ def test_doctor_deep_with_json(fake_session, capsys):
     base_results = [{"check": "A", "status": "ok", "message": "a"}]
     deep_results = [{"check": "B", "status": "warn", "message": "b"}]
 
-    with patch("lilith_cli.extra_commands.run_diagnostics", return_value=base_results), \
-         patch("lilith_cli.extra_commands._run_deep_checks", return_value=deep_results):
+    with patch("lilith_cli.slash_commands.environment.run_diagnostics", return_value=base_results), \
+         patch("lilith_cli.slash_commands.environment._run_deep_checks", return_value=deep_results):
         _run(run_doctor_command(fake_session, "--deep --json"))
 
     out = capsys.readouterr().out

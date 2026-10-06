@@ -70,14 +70,14 @@ def test_set_theme_no_reemplaza_el_objeto_console():
     los prints (contaminaba suites enteras). El objeto debe mutarse, no
     reemplazarse.
     """
-    from lilith_cli import extra_commands
     from lilith_cli import render
+    from lilith_cli.slash_commands import settings
 
     original = render.console
     try:
         set_theme("cyberpunk")
         assert render.console is original, "set_theme no debe reemplazar el console"
-        assert extra_commands.console is original, "los importadores quedarían desconectados"
+        assert settings.console is original, "los importadores quedarían desconectados"
         assert get_theme().name == "cyberpunk"
     finally:
         set_theme("norse")

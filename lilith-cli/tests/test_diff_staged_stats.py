@@ -87,7 +87,7 @@ def test_render_diff_staged_stats_handles_binary_marker():
     """Binary files report '-' for both counts — must not crash int()."""
     from unittest.mock import patch
     numstat = "-\t-\timg/banner.png\n"
-    with patch("lilith_cli.extra_commands.console"):
+    with patch("lilith_cli.slash_commands.git.console"):
         # Should not raise.
         _render_diff_staged_stats(numstat)
 
@@ -122,7 +122,7 @@ async def test_diff_staged_stats_renders_table(capsys, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     fake_stdout = "12\t3\tsrc/foo.py\n5\t2\tsrc/bar.py\n"
     with patch(
-        "lilith_cli.extra_commands.subprocess.run",
+        "subprocess.run",
         return_value=_Result(stdout=fake_stdout, returncode=0),
     ):
         await run_diff_staged_command(None, "stats")
@@ -145,7 +145,7 @@ async def test_diff_staged_full_patch_uses_no_numstat(capsys, monkeypatch):
         return _Result(stdout="diff --git a/foo\n", returncode=0)
 
     with patch(
-        "lilith_cli.extra_commands.subprocess.run",
+        "subprocess.run",
         side_effect=fake_run,
     ):
         await run_diff_staged_command(None, "")
@@ -157,7 +157,7 @@ async def test_diff_staged_full_patch_uses_no_numstat(capsys, monkeypatch):
 async def test_diff_staged_renders_git_error(capsys):
     """When git returns non-zero, the stderr is rendered."""
     with patch(
-        "lilith_cli.extra_commands.subprocess.run",
+        "subprocess.run",
         return_value=_Result(stderr="fatal: not a git repo", returncode=128),
     ):
         await run_diff_staged_command(None, "")
@@ -176,7 +176,7 @@ async def test_diff_staged_file_filter_passes_through(capsys, monkeypatch):
         return _Result(stdout="diff content", returncode=0)
 
     with patch(
-        "lilith_cli.extra_commands.subprocess.run",
+        "subprocess.run",
         side_effect=fake_run,
     ):
         await run_diff_staged_command(None, "src/foo.py")

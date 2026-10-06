@@ -44,7 +44,7 @@ def changelog(tmp_path: Path, monkeypatch):
         "### Added\n- Initial slash commands.\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr("lilith_cli.extra_commands.CHANGELOG_PATH", changelog_file)
+    monkeypatch.setattr("lilith_cli.slash_commands.git.CHANGELOG_PATH", changelog_file)
     return changelog_file
 
 
@@ -57,7 +57,7 @@ async def test_changelog_default_shows_latest_entries(changelog):
     def capture(text: str = "") -> None:
         prints.append(str(text))
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_changelog_command(session, "")
 
     output = "\n".join(prints)
@@ -76,7 +76,7 @@ async def test_changelog_specific_version(changelog):
     def capture(text: str = "") -> None:
         prints.append(str(text))
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_changelog_command(session, "4.2.0")
 
     output = "\n".join(prints)
@@ -96,7 +96,7 @@ async def test_changelog_unknown_version(changelog):
     def capture(text: str = "") -> None:
         prints.append(str(text))
 
-    with patch("lilith_cli.extra_commands.render_error", side_effect=capture):
+    with patch("lilith_cli.slash_commands.git.render_error", side_effect=capture):
         await run_changelog_command(session, "9.9.9")
 
     output = "\n".join(prints)

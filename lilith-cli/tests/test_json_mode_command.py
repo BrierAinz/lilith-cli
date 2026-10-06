@@ -26,11 +26,11 @@ async def test_json_mode_on_and_off():
     """/json-mode on y off cambian el flag _json_mode de la sesión."""
     session = DummySession()
 
-    with patch("lilith_cli.extra_commands.console.print"):
+    with patch("lilith_cli.render.console.print"):
         await run_json_mode_command(session, "on")
     assert session._json_mode is True
 
-    with patch("lilith_cli.extra_commands.console.print"):
+    with patch("lilith_cli.render.console.print"):
         await run_json_mode_command(session, "off")
     assert session._json_mode is False
 
@@ -44,7 +44,7 @@ async def test_json_mode_status():
     def capture(text: str = ""):
         prints.append(text)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_json_mode_command(session, "status")
 
     assert any("OFF" in str(p) for p in prints)
@@ -52,7 +52,7 @@ async def test_json_mode_status():
     session._json_mode = True
     prints.clear()
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_json_mode_command(session, "")
 
     assert any("ON" in str(p) for p in prints)

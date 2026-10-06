@@ -6,6 +6,7 @@ import json
 from unittest.mock import patch
 
 import pytest
+from lilith_cli.slash_commands import environment as environment_cmds
 
 
 def _strings(prints) -> str:
@@ -42,7 +43,6 @@ def _tool_result(success: bool = True, data=None, error: str | None = None):
 @pytest.fixture
 def patched_env_tools(monkeypatch):
     """Patch EnvListTool / EnvGetTool / SysInfoTool in the extra_commands module."""
-    import lilith_cli.extra_commands as ec
 
     list_data = {
         "variables": {"PATH": "/usr/bin", "PYTHON": "3.11"},
@@ -80,9 +80,9 @@ def patched_env_tools(monkeypatch):
         def execute(self, **_kw):
             return info_result
 
-    monkeypatch.setattr(ec, "EnvListTool", FakeList)
-    monkeypatch.setattr(ec, "EnvGetTool", FakeGet)
-    monkeypatch.setattr(ec, "SysInfoTool", FakeSys)
+    monkeypatch.setattr(environment_cmds, "EnvListTool", FakeList)
+    monkeypatch.setattr(environment_cmds, "EnvGetTool", FakeGet)
+    monkeypatch.setattr(environment_cmds, "SysInfoTool", FakeSys)
 
     return {
         "list_result": list_result,
@@ -112,7 +112,7 @@ async def test_env_list_renders_table(fake_session, patched_env_tools):
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_env_command
 
         await run_env_command(fake_session, "")
@@ -131,7 +131,7 @@ async def test_env_list_alias_renders_table(fake_session, patched_env_tools):
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_env_command
 
         await run_env_command(fake_session, "all")
@@ -148,7 +148,7 @@ async def test_env_info_renders_table(fake_session, patched_env_tools):
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_env_command
 
         await run_env_command(fake_session, "info")
@@ -163,7 +163,6 @@ async def test_env_info_renders_table(fake_session, patched_env_tools):
 @pytest.mark.asyncio
 async def test_env_prefix_filters_results(fake_session, monkeypatch, patched_env_tools):
     """/env prefix PYTHON must invoke EnvListTool with the prefix kwarg."""
-    import lilith_cli.extra_commands as ec
     from lilith_tools.base import ToolResult
 
     captured: dict[str, object] = {}
@@ -173,9 +172,9 @@ async def test_env_prefix_filters_results(fake_session, monkeypatch, patched_env
             captured.update(kw)
             return ToolResult(success=True, data={"variables": {"PYTHONPATH": "x"}, "total": 1, "returned": 1, "prefix": kw.get("prefix", ""), "limit": 50})
 
-    monkeypatch.setattr(ec, "EnvListTool", FakeList)
+    monkeypatch.setattr(environment_cmds, "EnvListTool", FakeList)
 
-    with patch("lilith_cli.extra_commands.console.print"):
+    with patch("lilith_cli.render.console.print"):
         from lilith_cli.extra_commands import run_env_command
 
         await run_env_command(fake_session, "prefix PYTHON")
@@ -191,7 +190,7 @@ async def test_env_prefix_no_value_reports_error(fake_session, patched_env_tools
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_env_command
 
         await run_env_command(fake_session, "prefix")
@@ -210,7 +209,7 @@ async def test_env_unset_simulates_deletion(fake_session, monkeypatch):
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_env_command
 
         await run_env_command(fake_session, "unset FOO")
@@ -233,7 +232,7 @@ async def test_env_unset_no_name_reports_error(fake_session, monkeypatch):
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_env_command
 
         await run_env_command(fake_session, "unset")
@@ -245,7 +244,6 @@ async def test_env_unset_no_name_reports_error(fake_session, monkeypatch):
 @pytest.mark.asyncio
 async def test_env_get_single_var(fake_session, monkeypatch, patched_env_tools):
     """/env PATH must invoke EnvGetTool with name=PATH."""
-    import lilith_cli.extra_commands as ec
     from lilith_tools.base import ToolResult
 
     captured: dict[str, object] = {}
@@ -255,9 +253,9 @@ async def test_env_get_single_var(fake_session, monkeypatch, patched_env_tools):
             captured.update(kw)
             return ToolResult(success=True, data={kw.get("name", ""): "/usr/bin"})
 
-    monkeypatch.setattr(ec, "EnvGetTool", FakeGet)
+    monkeypatch.setattr(environment_cmds, "EnvGetTool", FakeGet)
 
-    with patch("lilith_cli.extra_commands.console.print"):
+    with patch("lilith_cli.render.console.print"):
         from lilith_cli.extra_commands import run_env_command
 
         await run_env_command(fake_session, "PATH")
@@ -268,21 +266,20 @@ async def test_env_get_single_var(fake_session, monkeypatch, patched_env_tools):
 @pytest.mark.asyncio
 async def test_env_get_failure_reports_error(fake_session, monkeypatch):
     """/env MISSING when the get tool fails must print a usage error."""
-    import lilith_cli.extra_commands as ec
     from lilith_tools.base import ToolResult
 
     class FakeGet:
         def execute(self, **kw):
             return ToolResult(success=False, data=None, error="not found")
 
-    monkeypatch.setattr(ec, "EnvGetTool", FakeGet)
+    monkeypatch.setattr(environment_cmds, "EnvGetTool", FakeGet)
 
     prints = []
 
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_env_command
 
         await run_env_command(fake_session, "MISSING_VAR")

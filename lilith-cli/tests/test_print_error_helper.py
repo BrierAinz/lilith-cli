@@ -31,7 +31,7 @@ def test_print_error_prints_context_and_message():
     def capture(text=""):
         prints.append(str(text))
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         _print_error("reading file", FileNotFoundError("foo.txt"))
 
     output = "\n".join(prints)
@@ -45,7 +45,7 @@ def test_print_error_includes_tip_for_known_exception():
     def capture(text=""):
         prints.append(str(text))
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         _print_error("reading file", FileNotFoundError("foo.txt"))
 
     output = "\n".join(prints)
@@ -64,7 +64,7 @@ def test_print_error_no_tip_for_unknown_exception():
     class WeirdError(Exception):
         pass
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         _print_error("doing thing", WeirdError("oops"))
 
     output = "\n".join(prints)
@@ -79,7 +79,7 @@ def test_print_error_accepts_string_err():
     def capture(text=""):
         prints.append(str(text))
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         _print_error("validation", "missing argument")
 
     output = "\n".join(prints)
@@ -96,7 +96,7 @@ def test_print_error_subclass_match():
 
     # ConnectionError has a subclass in some libs; PermissionError has
     # many subclasses too. Use the standard one directly.
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         _print_error("network call", ConnectionError("refused"))
 
     output = "\n".join(prints)

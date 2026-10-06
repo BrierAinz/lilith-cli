@@ -21,6 +21,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from lilith_cli.slash_commands import extras as extras_cmds
 
 
 # Ensure lilith_cli is importable
@@ -86,8 +87,8 @@ def fake_qrcode(monkeypatch, tmp_path):
     # Isolate persistence to tmp_path
     last_file = tmp_path / "qr_last.json"
     prefs_file = tmp_path / "qr.json"
-    monkeypatch.setattr(ec, "_QR_LAST_FILE", last_file)
-    monkeypatch.setattr(ec, "_QR_PREFS_FILE", prefs_file)
+    monkeypatch.setattr(extras_cmds, "_QR_LAST_FILE", last_file)
+    monkeypatch.setattr(extras_cmds, "_QR_PREFS_FILE", prefs_file)
 
     fake_qr_instance = MagicMock()
 
@@ -163,7 +164,7 @@ def test_qr_renders_ascii_for_text(fake_qrcode) -> None:
 
     fake_console, captured = _make_fake_console()
 
-    with patch("lilith_cli.extra_commands.console", fake_console):
+    with patch("lilith_cli.slash_commands.extras.console", fake_console):
         asyncio.run(run_qr_command(DummySession(), "https://example.com"))
 
     # The fake QRCode.print_ascii should have been called.
@@ -190,7 +191,7 @@ def test_qr_save_writes_png_file(tmp_path: Path, fake_qrcode) -> None:
 
     fake_console, _captured = _make_fake_console()
 
-    with patch("lilith_cli.extra_commands.console", fake_console):
+    with patch("lilith_cli.slash_commands.extras.console", fake_console):
         asyncio.run(
             run_qr_command(
                 DummySession(),
@@ -221,8 +222,8 @@ def test_qr_help_and_empty_args_show_usage(fake_qrcode) -> None:
     def _fake_render_error(text: str) -> None:
         fake_console.print(f"[error]✗ {text}[/error]")
 
-    with patch("lilith_cli.extra_commands.console", fake_console), \
-         patch("lilith_cli.extra_commands.render_error", _fake_render_error):
+    with patch("lilith_cli.slash_commands.extras.console", fake_console), \
+         patch("lilith_cli.slash_commands.extras.render_error", _fake_render_error):
         asyncio.run(run_qr_command(DummySession(), ""))
         asyncio.run(run_qr_command(DummySession(), "--help"))
 
@@ -242,8 +243,8 @@ def test_qr_last_without_prior_data_reports_error(fake_qrcode) -> None:
     def _fake_render_error(text: str) -> None:
         fake_console.print(f"[error]✗ {text}[/error]")
 
-    with patch("lilith_cli.extra_commands.console", fake_console), \
-         patch("lilith_cli.extra_commands.render_error", _fake_render_error):
+    with patch("lilith_cli.slash_commands.extras.console", fake_console), \
+         patch("lilith_cli.slash_commands.extras.render_error", _fake_render_error):
         asyncio.run(run_qr_command(DummySession(), "--last"))
 
     assert any("No hay un QR previo" in line for line in captured), captured
@@ -258,7 +259,7 @@ def test_qr_persists_last_text(fake_qrcode) -> None:
 
     fake_console, _captured = _make_fake_console()
 
-    with patch("lilith_cli.extra_commands.console", fake_console):
+    with patch("lilith_cli.slash_commands.extras.console", fake_console):
         asyncio.run(run_qr_command(DummySession(), "https://example.com"))
 
     assert fake_qrcode.last_file.exists(), "qr_last.json should be written"
@@ -281,7 +282,7 @@ def test_qr_save_with_error_correction_override(tmp_path: Path, fake_qrcode) -> 
 
     fake_console, _captured = _make_fake_console()
 
-    with patch("lilith_cli.extra_commands.console", fake_console):
+    with patch("lilith_cli.slash_commands.extras.console", fake_console):
         asyncio.run(
             run_qr_command(
                 DummySession(),

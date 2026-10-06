@@ -48,7 +48,7 @@ async def test_diff_staged_no_changes(tmp_path, monkeypatch):
     def capture(text: str = "", **kwargs):
         prints.append(text)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_diff_staged_command(session, "")
 
     assert any("No hay cambios preparados" in str(p) for p in prints)
@@ -69,7 +69,7 @@ async def test_diff_staged_stats_shows_file_only(tmp_path, monkeypatch):
     def capture(text: str = "", **kwargs):
         prints.append(text)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_diff_staged_command(session, "stats")
 
     # El nombre del archivo vive dentro de la tabla Rich (str() de una Table
@@ -105,7 +105,7 @@ async def test_diff_staged_specific_file(tmp_path, monkeypatch):
     def capture(text: str = "", **kwargs):
         prints.append(text)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_diff_staged_command(session, "tracked.txt")
 
     output = "\n".join(str(p) for p in prints)

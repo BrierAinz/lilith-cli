@@ -70,7 +70,7 @@ async def test_compare_files_shows_diff(tmp_path, monkeypatch):
             if v is not None:
                 rendered_pieces.append(str(v))
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_compare_command(session, f"files {file_a} {file_b}")
 
     rendered = "\n".join(rendered_pieces)
@@ -109,7 +109,7 @@ async def test_compare_json_reports_change(tmp_path, monkeypatch):
             if v is not None:
                 prints.append(str(v))
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_compare_command(session, f"json {file_a} {file_b}")
 
     rendered = "\n".join(prints)
@@ -128,7 +128,7 @@ async def test_compare_missing_args_renders_error(tmp_path):
         for a in args:
             prints.append(str(a))
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_compare_command(session, "")
 
     rendered = "\n".join(prints)
@@ -158,8 +158,8 @@ async def test_compare_missing_file_renders_error(tmp_path, monkeypatch):
         for a in args:
             errors.append(str(a))
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture_print):
-        with patch("lilith_cli.extra_commands.render_error", side_effect=capture_error):
+    with patch("lilith_cli.render.console.print", side_effect=capture_print):
+        with patch("lilith_cli.slash_commands.navigation.render_error", side_effect=capture_error):
             await run_compare_command(session, f"files {file_a} {file_b}")
 
     joined_errors = "\n".join(errors)

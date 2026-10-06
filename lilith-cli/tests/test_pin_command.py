@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from lilith_cli.extra_commands import run_pin_command
+from lilith_cli.slash_commands import conversation as conversation_cmds
 
 
 @pytest.mark.asyncio
@@ -78,7 +79,7 @@ async def test_pin_sobrevive_al_reinicio_del_repl(fake_session, tmp_path, monkey
     """
     from lilith_cli import extra_commands
 
-    monkeypatch.setattr(extra_commands, "_pin_storage_path",
+    monkeypatch.setattr(conversation_cmds, "_pin_storage_path",
                         lambda: tmp_path / "pins.json")
     fake_session.session_id = "sesion-de-prueba"
     fake_session.history = [{"role": "assistant", "content": "no me olvides"}]
@@ -99,7 +100,6 @@ async def test_pin_sobrevive_al_reinicio_del_repl(fake_session, tmp_path, monkey
 @pytest.mark.asyncio
 async def test_pin_no_revienta_si_el_disco_falla(fake_session, monkeypatch):
     """El fijado vale en memoria aunque no se pueda escribir el archivo."""
-    from lilith_cli import extra_commands
 
     class RutaRota:
         def exists(self):
@@ -108,7 +108,7 @@ async def test_pin_no_revienta_si_el_disco_falla(fake_session, monkeypatch):
         def write_text(self, *a, **kw):
             raise OSError("disco lleno")
 
-    monkeypatch.setattr(extra_commands, "_pin_storage_path", lambda: RutaRota())
+    monkeypatch.setattr(conversation_cmds, "_pin_storage_path", lambda: RutaRota())
     fake_session.history = [{"role": "assistant", "content": "igual sirve"}]
 
     await run_pin_command(fake_session, "1")

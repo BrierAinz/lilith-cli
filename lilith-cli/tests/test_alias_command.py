@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from lilith_cli.slash_commands import settings as settings_cmds
 
 
 def _run(coro):
@@ -17,9 +18,8 @@ def _run(coro):
 @pytest.fixture
 def isolated_aliases(tmp_path, monkeypatch):
     """Redirect the alias store to a tmp_path so tests do not touch real config."""
-    from lilith_cli import extra_commands as ec
     fake_file = tmp_path / "aliases.json"
-    monkeypatch.setattr(ec, "_ALIAS_FILE", fake_file)
+    monkeypatch.setattr(settings_cmds, "_ALIAS_FILE", fake_file)
     return fake_file
 
 

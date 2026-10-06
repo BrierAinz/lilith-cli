@@ -38,7 +38,7 @@ async def test_tokens_command_uses_session_usage(fake_session):
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_tokens_command
 
         await run_tokens_command(fake_session, "")
@@ -64,7 +64,7 @@ async def test_tokens_command_passes_panel_with_thousands_separators(fake_sessio
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_tokens_command
 
         await run_tokens_command(fake_session, "")
@@ -89,7 +89,7 @@ async def test_tokens_command_high_tier_value_wrapped_in_bold(fake_session):
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_tokens_command
 
         await run_tokens_command(fake_session, "")
@@ -115,7 +115,7 @@ async def test_tokens_command_zero_usage_renders_zeros(fake_session):
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_tokens_command
 
         await run_tokens_command(fake_session, "")
@@ -135,7 +135,7 @@ async def test_tokens_command_missing_keys_default_to_zero(fake_session):
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_tokens_command
 
         await run_tokens_command(fake_session, "")

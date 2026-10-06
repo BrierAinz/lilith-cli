@@ -19,7 +19,6 @@ class _FakeCompletedProcess:
 @pytest.fixture
 def patched_subprocess(monkeypatch):
     """Replace subprocess.run inside extra_commands so the clipboard is never touched."""
-    import lilith_cli.extra_commands as ec
 
     captured: list[dict[str, object]] = []
 
@@ -27,7 +26,7 @@ def patched_subprocess(monkeypatch):
         captured.append({"args": args, "kwargs": kwargs})
         return _FakeCompletedProcess(returncode=0)
 
-    monkeypatch.setattr(ec.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     return {"captured": captured}
 
 
@@ -105,12 +104,11 @@ async def test_copy_last_alias_works(fake_session, patched_subprocess, capsys):
 @pytest.mark.asyncio
 async def test_copy_falls_back_to_console_on_subprocess_failure(fake_session, monkeypatch, capsys):
     """If the clipboard copy fails the command must still print the text to stdout."""
-    import lilith_cli.extra_commands as ec
 
     def failing_run(*args, **kwargs):
         raise OSError("clipboard unavailable")
 
-    monkeypatch.setattr(ec.subprocess, "run", failing_run)
+    monkeypatch.setattr(subprocess, "run", failing_run)
 
     from lilith_cli.extra_commands import run_copy_command
 

@@ -194,7 +194,7 @@ def test_alias_listados_en_help_catalog():
     import ast
     from pathlib import Path
 
-    src = Path(__file__).resolve().parent.parent / "lilith_cli" / "extra_commands.py"
+    src = Path(__file__).resolve().parent.parent / "lilith_cli" / "slash_commands" / "help.py"
     tree = ast.parse(src.read_text(encoding="utf-8"))
     run_help = next(
         n

@@ -41,7 +41,7 @@ async def test_tree_symbols_json_es_machinereadable(tmp_path):
     # soft_wrap/markup/highlight para que Rich no parta el JSON en varias
     # lineas. Se ignoran los kwargs y se guarda solo el texto.
     with patch(
-        "lilith_cli.extra_commands.console.print",
+        "lilith_cli.render.console.print",
         side_effect=lambda *a, **kw: prints.append(a[0] if a else ""),
     ):
         await run_tree_command(DummySession(), f"symbols {tmp_path} --json")

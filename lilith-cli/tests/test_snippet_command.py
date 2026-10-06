@@ -41,7 +41,7 @@ def tmp_snippets_path(monkeypatch, tmp_path: Path) -> Path:
     """Redirect snippet storage to a per-test temporary file."""
     snippets_path = tmp_path / "snippets.json"
     monkeypatch.setattr(
-        "lilith_cli.extra_commands._SNIPPETS_PATH",
+        "lilith_cli.slash_commands.navigation._SNIPPETS_PATH",
         snippets_path,
     )
     return snippets_path

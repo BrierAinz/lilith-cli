@@ -150,7 +150,7 @@ async def test_apply_happy_path(tmp_path, monkeypatch):
         if isinstance(text, str):
             prints.append(text)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_apply_command(session, f"{patch_file}")
 
     assert target.read_text(encoding="utf-8") == "one\ndos\nthree\n"
@@ -184,7 +184,7 @@ async def test_apply_check_does_not_modify(tmp_path, monkeypatch):
         if isinstance(text, str):
             prints.append(text)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_apply_command(session, f"{patch_file} --check")
 
     # El archivo NO fue modificado.
@@ -217,7 +217,7 @@ async def test_apply_rejects_path_outside_repo(tmp_path, monkeypatch):
         if isinstance(text, str):
             prints.append(text)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_apply_command(session, f"{patch_file}")
 
     assert any("fuera del repositorio" in p for p in prints), prints
@@ -233,7 +233,7 @@ async def test_apply_shows_help_when_no_args(tmp_path, monkeypatch):
         if isinstance(text, str):
             prints.append(text)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_apply_command(session, "")
 
     joined = "\n".join(prints)
@@ -256,7 +256,7 @@ async def test_apply_rejects_unknown_flag(tmp_path, monkeypatch):
         if isinstance(text, str):
             prints.append(text)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_apply_command(session, "fix.patch --bogus-flag")
 
     assert any("no reconocidos" in p for p in prints), prints

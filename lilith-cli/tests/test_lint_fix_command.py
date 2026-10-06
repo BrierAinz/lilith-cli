@@ -17,7 +17,7 @@ def test_lint_fix_no_linters_installed(fake_session, capsys, tmp_path, monkeypat
     target = tmp_path / "module.py"
     target.write_text("x = 1\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
-    with patch("lilith_cli.extra_commands.shutil.which", return_value=None):
+    with patch("shutil.which", return_value=None):
         _run(run_lint_fix_command(fake_session, "module.py"))
 
     out = capsys.readouterr().out
@@ -30,8 +30,8 @@ def test_lint_fix_rejects_implicit_or_absolute_paths(fake_session, capsys, tmp_p
     from lilith_cli.extra_commands import run_lint_fix_command
 
     monkeypatch.chdir(tmp_path)
-    with patch("lilith_cli.extra_commands.shutil.which") as which, patch(
-        "lilith_cli.extra_commands.subprocess.run"
+    with patch("shutil.which") as which, patch(
+        "subprocess.run"
     ) as run:
         _run(run_lint_fix_command(fake_session, "."))
         _run(run_lint_fix_command(fake_session, str(tmp_path.parent / "outside.py")))
@@ -50,8 +50,8 @@ def test_lint_fix_uses_ruff_check_without_fix(fake_session, capsys, tmp_path, mo
     target.write_text("x = 1\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     fake_proc = type("P", (), {"stdout": "1 issue", "stderr": "", "returncode": 1})()
-    with patch("lilith_cli.extra_commands.shutil.which", return_value="ruff"), patch(
-        "lilith_cli.extra_commands.subprocess.run", return_value=fake_proc
+    with patch("shutil.which", return_value="ruff"), patch(
+        "subprocess.run", return_value=fake_proc
     ) as run:
         _run(run_lint_fix_command(fake_session, "module.py"))
 
@@ -77,8 +77,8 @@ def test_lint_fix_uses_ruff_when_available(fake_session, capsys, tmp_path, monke
     def fake_run(*args, **kwargs):
         return fake_proc
 
-    with patch("lilith_cli.extra_commands.shutil.which", return_value="C:/fake/ruff.exe"), \
-         patch("lilith_cli.extra_commands.subprocess.run", side_effect=fake_run):
+    with patch("shutil.which", return_value="C:/fake/ruff.exe"), \
+         patch("subprocess.run", side_effect=fake_run):
         _run(run_lint_fix_command(fake_session, "module.py"))
 
     out = capsys.readouterr().out
@@ -105,8 +105,8 @@ def test_lint_fix_falls_back_to_black(fake_session, capsys, tmp_path, monkeypatc
     def fake_run(*args, **kwargs):
         return fake_proc
 
-    with patch("lilith_cli.extra_commands.shutil.which", side_effect=fake_which), \
-         patch("lilith_cli.extra_commands.subprocess.run", side_effect=fake_run):
+    with patch("shutil.which", side_effect=fake_which), \
+         patch("subprocess.run", side_effect=fake_run):
         _run(run_lint_fix_command(fake_session, "module.py"))
 
     out = capsys.readouterr().out
@@ -126,8 +126,8 @@ def test_lint_fix_handles_timeout(fake_session, capsys, tmp_path, monkeypatch):
     def fake_run(*args, **kwargs):
         raise subprocess.TimeoutExpired(cmd=args[0] if args else "ruff", timeout=60)
 
-    with patch("lilith_cli.extra_commands.shutil.which", return_value="C:/fake/ruff.exe"), \
-         patch("lilith_cli.extra_commands.subprocess.run", side_effect=fake_run):
+    with patch("shutil.which", return_value="C:/fake/ruff.exe"), \
+         patch("subprocess.run", side_effect=fake_run):
         _run(run_lint_fix_command(fake_session, "module.py"))
 
     out = capsys.readouterr().out
@@ -150,8 +150,8 @@ def test_lint_fix_reports_issues_without_fixing(fake_session, capsys, tmp_path, 
     def fake_run(*args, **kwargs):
         return fake_proc
 
-    with patch("lilith_cli.extra_commands.shutil.which", return_value="C:/fake/ruff.exe"), \
-         patch("lilith_cli.extra_commands.subprocess.run", side_effect=fake_run):
+    with patch("shutil.which", return_value="C:/fake/ruff.exe"), \
+         patch("subprocess.run", side_effect=fake_run):
         _run(run_lint_fix_command(fake_session, "module.py"))
 
     out = capsys.readouterr().out

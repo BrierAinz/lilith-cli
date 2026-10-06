@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 from rich.console import Console
+from lilith_cli.slash_commands import navigation as navigation_cmds
 
 
 def _render(prints) -> str:
@@ -34,7 +35,6 @@ def _tool_result(success: bool = True, data=None, error: str | None = None):
 @pytest.fixture
 def patched_todo_tools(monkeypatch):
     """Patch all Todo*Tool classes so tests do not touch real todo storage."""
-    import lilith_cli.extra_commands as ec
     import lilith_tools.todos as todos_mod
 
     list_result = _tool_result(success=True, data={"todos": [], "count": 0})
@@ -63,10 +63,10 @@ def patched_todo_tools(monkeypatch):
         def clear(self):
             return clear_count
 
-    monkeypatch.setattr(ec, "TodoListTool", FakeList)
-    monkeypatch.setattr(ec, "TodoAddTool", FakeAdd)
-    monkeypatch.setattr(ec, "TodoDoneTool", FakeDone)
-    monkeypatch.setattr(ec, "TodoRemoveTool", FakeRemove)
+    monkeypatch.setattr(navigation_cmds, "TodoListTool", FakeList)
+    monkeypatch.setattr(navigation_cmds, "TodoAddTool", FakeAdd)
+    monkeypatch.setattr(navigation_cmds, "TodoDoneTool", FakeDone)
+    monkeypatch.setattr(navigation_cmds, "TodoRemoveTool", FakeRemove)
     monkeypatch.setattr(todos_mod, "TodoManager", FakeManager)
 
     return {
@@ -86,7 +86,7 @@ async def test_todos_list_empty(fake_session, patched_todo_tools):
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_todos_command
 
         await run_todos_command(fake_session, "")
@@ -98,7 +98,6 @@ async def test_todos_list_empty(fake_session, patched_todo_tools):
 @pytest.mark.asyncio
 async def test_todos_list_renders_rows(fake_session, monkeypatch):
     """/todos list must render each todo item as a row."""
-    import lilith_cli.extra_commands as ec
 
     sample = [
         {"content": "Comprar leche", "done": False},
@@ -111,14 +110,14 @@ async def test_todos_list_renders_rows(fake_session, monkeypatch):
 
             return ToolResult(success=True, data=sample)
 
-    monkeypatch.setattr(ec, "TodoListTool", FakeList)
+    monkeypatch.setattr(navigation_cmds, "TodoListTool", FakeList)
 
     prints = []
 
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_todos_command
 
         await run_todos_command(fake_session, "list")
@@ -131,7 +130,6 @@ async def test_todos_list_renders_rows(fake_session, monkeypatch):
 @pytest.mark.asyncio
 async def test_todos_add_invokes_add_tool(fake_session, monkeypatch):
     """/todos add <text> must invoke TodoAddTool with the rest text."""
-    import lilith_cli.extra_commands as ec
     from lilith_tools.base import ToolResult
 
     captured_kwargs: dict[str, str] = {}
@@ -145,10 +143,10 @@ async def test_todos_add_invokes_add_tool(fake_session, monkeypatch):
         def execute(self, **_kw):
             return ToolResult(success=True, data={"todos": [], "count": 0})
 
-    monkeypatch.setattr(ec, "TodoAddTool", FakeAdd)
-    monkeypatch.setattr(ec, "TodoListTool", FakeList)
+    monkeypatch.setattr(navigation_cmds, "TodoAddTool", FakeAdd)
+    monkeypatch.setattr(navigation_cmds, "TodoListTool", FakeList)
 
-    with patch("lilith_cli.extra_commands.console.print"):
+    with patch("lilith_cli.render.console.print"):
         from lilith_cli.extra_commands import run_todos_command
 
         await run_todos_command(fake_session, "add comprar pan")
@@ -159,7 +157,6 @@ async def test_todos_add_invokes_add_tool(fake_session, monkeypatch):
 @pytest.mark.asyncio
 async def test_todos_done_passes_index(fake_session, patched_todo_tools, monkeypatch):
     """/todos done 2 must invoke TodoDoneTool with index=2."""
-    import lilith_cli.extra_commands as ec
     from lilith_tools.base import ToolResult
 
     captured: dict[str, int] = {}
@@ -169,9 +166,9 @@ async def test_todos_done_passes_index(fake_session, patched_todo_tools, monkeyp
             captured.update(kw)
             return ToolResult(success=True, data={"message": "ok"})
 
-    monkeypatch.setattr(ec, "TodoDoneTool", FakeDone)
+    monkeypatch.setattr(navigation_cmds, "TodoDoneTool", FakeDone)
 
-    with patch("lilith_cli.extra_commands.console.print"):
+    with patch("lilith_cli.render.console.print"):
         from lilith_cli.extra_commands import run_todos_command
 
         await run_todos_command(fake_session, "done 3")
@@ -182,7 +179,6 @@ async def test_todos_done_passes_index(fake_session, patched_todo_tools, monkeyp
 @pytest.mark.asyncio
 async def test_todos_remove_passes_index(fake_session, monkeypatch):
     """/todos remove 4 must invoke TodoRemoveTool with index=4."""
-    import lilith_cli.extra_commands as ec
     from lilith_tools.base import ToolResult
 
     captured: dict[str, int] = {}
@@ -192,9 +188,9 @@ async def test_todos_remove_passes_index(fake_session, monkeypatch):
             captured.update(kw)
             return ToolResult(success=True, data={"message": "ok"})
 
-    monkeypatch.setattr(ec, "TodoRemoveTool", FakeRemove)
+    monkeypatch.setattr(navigation_cmds, "TodoRemoveTool", FakeRemove)
 
-    with patch("lilith_cli.extra_commands.console.print"):
+    with patch("lilith_cli.render.console.print"):
         from lilith_cli.extra_commands import run_todos_command
 
         await run_todos_command(fake_session, "remove 4")
@@ -218,7 +214,7 @@ async def test_todos_clear_reports_count(fake_session, monkeypatch):
     def capture(*args, **kwargs):
         prints.append(args)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         from lilith_cli.extra_commands import run_todos_command
 
         await run_todos_command(fake_session, "clear")

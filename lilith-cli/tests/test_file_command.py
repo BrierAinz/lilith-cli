@@ -85,7 +85,8 @@ async def test_file_with_directory_reports_error(fake_session, tmp_path: Path, c
 @pytest.mark.asyncio
 async def test_file_list_renders_attached_paths(fake_session, tmp_path: Path, capsys, monkeypatch):
     """/file --list (alias for list/ls) must print every attached path."""
-    from lilith_cli.extra_commands import console, run_file_command
+    from lilith_cli.extra_commands import run_file_command
+    from lilith_cli.render import console
 
     a = tmp_path / "alpha_one.py"
     b = tmp_path / "beta_two.py"

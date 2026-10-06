@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 from rich.console import Console
+from lilith_cli.slash_commands import navigation as navigation_cmds
 
 
 def _render(prints) -> str:
@@ -35,9 +36,9 @@ async def test_todos_due_filters_future_and_completed(fake_session, monkeypatch)
         def execute(self):
             return ToolResult(success=True, data=data)
 
-    monkeypatch.setattr(commands, "TodoListTool", FakeList)
+    monkeypatch.setattr(navigation_cmds, "TodoListTool", FakeList)
     prints = []
-    with patch.object(commands.console, "print", side_effect=lambda *args, **_kw: prints.append(args)):
+    with patch.object(navigation_cmds.console, "print", side_effect=lambda *args, **_kw: prints.append(args)):
         await commands.run_todos_command(fake_session, "due")
 
     rendered = _render(prints)
@@ -58,9 +59,9 @@ async def test_todos_due_falls_back_when_storage_has_no_due_dates(fake_session, 
         def execute(self):
             return ToolResult(success=True, data=data)
 
-    monkeypatch.setattr(commands, "TodoListTool", FakeList)
+    monkeypatch.setattr(navigation_cmds, "TodoListTool", FakeList)
     prints = []
-    with patch.object(commands.console, "print", side_effect=lambda *args, **_kw: prints.append(args)):
+    with patch.object(navigation_cmds.console, "print", side_effect=lambda *args, **_kw: prints.append(args)):
         await commands.run_todos_command(fake_session, "due")
 
     rendered = _render(prints)
@@ -84,9 +85,9 @@ async def test_todos_due_fallback_hides_completed(fake_session, monkeypatch):
         def execute(self):
             return ToolResult(success=True, data=data)
 
-    monkeypatch.setattr(commands, "TodoListTool", FakeList)
+    monkeypatch.setattr(navigation_cmds, "TodoListTool", FakeList)
     prints = []
-    with patch.object(commands.console, "print", side_effect=lambda *args, **_kw: prints.append(args)):
+    with patch.object(navigation_cmds.console, "print", side_effect=lambda *args, **_kw: prints.append(args)):
         await commands.run_todos_command(fake_session, "due")
 
     rendered = _render(prints)

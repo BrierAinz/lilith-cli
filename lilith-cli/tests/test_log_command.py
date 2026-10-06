@@ -17,6 +17,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from lilith_cli.slash_commands import extras as extras_cmds
 
 
 def _run(coro):
@@ -36,13 +37,12 @@ def isolated_log_file(tmp_path, monkeypatch):
     vea la ruta temporal. Se asegura también de que el archivo no
     exista al inicio (cada test parte de cero).
     """
-    from lilith_cli import extra_commands as ec
 
     fake_file = tmp_path / "session.log"
     # Si un test anterior lo creó, lo borramos para garantizar aislamiento.
     if fake_file.exists():
         fake_file.unlink()
-    monkeypatch.setattr(ec, "_LOG_FILE", fake_file)
+    monkeypatch.setattr(extras_cmds, "_LOG_FILE", fake_file)
     return fake_file
 
 
@@ -85,8 +85,8 @@ def test_log_no_args_empty_history(fake_session, capsys, isolated_log_file):
     fake_session._tool_call_history = []
 
     prints, errors, cap_print, cap_error = _capture_prints()
-    with patch("lilith_cli.extra_commands.console.print", side_effect=cap_print):
-        with patch("lilith_cli.extra_commands.render_error", side_effect=cap_error):
+    with patch("lilith_cli.render.console.print", side_effect=cap_print):
+        with patch("lilith_cli.slash_commands.extras.render_error", side_effect=cap_error):
             _run(run_log_command(fake_session, ""))
 
     rendered = "\n".join(prints)
@@ -113,8 +113,8 @@ def test_log_with_n_shows_last_n(fake_session, capsys, isolated_log_file):
     fake_session._tool_call_history = []
 
     prints, errors, cap_print, cap_error = _capture_prints()
-    with patch("lilith_cli.extra_commands.console.print", side_effect=cap_print):
-        with patch("lilith_cli.extra_commands.render_error", side_effect=cap_error):
+    with patch("lilith_cli.render.console.print", side_effect=cap_print):
+        with patch("lilith_cli.slash_commands.extras.render_error", side_effect=cap_error):
             _run(run_log_command(fake_session, "5"))
 
     rendered = "\n".join(prints)
@@ -148,8 +148,8 @@ def test_log_stats_spanish_keywords(fake_session, capsys, isolated_log_file):
     ]
 
     prints, errors, cap_print, cap_error = _capture_prints()
-    with patch("lilith_cli.extra_commands.console.print", side_effect=cap_print):
-        with patch("lilith_cli.extra_commands.render_error", side_effect=cap_error):
+    with patch("lilith_cli.render.console.print", side_effect=cap_print):
+        with patch("lilith_cli.slash_commands.extras.render_error", side_effect=cap_error):
             _run(run_log_command(fake_session, "stats"))
 
     rendered = "\n".join(prints)
@@ -174,8 +174,8 @@ def test_log_help_contains_command_name(fake_session, capsys, isolated_log_file)
     from lilith_cli.extra_commands import run_log_command
 
     prints, errors, cap_print, cap_error = _capture_prints()
-    with patch("lilith_cli.extra_commands.console.print", side_effect=cap_print):
-        with patch("lilith_cli.extra_commands.render_error", side_effect=cap_error):
+    with patch("lilith_cli.render.console.print", side_effect=cap_print):
+        with patch("lilith_cli.slash_commands.extras.render_error", side_effect=cap_error):
             _run(run_log_command(fake_session, "help"))
 
     rendered = "\n".join(prints)
@@ -196,8 +196,8 @@ def test_log_clear_when_no_file(fake_session, capsys, isolated_log_file):
     assert not isolated_log_file.exists()
 
     prints, errors, cap_print, cap_error = _capture_prints()
-    with patch("lilith_cli.extra_commands.console.print", side_effect=cap_print):
-        with patch("lilith_cli.extra_commands.render_error", side_effect=cap_error):
+    with patch("lilith_cli.render.console.print", side_effect=cap_print):
+        with patch("lilith_cli.slash_commands.extras.render_error", side_effect=cap_error):
             _run(run_log_command(fake_session, "clear"))
 
     rendered = "\n".join(prints)
@@ -216,8 +216,8 @@ def test_log_path_prints_path(fake_session, capsys, isolated_log_file):
     from lilith_cli.extra_commands import run_log_command
 
     prints, errors, cap_print, cap_error = _capture_prints()
-    with patch("lilith_cli.extra_commands.console.print", side_effect=cap_print):
-        with patch("lilith_cli.extra_commands.render_error", side_effect=cap_error):
+    with patch("lilith_cli.render.console.print", side_effect=cap_print):
+        with patch("lilith_cli.slash_commands.extras.render_error", side_effect=cap_error):
             _run(run_log_command(fake_session, "path"))
 
     rendered = "\n".join(prints)
@@ -241,8 +241,8 @@ def test_log_clear_when_file_exists(fake_session, capsys, isolated_log_file):
     assert isolated_log_file.exists()
 
     prints, errors, cap_print, cap_error = _capture_prints()
-    with patch("lilith_cli.extra_commands.console.print", side_effect=cap_print):
-        with patch("lilith_cli.extra_commands.render_error", side_effect=cap_error):
+    with patch("lilith_cli.render.console.print", side_effect=cap_print):
+        with patch("lilith_cli.slash_commands.extras.render_error", side_effect=cap_error):
             _run(run_log_command(fake_session, "clear"))
 
     rendered = "\n".join(prints)
@@ -258,8 +258,8 @@ def test_log_unknown_subcommand(fake_session, capsys, isolated_log_file):
     from lilith_cli.extra_commands import run_log_command
 
     prints, errors, cap_print, cap_error = _capture_prints()
-    with patch("lilith_cli.extra_commands.console.print", side_effect=cap_print):
-        with patch("lilith_cli.extra_commands.render_error", side_effect=cap_error):
+    with patch("lilith_cli.render.console.print", side_effect=cap_print):
+        with patch("lilith_cli.slash_commands.extras.render_error", side_effect=cap_error):
             _run(run_log_command(fake_session, "no-existe"))
 
     assert errors != [], "Esperaba al menos un error para subcomando desconocido"

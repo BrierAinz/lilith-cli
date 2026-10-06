@@ -72,7 +72,7 @@ def test_pr_detect_branch_returns_branch():
     """Si `git rev-parse` devuelve 'feat/x', _pr_detect_branch devuelve 'feat/x'."""
     fake = MagicMock()
     fake.stdout = "feat/x\n"
-    with patch("lilith_cli.extra_commands.subprocess.run", return_value=fake):
+    with patch("subprocess.run", return_value=fake):
         assert _pr_detect_branch() == "feat/x"
 
 
@@ -80,7 +80,7 @@ def test_pr_detect_branch_returns_none_on_detached():
     """Una rama detached (HEAD) devuelve None en vez de 'HEAD'."""
     fake = MagicMock()
     fake.stdout = "HEAD\n"
-    with patch("lilith_cli.extra_commands.subprocess.run", return_value=fake):
+    with patch("subprocess.run", return_value=fake):
         assert _pr_detect_branch() is None
 
 
@@ -89,7 +89,7 @@ def test_pr_detect_branch_returns_none_on_error():
     import subprocess as _sp
 
     with patch(
-        "lilith_cli.extra_commands.subprocess.run",
+        "subprocess.run",
         side_effect=_sp.CalledProcessError(128, "git"),
     ):
         assert _pr_detect_branch() is None
@@ -109,8 +109,8 @@ async def test_pr_command_aborts_when_no_branch():
         errors.append(str(text))
 
     session = DummySession()
-    with patch("lilith_cli.extra_commands.subprocess.run", return_value=fake), patch(
-        "lilith_cli.extra_commands.render_error", side_effect=capture_err
+    with patch("subprocess.run", return_value=fake), patch(
+        "lilith_cli.slash_commands.git.render_error", side_effect=capture_err
     ):
         await run_pr_command(session, "")
 
@@ -142,8 +142,8 @@ async def test_pr_command_aborts_when_same_branch():
         errors.append(str(text))
 
     session = DummySession()
-    with patch("lilith_cli.extra_commands.subprocess.run", side_effect=fake_run), patch(
-        "lilith_cli.extra_commands.render_error", side_effect=capture_err
+    with patch("subprocess.run", side_effect=fake_run), patch(
+        "lilith_cli.slash_commands.git.render_error", side_effect=capture_err
     ):
         await run_pr_command(session, "main")
 
@@ -183,8 +183,8 @@ async def test_pr_command_rejects_non_github_remote():
 
     session = DummySession()
     with patch(
-        "lilith_cli.extra_commands.subprocess.run", side_effect=tracking_run
-    ), patch("lilith_cli.extra_commands.render_error", side_effect=capture_err):
+        "subprocess.run", side_effect=tracking_run
+    ), patch("lilith_cli.slash_commands.git.render_error", side_effect=capture_err):
         await run_pr_command(session, "")
 
     assert any("github" in e.lower() for e in errors), (
@@ -219,9 +219,9 @@ async def test_pr_command_dry_run_skips_push_and_gh():
 
     session = DummySession()
     with patch(
-        "lilith_cli.extra_commands.subprocess.run", side_effect=fake_run
-    ), patch("lilith_cli.extra_commands.shutil.which", return_value="/fake/gh"), patch(
-        "lilith_cli.extra_commands.console.print", side_effect=capture
+        "subprocess.run", side_effect=fake_run
+    ), patch("shutil.which", return_value="/fake/gh"), patch(
+        "lilith_cli.render.console.print", side_effect=capture
     ):
         await run_pr_command(session, "--dry-run")
 
@@ -309,11 +309,11 @@ async def test_pr_command_passes_title_and_body_to_gh():
 
     session = DummySession()
     with patch(
-        "lilith_cli.extra_commands.subprocess.run", side_effect=tracking_run
+        "subprocess.run", side_effect=tracking_run
     ), patch(
-        "lilith_cli.extra_commands.shutil.which", return_value="/fake/gh"
+        "shutil.which", return_value="/fake/gh"
     ), patch(
-        "lilith_cli.extra_commands.console.print"
+        "lilith_cli.render.console.print"
     ):
         await run_pr_command(
             session, '--title "Mi PR" --body "Descripcion del PR"'
@@ -356,11 +356,11 @@ async def test_pr_command_only_title_uses_fill_false():
 
     session = DummySession()
     with patch(
-        "lilith_cli.extra_commands.subprocess.run", side_effect=tracking_run
+        "subprocess.run", side_effect=tracking_run
     ), patch(
-        "lilith_cli.extra_commands.shutil.which", return_value="/fake/gh"
+        "shutil.which", return_value="/fake/gh"
     ), patch(
-        "lilith_cli.extra_commands.console.print"
+        "lilith_cli.render.console.print"
     ):
         await run_pr_command(session, '--title "Solo title"')
 
@@ -396,11 +396,11 @@ async def test_pr_command_without_title_or_body_uses_fill():
 
     session = DummySession()
     with patch(
-        "lilith_cli.extra_commands.subprocess.run", side_effect=tracking_run
+        "subprocess.run", side_effect=tracking_run
     ), patch(
-        "lilith_cli.extra_commands.shutil.which", return_value="/fake/gh"
+        "shutil.which", return_value="/fake/gh"
     ), patch(
-        "lilith_cli.extra_commands.console.print"
+        "lilith_cli.render.console.print"
     ):
         await run_pr_command(session, "")
 

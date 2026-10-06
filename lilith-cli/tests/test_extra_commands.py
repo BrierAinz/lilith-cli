@@ -56,7 +56,7 @@ async def test_git_command_runs_git_operation_tool(tmp_path, monkeypatch):
     def capture(text: str):
         console_prints.append(text)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_git_command(session, "status")
 
     assert any("nothing to commit" in str(p).lower() or "nada para confirmar" in str(p).lower() for p in console_prints)
@@ -79,7 +79,7 @@ async def test_todos_command_adds_and_lists(tmp_path, monkeypatch):
         def capture(text: str = ""):
             prints.append(text)
 
-        with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+        with patch("lilith_cli.render.console.print", side_effect=capture):
             await run_todos_command(session, "add comprar leche")
             await run_todos_command(session, "")
 

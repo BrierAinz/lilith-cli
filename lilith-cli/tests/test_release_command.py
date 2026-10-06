@@ -99,7 +99,6 @@ def test_write_package_version_updates_init(monkeypatch):
 
 def test_prepend_changelog_inserts_entry(tmp_path, monkeypatch):
     """Inserts a new heading after the first existing heading."""
-    import lilith_cli.extra_commands as ec
 
     fake_module_dir = tmp_path / "lilith_cli"
     fake_module_dir.mkdir()
@@ -135,19 +134,19 @@ def test_prepend_changelog_inserts_entry(tmp_path, monkeypatch):
 
 def test_prepend_changelog_returns_false_when_missing(tmp_path):
     """If CHANGELOG.md doesn't exist, returns False without raising."""
-    import lilith_cli.extra_commands as ec
+    from lilith_cli.slash_commands import git as git_cmds
 
-    fake_module_dir = tmp_path / "lilith_cli"
-    fake_module_dir.mkdir()
-    (fake_module_dir / "__init__.py").write_text("", encoding="utf-8")
+    fake_module_dir = tmp_path / "lilith_cli" / "slash_commands"
+    fake_module_dir.mkdir(parents=True)
+    (fake_module_dir / "git.py").write_text("", encoding="utf-8")
 
     # Real call against a __file__ pointing at our fake dir
-    real_file = ec.__file__
+    real_file = git_cmds.__file__
     try:
-        ec.__file__ = str(fake_module_dir / "__init__.py")
-        ok = ec._prepend_changelog("1.0.0", "2026-07-10")
+        git_cmds.__file__ = str(fake_module_dir / "git.py")
+        ok = git_cmds._prepend_changelog("1.0.0", "2026-07-10")
     finally:
-        ec.__file__ = real_file
+        git_cmds.__file__ = real_file
     assert ok is False
 
 
@@ -169,13 +168,13 @@ async def test_release_command_dry_run_does_not_mutate(monkeypatch):
         prints.append(str(text))
 
     monkeypatch.setattr(
-        "lilith_cli.extra_commands.console.print", capture
+        "lilith_cli.render.console.print", capture
     )
     # Block any accidental subprocess
     def fail(*args, **kwargs):
         raise AssertionError("subprocess should not be called in --dry-run")
 
-    monkeypatch.setattr("lilith_cli.extra_commands.subprocess.run", fail)
+    monkeypatch.setattr("subprocess.run", fail)
 
     session = DummySession()
     await run_release_command(session, "patch --dry-run")
@@ -198,7 +197,7 @@ async def test_release_command_rejects_invalid_no_level_defaults_to_patch(monkey
         prints.append(str(text))
 
     monkeypatch.setattr(
-        "lilith_cli.extra_commands.console.print", capture
+        "lilith_cli.render.console.print", capture
     )
 
     session = DummySession()
@@ -228,7 +227,7 @@ async def test_release_command_does_not_use_git_add_dot_a(monkeypatch, tmp_path)
 
     # Force _prepend_changelog to return True so the changelog path is staged.
     monkeypatch.setattr(
-        "lilith_cli.extra_commands._prepend_changelog", lambda *a, **kw: True
+        "lilith_cli.slash_commands.git._prepend_changelog", lambda *a, **kw: True
     )
 
     # Capture every subprocess.run invocation.
@@ -244,16 +243,16 @@ async def test_release_command_does_not_use_git_add_dot_a(monkeypatch, tmp_path)
 
         return _Result()
 
-    monkeypatch.setattr("lilith_cli.extra_commands.subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.run", fake_run)
 
     # Skip the actual file mutation; _write_package_version is a thin wrapper.
     monkeypatch.setattr(
-        "lilith_cli.extra_commands._write_package_version", lambda *a, **kw: None
+        "lilith_cli.slash_commands.git._write_package_version", lambda *a, **kw: None
     )
 
     # Silence the print output for the test run.
     monkeypatch.setattr(
-        "lilith_cli.extra_commands.console.print", lambda *a, **kw: None
+        "lilith_cli.render.console.print", lambda *a, **kw: None
     )
 
     await run_release_command(DummySession(), "patch")

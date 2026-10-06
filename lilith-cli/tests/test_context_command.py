@@ -27,6 +27,7 @@ from lilith_cli.extra_commands import (
     _save_warn_pct,
     run_context_command,
 )
+from lilith_cli.slash_commands import conversation as conversation_cmds
 
 
 def _make_session(model: str = "gpt-4o") -> AgentSession:
@@ -39,10 +40,9 @@ def _make_session(model: str = "gpt-4o") -> AgentSession:
 @pytest.fixture
 def isolated_warn_file(tmp_path, monkeypatch):
     """Redirect the warn-threshold store to a tmp file so tests stay hermetic."""
-    from lilith_cli import extra_commands as ec
 
     fake = tmp_path / "context_warn.json"
-    monkeypatch.setattr(ec, "_CONTEXT_WARN_FILE", fake)
+    monkeypatch.setattr(conversation_cmds, "_CONTEXT_WARN_FILE", fake)
     return fake
 
 

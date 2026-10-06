@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from lilith_cli.config import CONFIG_DIR
 from lilith_cli.extra_commands import (
     _DEFAULT_TEST_SUITE,
@@ -16,6 +16,7 @@ from lilith_cli.extra_commands import (
     _set_test_last_failed_path,
     run_test_command,
 )
+from lilith_cli.slash_commands import quality as quality_cmds
 
 
 class DummyConfig:
@@ -60,7 +61,7 @@ def _capture_prints(monkeypatch=None):
     def capture(text: str = "") -> None:
         prints.append(text)
 
-    patcher = patch("lilith_cli.extra_commands.console.print", side_effect=capture)
+    patcher = patch("lilith_cli.render.console.print", side_effect=capture)
     patcher.start()
     return prints, patcher.stop
 
@@ -119,7 +120,7 @@ async def test_test_command_no_args_runs_default_suite():
     prints, stop = _capture_prints()
     try:
         with patch(
-            "lilith_cli.extra_commands._run_pytest_subprocess",
+            "lilith_cli.slash_commands.quality._run_pytest_subprocess",
             return_value=fake_summary,
         ) as run_mock:
             await run_test_command(DummySession(), "")
@@ -154,7 +155,7 @@ async def test_test_command_with_target_path():
     prints, stop = _capture_prints()
     try:
         with patch(
-            "lilith_cli.extra_commands._run_pytest_subprocess",
+            "lilith_cli.slash_commands.quality._run_pytest_subprocess",
             return_value=fake_summary,
         ) as run_mock:
             await run_test_command(DummySession(), "lilith-stack/lilith-cli/tests/test_plan.py")
@@ -171,7 +172,7 @@ async def test_test_command_rechaza_ruta_fuera_del_repositorio(tmp_path):
     prints, stop = _capture_prints()
     try:
         with patch(
-            "lilith_cli.extra_commands._run_pytest_subprocess",
+            "lilith_cli.slash_commands.quality._run_pytest_subprocess",
             return_value={},
         ) as run_mock:
             await run_test_command(DummySession(), str(tmp_path / "externo.py"))
@@ -189,7 +190,7 @@ async def test_test_command_rechaza_traversal_de_ruta():
     prints, stop = _capture_prints()
     try:
         with patch(
-            "lilith_cli.extra_commands._run_pytest_subprocess",
+            "lilith_cli.slash_commands.quality._run_pytest_subprocess",
             return_value={},
         ) as run_mock:
             await run_test_command(DummySession(), "../fuera-del-repo/tests")
@@ -216,7 +217,7 @@ async def test_test_command_with_keyword_flag():
     prints, stop = _capture_prints()
     try:
         with patch(
-            "lilith_cli.extra_commands._run_pytest_subprocess",
+            "lilith_cli.slash_commands.quality._run_pytest_subprocess",
             return_value=fake_summary,
         ) as run_mock:
             await run_test_command(DummySession(), "-k hello")
@@ -242,7 +243,7 @@ async def test_test_command_with_k_equals():
         "command": [],
     }
     with patch(
-        "lilith_cli.extra_commands._run_pytest_subprocess",
+        "lilith_cli.slash_commands.quality._run_pytest_subprocess",
         return_value=fake_summary,
     ) as run_mock:
         await run_test_command(DummySession(), "-k=hello")
@@ -264,7 +265,7 @@ async def test_test_command_combined_path_and_keyword():
         "command": [],
     }
     with patch(
-        "lilith_cli.extra_commands._run_pytest_subprocess",
+        "lilith_cli.slash_commands.quality._run_pytest_subprocess",
         return_value=fake_summary,
     ) as run_mock:
         await run_test_command(
@@ -295,7 +296,7 @@ async def test_test_command_shows_last_failure():
     prints, stop = _capture_prints()
     try:
         with patch(
-            "lilith_cli.extra_commands._run_pytest_subprocess",
+            "lilith_cli.slash_commands.quality._run_pytest_subprocess",
             return_value=fake_summary,
         ):
             await run_test_command(DummySession(), "")
@@ -328,7 +329,7 @@ async def test_test_command_subprocess_error_renders_tip():
     prints, stop = _capture_prints()
     try:
         with patch(
-            "lilith_cli.extra_commands._run_pytest_subprocess",
+            "lilith_cli.slash_commands.quality._run_pytest_subprocess",
             return_value=fake_summary,
         ):
             await run_test_command(DummySession(), "")
@@ -356,7 +357,7 @@ async def test_test_command_shows_results_when_pytest_reports_errors():
     prints, stop = _capture_prints()
     try:
         with patch(
-            "lilith_cli.extra_commands._run_pytest_subprocess",
+            "lilith_cli.slash_commands.quality._run_pytest_subprocess",
             return_value=fake_summary,
         ):
             await run_test_command(DummySession(), "")
@@ -376,8 +377,8 @@ def test_run_pytest_subprocess_keeps_error_count_separate(monkeypatch, tmp_path)
     def missing_python(*_args, **_kwargs):
         raise FileNotFoundError("python")
 
-    monkeypatch.setattr(ec.subprocess, "run", missing_python)
-    monkeypatch.setattr(ec, "_validate_test_target", lambda _target: None)
+    monkeypatch.setattr(subprocess, "run", missing_python)
+    monkeypatch.setattr(quality_cmds, "_validate_test_target", lambda _target: None)
     summary = ec._run_pytest_subprocess("tests", cwd=tmp_path)
 
     assert summary["error"] == 0

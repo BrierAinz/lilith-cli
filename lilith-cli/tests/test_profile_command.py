@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lilith_cli import extra_commands
+from lilith_cli.render import get_theme, set_theme
 from lilith_cli.extra_commands import (
     _DEFAULT_PROFILES,
     _ensure_profiles,
@@ -17,6 +17,7 @@ from lilith_cli.extra_commands import (
     _save_profiles,
     run_profile_command,
 )
+from lilith_cli.slash_commands import settings as settings_cmds
 
 
 class DummyConfig:
@@ -42,11 +43,11 @@ class DummySession:
 @pytest.fixture
 def profiles_file(tmp_path, monkeypatch):
     """Redirect profile storage to a temporary directory."""
-    original = extra_commands._PROFILES_PATH
+    original = settings_cmds._PROFILES_PATH
     path = tmp_path / "profiles.json"
-    extra_commands._PROFILES_PATH = path
+    settings_cmds._PROFILES_PATH = path
     yield path
-    extra_commands._PROFILES_PATH = original
+    settings_cmds._PROFILES_PATH = original
 
 
 @pytest.mark.asyncio
@@ -58,7 +59,7 @@ async def test_profile_list_pre_populated(profiles_file):
     def capture(text: str = ""):
         prints.append(text)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_profile_command(session, "list")
 
     output = "".join(str(p) for p in prints)
@@ -78,7 +79,7 @@ async def test_profile_save_load_and_show(profiles_file):
     def capture(text: str = ""):
         prints.append(text)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_profile_command(session, "save custom")
         # Reset and load
         session.config.model = "other"
@@ -104,7 +105,7 @@ async def test_profile_delete(profiles_file):
     def capture(text: str = ""):
         prints.append(text)
 
-    with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+    with patch("lilith_cli.render.console.print", side_effect=capture):
         await run_profile_command(session, "save temp")
         await run_profile_command(session, "delete temp")
         await run_profile_command(session, "list")
@@ -117,7 +118,7 @@ async def test_profile_delete(profiles_file):
 def test_profiles_path_uses_config_dir(tmp_path, monkeypatch):
     """La ruta de perfiles se basa en el directorio de configuración."""
     monkeypatch.setenv("HOME", str(tmp_path))
-    extra_commands._PROFILES_PATH = None
+    settings_cmds._PROFILES_PATH = None
     path = _profiles_path()
     assert path == tmp_path / ".yggdrasil" / "profiles.json"
 
@@ -137,13 +138,13 @@ async def test_profile_save_persiste_tema_sin_secretos(profiles_file):
     session.config.model = "modelo-seguro"
     session.config.api_key = "secreto-que-no-debe-guardarse"
     session.config.system_prompt = "prompt privado"
-    previous_theme = extra_commands.get_theme().name
+    previous_theme = get_theme().name
 
     try:
-        extra_commands.set_theme("cyberpunk")
+        set_theme("cyberpunk")
         await run_profile_command(session, "save seguro")
     finally:
-        extra_commands.set_theme(previous_theme)
+        set_theme(previous_theme)
 
     saved = _load_profiles()["seguro"]
     assert saved["provider"] == "proveedor-seguro"
@@ -167,14 +168,14 @@ async def test_profile_list_y_load_incluyen_tema(profiles_file):
     )
     session = DummySession()
     prints = []
-    previous_theme = extra_commands.get_theme().name
+    previous_theme = get_theme().name
 
     def capture(text: str = ""):
         prints.append(text)
 
     try:
-        extra_commands.set_theme("norse")
-        with patch("lilith_cli.extra_commands.console.print", side_effect=capture):
+        set_theme("norse")
+        with patch("lilith_cli.render.console.print", side_effect=capture):
             await run_profile_command(session, "list")
             await run_profile_command(session, "load minimalista")
 
@@ -184,6 +185,6 @@ async def test_profile_list_y_load_incluyen_tema(profiles_file):
         assert "theme=minimal" in output
         assert session.config.provider == "local"
         assert session.config.model == "modelo-local"
-        assert extra_commands.get_theme().name == "minimal"
+        assert get_theme().name == "minimal"
     finally:
-        extra_commands.set_theme(previous_theme)
+        set_theme(previous_theme)

@@ -17,6 +17,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    name: Lint and type check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.1"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install workspace
+        run: uv sync --all-packages --locked --extra dev --extra web
+
+      - name: Ruff
+        run: uv run ruff check .
+
+      - name: Mypy (library packages)
+        run: uv run mypy
+
   tests:
     name: Tests (${{ matrix.os }}, Python ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
@@ -31,6 +61,7 @@ jobs:
         python-version:
           - "3.11"
           - "3.12"
+          - "3.13"
 
     env:
       PYTHONUTF8: "1"
@@ -74,3 +105,69 @@ jobs:
 
       - name: Test tools
         run: uv run pytest -q lilith-tools/tests
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      PYTHONUTF8: "1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.1"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install workspace
+        run: uv sync --all-packages --locked --extra dev --extra web
+
+      # The IDE snapshot tests are timing-sensitive under coverage tracing;
+      # the test matrix above runs them.
+      - name: Measure coverage
+        run: >-
+          uv run pytest -q --cov --cov-report=term
+          --ignore=lilith-cli/tests/test_ide_snapshots.py
+          lilith-cli/tests lilith-core/tests lilith-memory/tests
+          lilith-skills/tests lilith-orchestrator/tests lilith-tools/tests
+
+      - name: Coverage summary
+        if: always()
+        run: uv run coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
+
+  frontend:
+    name: Web console frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: lilith-cli/lilith_cli/web_console/frontend
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: lilith-cli/lilith_cli/web_console/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check and build
+        run: npm run build

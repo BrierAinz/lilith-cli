@@ -1447,7 +1447,7 @@ requires-dist = [
 
 [[package]]
 name = "lilith-workspace"
-version = "4.4.0"
+version = "4.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "lilith-cli" },

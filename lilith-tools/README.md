@@ -1,6 +1,7 @@
 # lilith-tools
 
-PC control, browser automation, RAG tools.
+Agent tools for Lilith: filesystem, coding (test/lint/format), Git, search, MCP
+client, delegation, recall, web search and Forja design automation.
 
 Part of the Yggdrasil ecosystem.
 

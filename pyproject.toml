@@ -1,6 +1,6 @@
 [project]
 name = "lilith-workspace"
-version = "4.4.0"
+version = "4.6.0"
 description = "Lilith CLI — Norse-themed terminal IDE and agent interface (uv workspace)"
 requires-python = ">=3.11"
 license = "MIT"

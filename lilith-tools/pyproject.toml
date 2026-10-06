@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "lilith-tools"
 version = "1.4.0"
-description = "PC control, browser automation, RAG tools"
+description = "Agent tools for Lilith: files, coding, Git, search, MCP, delegation and recall"
 requires-python = ">=3.11"
 license = "MIT"
 dependencies = [

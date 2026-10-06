@@ -307,6 +307,24 @@ async def run_reverse_command(session: SessionRuntime, args: str) -> None:  # no
     console.print()
 
 
+# Tamaño máximo (en bits) de una potencia entera. ``10**10**10`` dejaría el
+# REPL colgado calculando un entero de miles de millones de dígitos.
+_CALC_MAX_POW_BITS = 100_000
+
+
+def _calc_pow(base: Any, exponent: Any) -> Any:
+    """``base ** exponent`` rechazando enteros desproporcionados."""
+    if (
+        isinstance(base, int)
+        and isinstance(exponent, int)
+        and abs(base) > 1
+        and exponent > 0
+        and exponent * math.log2(abs(base)) > _CALC_MAX_POW_BITS
+    ):
+        raise ValueError("resultado demasiado grande")
+    return operator.pow(base, exponent)
+
+
 # Operadores binarios permitidos (suma, resta, multiplicación, división real,
 # división entera, módulo y potencia). Se evalúan con funciones explícitas en
 # lugar de ``eval`` para que el comando sea seguro ante entrada arbitraria.
@@ -317,7 +335,7 @@ _CALC_BINOPS: dict[type, Any] = {
     ast.Div: operator.truediv,
     ast.FloorDiv: operator.floordiv,
     ast.Mod: operator.mod,
-    ast.Pow: operator.pow,
+    ast.Pow: _calc_pow,
 }
 
 
@@ -438,7 +456,12 @@ async def run_calc_command(session: SessionRuntime, args: str) -> None:  # noqa:
     if isinstance(result, float) and result.is_integer() and abs(result) < 1e15:
         rendered = str(int(result))
     else:
-        rendered = str(result)
+        try:
+            rendered = str(result)
+        except ValueError:
+            # Python limita la conversión de enteros enormes a texto.
+            render_error("El resultado es demasiado grande para mostrarlo")
+            return
 
     console.print(f"[tool.name]{expr}[/] = [bold cyan]{rendered}[/]")
 

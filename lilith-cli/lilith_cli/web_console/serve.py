@@ -43,6 +43,26 @@ def web(
         f"http://127.0.0.1:{port}",
         f"http://[::1]:{port}",
     ]
+    if dev:
+        # uvicorn only reloads an app given as an import string, so the
+        # settings reach the reloaded worker through the environment.
+        os.environ["LILITH_WEB_WORKSPACE"] = str(workspace)
+        os.environ["LILITH_WEB_ORIGINS"] = ",".join(origins)
+        if config:
+            os.environ["LILITH_WEB_CONFIG"] = config
+        else:
+            os.environ.pop("LILITH_WEB_CONFIG", None)
+        uvicorn.run(
+            "lilith_cli.web_console.server:create_app_from_env",
+            factory=True,
+            host=host,
+            port=int(port),
+            reload=True,
+            reload_dirs=[str(Path(__file__).resolve().parents[1])],
+            log_level="info",
+        )
+        return
+
     app = create_app(
         workspace=str(workspace),
         auth_token=token,
@@ -53,6 +73,5 @@ def web(
         app,
         host=host,
         port=int(port),
-        reload=bool(dev),
         log_level="info",
     )

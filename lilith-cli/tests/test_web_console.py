@@ -53,6 +53,41 @@ def test_websocket_rejects_missing_token(tmp_path: Path) -> None:
     assert caught.value.code == 4401
 
 
+def test_web_dev_reload_uses_an_import_string_factory(tmp_path: Path, monkeypatch) -> None:
+    """Regression: uvicorn exits when ``reload=True`` gets an app object."""
+    import uvicorn
+    from lilith_cli.web_console import server
+    from lilith_cli.web_console.serve import web
+
+    for name in ("LILITH_WEB_WORKSPACE", "LILITH_WEB_ORIGINS", "LILITH_WEB_CONFIG"):
+        monkeypatch.delenv(name, raising=False)
+    calls: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    web(root=str(tmp_path), dev=True)
+
+    (args, kwargs), = calls
+    assert args == ("lilith_cli.web_console.server:create_app_from_env",)
+    assert kwargs["factory"] is True and kwargs["reload"] is True
+    app = server.create_app_from_env()
+    assert app.state.workspace == tmp_path.resolve()
+
+
+def test_web_without_dev_passes_the_app_without_reload(tmp_path: Path, monkeypatch) -> None:
+    import uvicorn
+    from fastapi import FastAPI
+    from lilith_cli.web_console.serve import web
+
+    calls: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    web(root=str(tmp_path))
+
+    (args, kwargs), = calls
+    assert isinstance(args[0], FastAPI)
+    assert not kwargs.get("reload")
+
+
 class _Provider:
     async def close(self) -> None:
         return None

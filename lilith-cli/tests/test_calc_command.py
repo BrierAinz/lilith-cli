@@ -73,3 +73,26 @@ def test_calc_eval_unidad():
         calc_eval("__import__('os')")
     with pytest.raises(ValueError):
         calc_eval("variable_inexistente + 1")
+
+
+def test_calc_rechaza_potencias_desproporcionadas(fake_session, capsys):
+    """Regression: ``10**10**10`` used to hang the REPL computing the integer."""
+    from lilith_cli.extra_commands import calc_eval, run_calc_command
+
+    with pytest.raises(ValueError, match="demasiado grande"):
+        calc_eval("10 ** 10 ** 10")
+    with pytest.raises(ValueError, match="demasiado grande"):
+        calc_eval("(10 ** 1000) ** 1000")
+    assert calc_eval("2 ** 64") == 18446744073709551616
+    assert calc_eval("2 ** -2") == 0.25
+
+    _run(run_calc_command(fake_session, "10 ** 10 ** 10"))
+    assert "demasiado grande" in capsys.readouterr().out
+
+
+def test_calc_resultado_enorme_no_rompe_el_render(fake_session, capsys):
+    """Integers above Python's str() digit limit are reported, not raised."""
+    from lilith_cli.extra_commands import run_calc_command
+
+    _run(run_calc_command(fake_session, "10 ** 30000"))
+    assert "demasiado grande para mostrarlo" in capsys.readouterr().out

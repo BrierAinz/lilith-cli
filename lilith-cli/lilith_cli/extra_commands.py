@@ -49,6 +49,7 @@ from lilith_tools.watcher import (
 
 from .config import CONFIG_DIR
 from .render import console, get_theme, render_error, set_theme
+from rich.markup import escape
 from rich.syntax import Syntax
 from rich.tree import Tree as RichTree
 from lilith_tools.file_walk import walk_all_files
@@ -5645,6 +5646,8 @@ def _run_pytest_subprocess(
     Returns:
         ``{"passed": int, "failed": int, "error": int, "duration": float,
            "last_failure": str | None, "returncode": int, "command": list[str]}``.
+        ``error`` is pytest's error count; when pytest could not run at all
+        the dict also carries a ``run_error`` message.
     """
     if cwd is None:
         # Asgard root sits two levels above lilith-stack/lilith-cli
@@ -5660,7 +5663,7 @@ def _run_pytest_subprocess(
             "last_failure": None,
             "returncode": -1,
             "command": [],
-            "error": target_error,
+            "run_error": target_error,
         }
 
     venv_py = cwd / ".venv" / "Scripts" / "python.exe"
@@ -5693,7 +5696,7 @@ def _run_pytest_subprocess(
             "last_failure": None,
             "returncode": -1,
             "command": cmd,
-            "error": f"pytest no disponible: {exc}",
+            "run_error": f"pytest no disponible: {exc}",
         }
     except subprocess.TimeoutExpired:
         return {
@@ -5704,7 +5707,7 @@ def _run_pytest_subprocess(
             "last_failure": None,
             "returncode": -1,
             "command": cmd,
-            "error": "pytest excedió el timeout (600s)",
+            "run_error": "pytest excedió el timeout (600s)",
         }
 
     output = (proc.stdout or "") + "\n" + (proc.stderr or "")
@@ -5715,6 +5718,13 @@ def _run_pytest_subprocess(
     summary["returncode"] = proc.returncode
     summary["command"] = cmd
     return summary
+
+
+def _render_test_run_error(message: str) -> None:
+    """Report that pytest could not run (as opposed to failing tests)."""
+    console.print(f"[error]{escape(message)}[/error]")
+    console.print("[dim]tip: verifica que .venv exista y pytest esté instalado[/dim]")
+    console.print()
 
 
 def _render_test_usage() -> None:
@@ -5794,6 +5804,9 @@ async def run_test_command(session: SessionRuntime, args: str) -> None:  # noqa:
         summary = _run_pytest_subprocess(
             _DEFAULT_TEST_SUITE, keyword=pattern
         )
+        if summary.get("run_error"):
+            _render_test_run_error(summary["run_error"])
+            return
         console.print(_render_test_summary(summary, summary["returncode"]))
         console.print()
         return
@@ -5826,12 +5839,8 @@ async def run_test_command(session: SessionRuntime, args: str) -> None:  # noqa:
         return
 
     summary = _run_pytest_subprocess(target, keyword=keyword)
-    if summary.get("error"):
-        console.print(f"[error]{summary['error']}[/error]")
-        console.print(
-            "[dim]tip: verifica que .venv exista y pytest esté instalado[/dim]"
-        )
-        console.print()
+    if summary.get("run_error"):
+        _render_test_run_error(summary["run_error"])
         return
     console.print(_render_test_summary(summary, summary["returncode"]))
     console.print()
@@ -9849,17 +9858,12 @@ async def run_format_command(session: SessionRuntime, args: str) -> None:  # noq
             render_error("Cancelado por el usuario")
             return
 
-    # Delegamos en FormatFileTool. Cuando --check está activo, lo transformamos
-    # en un audit pasándole check=True (que la herramienta respeta a través de
-    # su propio path de auditoría: cualquier formatter que soporte --check lo
-    # usará, los demás sólo reportarán rc≠0). Para mantener la promesa de
-    # "no modifica" del modo --check, le pasamos un formatter vacío y leemos
-    # el resultado rc sin invocar la mutación: la herramienta ya hace backup
-    # antes de tocar el disco, pero --check no debería siquiera llegar a ese
-    # punto. Para mantener la lógica simple y 100% segura, --check corre el
-    # formatter con --check cuando el formatter lo soporta (black, ruff).
+    # --check nunca pasa por FormatFileTool: corre la variante de solo
+    # revisión del formatter detectado (``black --check``, ``prettier
+    # --check``, ``gofmt -l``...). Si el formatter no tiene una, no se
+    # ejecuta nada en lugar de caer en la invocación que escribe.
     if check_only:
-        from lilith_tools.coding_tools import _detect_formatter, _run_command
+        from lilith_tools.coding_tools import _detect_formatter, _formatter_check_command
 
         detected = _detect_formatter(str(resolved), None)
         if detected is None:
@@ -9869,46 +9873,46 @@ async def run_format_command(session: SessionRuntime, args: str) -> None:  # noq
             )
             return
 
-        cmd_str = detected.strip()
-        # Inyectar --check al final cuando el formatter lo entienda.
-        # Reconocemos tanto la invocación directa (``ruff``, ``black``) como
-        # la variante con módulo de Python (``python -m black``,
-        # ``python -m ruff``).
-        lowered_first = cmd_str.split()[0].lower() if cmd_str else ""
-        is_black_or_ruff = Path(lowered_first).name in {"black", "ruff"} or any(
-            token in cmd_str.split() for token in ("black", "ruff")
-        )
-        if is_black_or_ruff:
-            cmd_str = f"{cmd_str} --check"
-        full_cmd = f"{cmd_str} {resolved}"
+        check = _formatter_check_command(detected)
+        if check is None:
+            render_error(
+                f"El formatter detectado ({detected}) no tiene un modo de solo "
+                "revisión conocido; no se ejecutó nada."
+            )
+            return
+        check_argv, pending_from_stdout = check
+        argv = [*check_argv, str(resolved)]
+        full_cmd = shlex.join(argv)
         try:
             proc = subprocess.run(
-                full_cmd,
+                argv,
                 cwd=str(resolved.parent),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
                 timeout=60,
-                shell=True,
             )
         except subprocess.TimeoutExpired:
             render_error("El formatter agotó el tiempo después de 60s")
             return
         except FileNotFoundError:
-            render_error(f"Formatter no encontrado en PATH: {cmd_str}")
+            render_error(f"Formatter no encontrado en PATH: {check_argv[0]}")
             return
 
         console.print(
             "[info]Auditoría:[/info] [bold cyan]"
-            + full_cmd
+            + escape(full_cmd)
             + "[/bold cyan] [dim](solo reporte; sin cambios)[/dim]"
         )
         if proc.stdout:
             console.print(proc.stdout, markup=False)
         if proc.stderr:
             console.print(proc.stderr, markup=False)
-        label = "sin cambios pendientes" if proc.returncode == 0 else f"exit {proc.returncode}"
+        pending = proc.returncode != 0 or (pending_from_stdout and bool(proc.stdout.strip()))
+        label = (
+            f"cambios pendientes, exit {proc.returncode}" if pending else "sin cambios pendientes"
+        )
         console.print(
             f"[success]✓ format --check: reporte completado ({label}); no se modificaron archivos[/success]"
         )

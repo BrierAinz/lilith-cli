@@ -323,7 +323,7 @@ async def test_test_command_subprocess_error_renders_tip():
         "last_failure": None,
         "returncode": -1,
         "command": [],
-        "error": "pytest no disponible",
+        "run_error": "pytest no disponible",
     }
     prints, stop = _capture_prints()
     try:
@@ -338,6 +338,50 @@ async def test_test_command_subprocess_error_renders_tip():
     output = "".join(str(p) for p in prints)
     assert "pytest no disponible" in output
     assert ".venv" in output  # tip mentions .venv
+
+
+@pytest.mark.asyncio
+async def test_test_command_shows_results_when_pytest_reports_errors():
+    """Regression: pytest's error count used to be mistaken for a runner
+    failure, hiding the results behind a bare "2" and the .venv tip."""
+    fake_summary = {
+        "passed": 3,
+        "failed": 0,
+        "error": 2,
+        "duration": 0.4,
+        "last_failure": None,
+        "returncode": 2,
+        "command": [],
+    }
+    prints, stop = _capture_prints()
+    try:
+        with patch(
+            "lilith_cli.extra_commands._run_pytest_subprocess",
+            return_value=fake_summary,
+        ):
+            await run_test_command(DummySession(), "")
+    finally:
+        stop()
+
+    output = "".join(str(p) for p in prints)
+    assert "3 passed" in output
+    assert "2 error" in output
+    assert ".venv" not in output
+
+
+def test_run_pytest_subprocess_keeps_error_count_separate(monkeypatch, tmp_path):
+    """The runner-failure message must not overwrite pytest's error count."""
+    from lilith_cli import extra_commands as ec
+
+    def missing_python(*_args, **_kwargs):
+        raise FileNotFoundError("python")
+
+    monkeypatch.setattr(ec.subprocess, "run", missing_python)
+    monkeypatch.setattr(ec, "_validate_test_target", lambda _target: None)
+    summary = ec._run_pytest_subprocess("tests", cwd=tmp_path)
+
+    assert summary["error"] == 0
+    assert "pytest no disponible" in summary["run_error"]
 
 
 # ── _parse_pytest_summary helpers ─────────────────────────────────────────

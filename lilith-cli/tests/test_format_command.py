@@ -133,7 +133,7 @@ def test_format_check_runs_ruff_check_without_writing(
     import lilith_tools.coding_tools as coding
 
     with patch.object(ec, "FormatFileTool") as format_tool, patch.object(
-        coding, "_detect_formatter", return_value="ruff check"
+        coding, "_detect_formatter", return_value="ruff format"
     ), patch(
         "lilith_cli.extra_commands.subprocess.run", return_value=fake_proc
     ) as run:
@@ -143,8 +143,8 @@ def test_format_check_runs_ruff_check_without_writing(
     format_tool.assert_not_called()
     assert run.call_count == 1
     cmd = run.call_args.args[0]
-    assert "ruff" in cmd.lower()
-    assert "--check" in cmd
+    assert cmd == ["ruff", "format", "--check", str(target.resolve())]
+    assert not run.call_args.kwargs.get("shell")
     out = capsys.readouterr().out.lower()
     # Rich may soft-wrap the long success line; collapse whitespace before
     # the substring assertion so the test isn't fragile to terminal width.
@@ -176,6 +176,116 @@ def test_format_check_reports_no_formatter(
     run.assert_not_called()
     out = capsys.readouterr().out.lower()
     assert "formatter" in out or "instalado" in out
+
+
+@pytest.mark.parametrize(
+    ("detected", "expected_prefix"),
+    [
+        ("prettier --write", ["prettier", "--check"]),
+        ("npx prettier --write", ["npx", "prettier", "--check"]),
+        ("python -m black", ["python", "-m", "black", "--check"]),
+        ("rustfmt", ["rustfmt", "--check"]),
+        ("gofmt -w", ["gofmt", "-l"]),
+    ],
+)
+def test_format_check_never_runs_the_writing_variant(
+    fake_session, capsys, tmp_path, monkeypatch, detected, expected_prefix
+):
+    """Regression: ``--check`` used to run ``prettier --write``/``gofmt -w``
+    and then report that no file had been modified."""
+    from lilith_cli import extra_commands as ec
+    from lilith_cli.extra_commands import run_format_command
+
+    target = tmp_path / "module.js"
+    target.write_text("let x=1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    fake_proc = subprocess.CompletedProcess([], 0, "", "")
+
+    import lilith_tools.coding_tools as coding
+
+    with patch.object(ec, "FormatFileTool") as format_tool, patch.object(
+        coding, "_detect_formatter", return_value=detected
+    ), patch("lilith_cli.extra_commands.subprocess.run", return_value=fake_proc) as run:
+        _run(run_format_command(fake_session, f"{target.name} --check"))
+
+    format_tool.assert_not_called()
+    cmd = run.call_args.args[0]
+    assert cmd == [*expected_prefix, str(target.resolve())]
+    assert "--write" not in cmd and "-w" not in cmd
+    assert not run.call_args.kwargs.get("shell")
+
+
+def test_format_check_gofmt_reports_listed_files_as_pending(
+    fake_session, capsys, tmp_path, monkeypatch
+):
+    """``gofmt -l`` exits 0 but prints the files that need formatting."""
+    from lilith_cli import extra_commands as ec
+    from lilith_cli.extra_commands import run_format_command
+
+    target = tmp_path / "main.go"
+    target.write_text("package main\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    fake_proc = subprocess.CompletedProcess([], 0, f"{target}\n", "")
+
+    import lilith_tools.coding_tools as coding
+
+    with patch.object(ec, "FormatFileTool"), patch.object(
+        coding, "_detect_formatter", return_value="gofmt -w"
+    ), patch("lilith_cli.extra_commands.subprocess.run", return_value=fake_proc):
+        _run(run_format_command(fake_session, f"{target.name} --check"))
+
+    out = " ".join(capsys.readouterr().out.split())
+    assert "cambios pendientes" in out
+    assert "sin cambios pendientes" not in out
+
+
+def test_format_check_refuses_formatter_without_check_mode(
+    fake_session, capsys, tmp_path, monkeypatch
+):
+    """An unknown formatter has no report-only mode, so nothing runs."""
+    from lilith_cli import extra_commands as ec
+    from lilith_cli.extra_commands import run_format_command
+
+    target = tmp_path / "module.py"
+    target.write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    import lilith_tools.coding_tools as coding
+
+    with patch.object(ec, "FormatFileTool") as format_tool, patch.object(
+        coding, "_detect_formatter", return_value="yapf -i"
+    ), patch("lilith_cli.extra_commands.subprocess.run") as run:
+        _run(run_format_command(fake_session, f"{target.name} --check"))
+
+    format_tool.assert_not_called()
+    run.assert_not_called()
+    out = " ".join(capsys.readouterr().out.split())
+    assert "no se ejecutó nada" in out
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="';' is not valid in Windows file names")
+def test_format_check_passes_path_as_single_argument(
+    fake_session, capsys, tmp_path, monkeypatch
+):
+    """Shell metacharacters in a file name must never reach a shell."""
+    from lilith_cli import extra_commands as ec
+    from lilith_cli.extra_commands import run_format_command
+
+    target = tmp_path / "a;touch pwned.py"
+    target.write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    fake_proc = subprocess.CompletedProcess([], 0, "", "")
+
+    import lilith_tools.coding_tools as coding
+
+    with patch.object(ec, "FormatFileTool"), patch.object(
+        coding, "_detect_formatter", return_value="black"
+    ), patch("lilith_cli.extra_commands.subprocess.run", return_value=fake_proc) as run:
+        _run(run_format_command(fake_session, f'"{target.name}" --check'))
+
+    cmd = run.call_args.args[0]
+    assert cmd == ["black", "--check", str(target.resolve())]
+    assert not run.call_args.kwargs.get("shell")
 
 
 # ── /format application path ──────────────────────────────────────────

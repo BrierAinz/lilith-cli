@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -50,3 +51,17 @@ def create_app(
     app.include_router(sessions.router, prefix="/api/sessions")
     app.include_router(health.router, prefix="/api/health")
     return app
+
+
+def create_app_from_env() -> FastAPI:
+    """Build the app from ``LILITH_WEB_*`` variables for ``uvicorn --reload``.
+
+    The bearer token is still read from ``LILITH_AUTH_TOKEN`` by the
+    authentication middleware.
+    """
+    origins = [item for item in os.environ.get("LILITH_WEB_ORIGINS", "").split(",") if item]
+    return create_app(
+        workspace=os.environ.get("LILITH_WEB_WORKSPACE"),
+        allowed_origins=origins or None,
+        config_path=os.environ.get("LILITH_WEB_CONFIG") or None,
+    )

@@ -22,11 +22,13 @@ dependencies = [
     "pygments>=2.16",
     "textual>=0.70",
     "pywinpty>=2.0; sys_platform == 'win32'",
-    "qrcode>=8.2",
     "jsonschema>=4.26.0",
 ]
 
 [project.optional-dependencies]
+qr = [
+    "qrcode>=8.2",
+]
 web = [
     "fastapi>=0.110,<0.121",
     "uvicorn[standard]>=0.27",

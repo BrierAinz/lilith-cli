@@ -537,7 +537,14 @@ async def run_qr_command(session: SessionRuntime, args: str) -> None:  # noqa: A
         /qr "hola mundo" --error-correction H --box-size 4 --border 2
         /qr --help
     """
-    import qrcode.exceptions
+    try:
+        import qrcode.exceptions
+    except ImportError:
+        render_error(
+            "/qr necesita el paquete qrcode. Instálalo con: "
+            "uv sync --package lilith-cli --extra qr"
+        )
+        return
 
     text = args.strip()
 

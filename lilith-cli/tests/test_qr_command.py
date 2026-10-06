@@ -294,3 +294,13 @@ def test_qr_save_with_error_correction_override(tmp_path: Path, fake_qrcode) -> 
     kwargs = fake_qrcode.qrcode_mod.make.call_args.kwargs
     assert kwargs["error_correction"] == qrcode.constants.ERROR_CORRECT_H
     assert fake_qrcode.qrcode_mod.make.return_value.save.called
+
+def test_qr_without_qrcode_installed_explains_the_extra(fake_session, capsys, monkeypatch):
+    """qrcode is an optional extra; /qr must say how to install it."""
+    from lilith_cli.extra_commands import run_qr_command
+
+    monkeypatch.setitem(sys.modules, "qrcode", None)
+    monkeypatch.setitem(sys.modules, "qrcode.exceptions", None)
+    asyncio.run(run_qr_command(fake_session, "hola"))
+    out = capsys.readouterr().out
+    assert "--extra qr" in out

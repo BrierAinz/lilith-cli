@@ -27,7 +27,8 @@ and `tests/test_slash_router.py` fail if either is missing.
 Small utilities (`/calc`, `/uuid`, `/hash`, `/base64`, `/epoch`, `/now`, `/random`,
 `/quote`, `/reverse`, `/lines`, `/qr`, `/timer`, `/voice`) ship as the bundled
 `utilities` command plugin. Turn it off with
-`LILITH_DISABLED_COMMAND_PLUGINS=utilities`.
+`LILITH_DISABLED_COMMAND_PLUGINS=utilities`. `/qr` needs the optional `qr` extra
+(`uv sync --package lilith-cli --extra qr`).
 
 Installed packages can add commands through the `lilith_cli.slash_commands` entry
 point group; the entry point resolves to a sequence of `SlashRoute` objects:

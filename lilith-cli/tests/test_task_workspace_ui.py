@@ -69,8 +69,10 @@ async def test_ui_executes_tool_checks_diff_and_accepts(tmp_path, monkeypatch, c
             screen.query_one("#allow-edit", Checkbox).value = True
             screen.execute()
             if control:
-                for _ in range(80):
-                    await pilot.pause(0.05)
+                # Slow Windows child-CLI boot can exceed a 4 s window; align the
+                # request-wait budget with the 15 s result-wait loop below.
+                for _ in range(150):
+                    await pilot.pause(0.1)
                     if request_started.is_set():
                         break
                 assert request_started.is_set()
@@ -133,6 +135,70 @@ async def test_memory_screen_edits_and_forgets_in_selected_scope(tmp_path, monke
         assert records(str(tmp_path))[0]["value"] == "Anime"
         await screen.forget()
         assert records(str(tmp_path)) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("removed_selector", ["#execute", "#activity", "#diff-view", "#live-status"])
+async def test_task_screen_completion_during_partial_teardown_preserves_result(tmp_path, removed_selector):
+    """Missing UI controls must not turn a verified task into a blocked result."""
+    class StubRun:
+        def __init__(self, spec):
+            self.spec, self.result, self.before = spec, {}, {}
+
+        async def execute(self, on_activity, resume=None):
+            entered.set()
+            await asyncio.wait_for(released.wait(), timeout=5)
+            self.result = {"status": "verified", "usage": {"total_tokens": 0}}
+            on_activity("fixture completed")
+            return self.result
+
+        def diff(self):
+            return "fixture diff"
+
+    entered, released = asyncio.Event(), asyncio.Event()
+    app = HearthApp(tmp_path, sessions=[], preferences=tmp_path / "prefs.yaml")
+    screen = TaskScreen(tmp_path, runner_factory=StubRun)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await app.push_screen(screen)
+        await pilot.pause()
+        screen.execute()
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        assert screen.busy
+        assert screen.query_one("#execute", Button).disabled
+        await screen.query_one(removed_selector).remove()
+        assert screen.is_mounted
+        if removed_selector != "#live-status":
+            assert screen.query_one("#live-status") is not None
+        released.set()
+        for _ in range(50):
+            await pilot.pause(0.05)
+            if not screen.busy:
+                break
+        assert not screen.busy
+        assert screen.run.result == {"status": "verified", "usage": {"total_tokens": 0}}
+
+
+@pytest.mark.asyncio
+async def test_task_screen_worker_survives_app_shutdown_while_busy(tmp_path):
+    """Tearing the app down while a task worker is still awaiting must not raise
+    WorkerFailed: NoMatches('#execute') from the cancelled worker's cleanup."""
+    class StalledRun:
+        def __init__(self, spec):
+            self.spec, self.result, self.before = spec, {}, {}
+
+        async def execute(self, on_activity, resume=None):
+            entered.set()
+            await asyncio.Event().wait()
+
+    entered = asyncio.Event()
+    app = HearthApp(tmp_path, sessions=[], preferences=tmp_path / "prefs.yaml")
+    screen = TaskScreen(tmp_path, runner_factory=StalledRun)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await app.push_screen(screen)
+        await pilot.pause()
+        screen.execute()
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        assert screen.busy
 
 
 def test_acceptance_rejects_changes_after_review(tmp_path):

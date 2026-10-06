@@ -58,8 +58,13 @@ class CommandPaletteScreen(ModalScreen[Callable[[], Any] | None]):
             yield OptionList(id="palette-results", classes="modal-results")
 
     def on_mount(self) -> None:
-        self.call_after_refresh(self._update_list, "")
+        self.call_after_refresh(self._refresh_results)
         self.query_one("#palette-input", Input).focus()
+
+    def _refresh_results(self) -> None:
+        # Keys typed before the first refresh have already filtered the list;
+        # an empty query here would put every command back.
+        self._update_list(self.query_one("#palette-input", Input).value)
 
     def _update_list(self, query: str) -> None:
         self._filtered = [item for item in self._all_items if matches(query, item)]

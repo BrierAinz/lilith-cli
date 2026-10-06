@@ -1,40 +1,72 @@
-import create from 'zustand';
-import { useEffect } from 'react';
-import useWebSocket from '../hooks/useWebSocket';
+import { create } from 'zustand';
+import { openSocket } from '../api';
 
-interface ChatMessage {
-  id: string;
+export interface ChatMessage {
+  id: number;
+  role: 'user' | 'assistant' | 'error';
   content: string;
-  timestamp: Date;
+  toolErrors?: string[];
 }
+
+// Messages the server sends on /api/chat (see web_console/api/chat.py).
+type ServerEvent =
+  | { type: 'status'; status: string }
+  | { type: 'chat_result'; content: string; tool_errors?: string[]; cancelled?: boolean }
+  | { type: 'error'; message: string };
 
 interface ChatState {
   messages: ChatMessage[];
-  addMessage: (message: ChatMessage) => void;
+  running: boolean;
+  connected: boolean;
   connect: () => void;
+  send: (content: string) => void;
 }
 
-const useChatStore = create<ChatState>((set) => ({
-  messages: [],
-  addMessage: (message) => set((state) => ({ messages: [...state.messages, message] })),
-  connect: () => {}
-}));
+let socket: WebSocket | null = null;
+let nextId = 1;
 
-export function useChat() {
-  const chat = useChatStore();
-  const { sendMessage, lastMessage } = useWebSocket('/api/chat');
-
-  useEffect(() => {
-    if (lastMessage) {
-      chat.addMessage(JSON.parse(lastMessage.data));
-    }
-  }, [lastMessage]);
+export const useChatStore = create<ChatState>((set, get) => {
+  const push = (message: Omit<ChatMessage, 'id'>) =>
+    set((state) => ({ messages: [...state.messages, { ...message, id: nextId++ }] }));
 
   return {
-    ...chat,
-    sendMessage
+    messages: [],
+    running: false,
+    connected: false,
+    connect: () => {
+      if (socket && socket.readyState <= WebSocket.OPEN) return;
+      socket = openSocket('/api/chat');
+      socket.onopen = () => set({ connected: true });
+      socket.onclose = (event) => {
+        set({ connected: false, running: false });
+        if (event.code === 4401) push({ role: 'error', content: 'Token ausente o inválido.' });
+      };
+      socket.onmessage = (event) => {
+        const data = JSON.parse(event.data) as ServerEvent;
+        if (data.type === 'status') {
+          set({ running: data.status === 'running' });
+        } else if (data.type === 'chat_result') {
+          set({ running: false });
+          push({
+            role: 'assistant',
+            content: data.cancelled ? `${data.content}\n(cancelado)` : data.content,
+            toolErrors: data.tool_errors ?? [],
+          });
+        } else {
+          set({ running: false });
+          push({ role: 'error', content: data.message });
+        }
+      };
+    },
+    send: (content) => {
+      const text = content.trim();
+      if (!text || get().running) return;
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        push({ role: 'error', content: 'Sin conexión con el servidor.' });
+        return;
+      }
+      push({ role: 'user', content: text });
+      socket.send(JSON.stringify({ type: 'chat', content: text }));
+    },
   };
-}
-
-export { useChatStore };
-export default useChatStore;
+});

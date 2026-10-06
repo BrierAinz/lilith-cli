@@ -1,30 +1,40 @@
-import React, { useEffect, useRef } from 'react';
-import Editor from '@monaco-editor/react';
+import React from 'react';
 import { useFileStore } from '../stores/fileStore';
 
+// Read-only viewer: file changes go through the agent and its tool policy.
+// A plain <pre> keeps the console local-first (no editor bundle or CDN).
 const CodeEditor: React.FC = () => {
-  const editorRef = useRef(null);
-  const { currentFile, unsavedChanges, saveFile } = useFileStore();
+  const { currentFile, content } = useFileStore();
 
-  const handleEditorDidMount = (editor: any) => {
-    editorRef.current = editor;
-  };
+  if (!currentFile) {
+    return (
+      <section className="flex-1 flex items-center justify-center text-steel">
+        Elige un archivo para verlo.
+      </section>
+    );
+  }
 
-  useEffect(() => {
-    if (editorRef.current && currentFile) {
-      // Load file content into editor
-    }
-  }, [currentFile]);
-
+  const lines = content.split('\n');
   return (
-    <div className="flex-grow">
-      <Editor
-        height="100%"
-        theme="nordic-frost"
-        language="typescript"
-        onMount={handleEditorDidMount}
-      />
-    </div>
+    <section className="flex-1 min-w-0 flex flex-col">
+      <header className="px-3 py-2 text-sm text-frost border-b border-steel truncate">
+        {currentFile}
+      </header>
+      <div className="flex-1 overflow-auto font-mono text-sm">
+        <table className="border-collapse">
+          <tbody>
+            {lines.map((line, index) => (
+              <tr key={index}>
+                <td className="select-none text-right pr-4 pl-3 text-steel align-top">
+                  {index + 1}
+                </td>
+                <td className="whitespace-pre pr-4">{line}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 };
 

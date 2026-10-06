@@ -15,6 +15,21 @@ def _loopback(host: str) -> bool:
         return False
 
 
+def _print_access_hint(host: str, port: int, has_token: bool) -> None:
+    from .server import FRONTEND_DIST
+
+    url = f"http://{host}:{port}/"
+    if not (FRONTEND_DIST / "index.html").is_file():
+        print(
+            f"API en {url}api — la interfaz no está compilada: "
+            "ejecuta `npm ci && npm run build` en lilith_cli/web_console/frontend."
+        )
+    elif has_token:
+        print(f"Abre {url}#token=<LILITH_AUTH_TOKEN> (el fragmento no llega al servidor).")
+    else:
+        print(f"Abre {url}")
+
+
 def web(
     root: str = ".",
     host: str = "127.0.0.1",
@@ -69,6 +84,7 @@ def web(
         allowed_origins=origins,
         config_path=config,
     )
+    _print_access_hint(host, port, bool(token))
     uvicorn.run(
         app,
         host=host,

@@ -165,3 +165,18 @@ def test_authenticated_chat_uses_canonical_runtime(tmp_path: Path, monkeypatch) 
     assert result["type"] == "chat_result"
     assert result["content"] == "echo:hello"
     assert result["usage"]["total_tokens"] == 3
+
+
+def test_built_frontend_is_served_without_exposing_the_api(tmp_path: Path) -> None:
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<div id=root></div>", encoding="utf-8")
+    (dist / "assets" / "app.js").write_text("console.log(1)", encoding="utf-8")
+    client = TestClient(create_app(
+        workspace=str(tmp_path), auth_token=TOKEN, frontend_dir=dist,
+    ))
+
+    assert client.get("/").text == "<div id=root></div>"
+    assert client.get("/assets/app.js").status_code == 200
+    assert client.get("/api/files").status_code == 401
+    assert client.get("/api/health/").status_code == 200

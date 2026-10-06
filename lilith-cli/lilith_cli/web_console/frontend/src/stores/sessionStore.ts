@@ -1,25 +1,25 @@
-import create from 'zustand';
+import { create } from 'zustand';
+import { apiGet } from '../api';
 
-interface SessionState {
-  session: string | null;
-  startSession: () => Promise<void>;
-  endSession: () => Promise<void>;
+interface Health {
+  version: string;
+  workspace: string;
 }
 
-const useSessionStore = create<SessionState>((set) => ({
-  session: null,
-  startSession: async () => {
-    // Start session via API
-    const response = await fetch('/api/session/start', { method: 'POST' });
-    const data = await response.json();
-    set({ session: data.sessionId });
-  },
-  endSession: async () => {
-    // End session via API
-    await fetch('/api/session/end', { method: 'POST' });
-    set({ session: null });
-  }
-}));
+interface SessionState {
+  health: Health | null;
+  loadHealth: () => Promise<void>;
+}
 
-export { useSessionStore };
-export default useSessionStore;
+// /api/health is exempt from authentication, so the header can show the
+// workspace even before a token is entered.
+export const useSessionStore = create<SessionState>((set) => ({
+  health: null,
+  loadHealth: async () => {
+    try {
+      set({ health: await apiGet<Health>('/api/health/') });
+    } catch {
+      set({ health: null });
+    }
+  },
+}));

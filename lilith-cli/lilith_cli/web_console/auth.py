@@ -12,7 +12,8 @@ import secrets
 from collections.abc import Iterable
 from urllib.parse import urlsplit
 
-EXEMPT_PATHS = {"/api/health", "/docs", "/openapi.json", "/redoc"}
+# The static app shell carries no data; the API behind it stays protected.
+EXEMPT_PATHS = {"/", "/index.html", "/api/health", "/docs", "/openapi.json", "/redoc"}
 
 
 def _headers(scope: dict) -> dict[str, str]:

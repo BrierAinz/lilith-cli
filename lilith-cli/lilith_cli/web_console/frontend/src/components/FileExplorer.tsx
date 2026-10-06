@@ -1,27 +1,41 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { useFileStore } from '../stores/fileStore';
 
-interface FileNodeProps {
-  file: FileNode;
-}
+const FileExplorer: React.FC = () => {
+  const { files, currentFile, openFile } = useFileStore();
+  const [filter, setFilter] = useState('');
 
-const FileNode: React.FC<FileNodeProps> = ({ file }) => {
-  const { openFile } = useFileStore();
+  const visible = useMemo(() => {
+    const needle = filter.trim().toLowerCase();
+    return needle ? files.filter((file) => file.path.toLowerCase().includes(needle)) : files;
+  }, [files, filter]);
 
   return (
-    <div onClick={() => openFile(file.path)} className="cursor-pointer p-2 hover:bg-bg-surface">
-      {file.name}
-    </div>
-  );
-};
-
-const FileExplorer: React.FC<{ files: FileNode[] }> = ({ files }) => {
-  return (
-    <div className="w-64 bg-bg-deep overflow-y-auto">
-      {files.map((file) => (
-        <FileNode key={file.path} file={file} />
-      ))}
-    </div>
+    <aside className="w-72 shrink-0 flex flex-col bg-bg-deep border-r border-steel">
+      <input
+        value={filter}
+        onChange={(event) => setFilter(event.target.value)}
+        placeholder="Filtrar archivos"
+        aria-label="Filtrar archivos"
+        className="m-2 p-2 bg-bg-surface border border-steel rounded text-sm"
+      />
+      <ul className="flex-1 overflow-y-auto text-sm">
+        {visible.map((file) => (
+          <li key={file.path}>
+            <button
+              type="button"
+              onClick={() => openFile(file.path)}
+              className={`w-full text-left px-3 py-1 truncate hover:bg-bg-surface ${
+                file.path === currentFile ? 'bg-bg-elevated text-frost' : ''
+              }`}
+              title={file.path}
+            >
+              {file.path}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </aside>
   );
 };
 

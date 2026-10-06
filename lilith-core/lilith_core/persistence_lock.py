@@ -1,6 +1,7 @@
 """Cross-process locks for cooperating local JSON writers."""
 
 import os
+import sys
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -16,7 +17,7 @@ def storage_lock(path: Path, timeout: float = 10.0) -> Iterator[None]:
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.with_name(f".{path.name}.lock").open("a+b") as handle:
-        if os.name == "nt":
+        if sys.platform == "win32":
             import msvcrt
 
             if handle.seek(0, os.SEEK_END) == 0:

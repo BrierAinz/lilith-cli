@@ -10,7 +10,7 @@ proceso (header ``X-Forja-Token``).
 import mimetypes
 import os
 import time
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import requests
 
@@ -460,7 +460,7 @@ class ForjaDesignBatchTool(BaseTool):
             return ToolResult(success=False, data=None, error="retries debe estar entre 0 y 5")
 
         base_url = _resolve_base_url()
-        body = {
+        body: dict[str, Any] = {
             "brief": brief.strip(),
             "count": count,
             "product": product.strip() or "t-shirt",

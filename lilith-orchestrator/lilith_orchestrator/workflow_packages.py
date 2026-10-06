@@ -32,6 +32,8 @@ This module is intentionally filesystem-only (no DB) so packages are git-friendl
 
 from __future__ import annotations
 
+import builtins
+
 import logging
 import shutil
 from dataclasses import dataclass, field
@@ -546,7 +548,7 @@ class WorkflowPackageRegistry:
 
     # ── inspection ───────────────────────────────────────────────────────────
 
-    def summary(self) -> list[dict[str, Any]]:
+    def summary(self) -> builtins.list[dict[str, Any]]:
         """Return a lightweight summary of every registered package.
 
         Each entry has name, version, description, tags, and step count

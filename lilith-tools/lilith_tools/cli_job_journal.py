@@ -90,7 +90,7 @@ class CliJobJournal:
         request_id: str | None,
         execution_context: str,
     ) -> tuple[str, bool]:
-        if not isinstance(agent, str) or agent not in ("Vor", "Huginn"):
+        if not isinstance(agent, str) or agent not in ("Vor", "Huginn", "Muninn"):
             raise ValueError("Unknown collaborator")
         if (
             not isinstance(task, str)

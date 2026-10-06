@@ -7,8 +7,8 @@ import json
 import sqlite3
 import time
 import uuid
+from contextlib import closing
 from typing import TYPE_CHECKING, Any
-
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -55,7 +55,7 @@ class EpisodicMemory:
 
     def _init_db(self) -> None:
         """Create the episodic_memories table and indexes."""
-        with sqlite3.connect(self._db_path) as conn:
+        with closing(sqlite3.connect(self._db_path)) as conn, conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute(
                 """
@@ -147,7 +147,7 @@ class EpisodicMemory:
         now = time.time()
 
         def _insert() -> None:
-            with sqlite3.connect(self._db_path) as conn:
+            with closing(sqlite3.connect(self._db_path)) as conn, conn:
                 conn.execute(
                     "PRAGMA journal_mode=WAL",
                 )
@@ -187,7 +187,7 @@ class EpisodicMemory:
         escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
         def _search() -> list[dict[str, Any]]:
-            with sqlite3.connect(self._db_path) as conn:
+            with closing(sqlite3.connect(self._db_path)) as conn, conn:
                 conn.row_factory = sqlite3.Row
                 conn.execute("PRAGMA journal_mode=WAL")
                 rows = conn.execute(
@@ -213,7 +213,7 @@ class EpisodicMemory:
         now = time.time()
 
         def _recent() -> list[dict[str, Any]]:
-            with sqlite3.connect(self._db_path) as conn:
+            with closing(sqlite3.connect(self._db_path)) as conn, conn:
                 conn.row_factory = sqlite3.Row
                 conn.execute("PRAGMA journal_mode=WAL")
                 rows = conn.execute(
@@ -248,7 +248,7 @@ class EpisodicMemory:
         """
 
         def _consolidate() -> list[dict[str, Any]]:
-            with sqlite3.connect(self._db_path) as conn:
+            with closing(sqlite3.connect(self._db_path)) as conn, conn:
                 conn.row_factory = sqlite3.Row
                 conn.execute("PRAGMA journal_mode=WAL")
                 # Recompute decay scores and select high-value entries
@@ -280,7 +280,7 @@ class EpisodicMemory:
         cutoff = now - self._decay_seconds
 
         def _prune() -> int:
-            with sqlite3.connect(self._db_path) as conn:
+            with closing(sqlite3.connect(self._db_path)) as conn, conn:
                 conn.execute("PRAGMA journal_mode=WAL")
                 cursor = conn.execute(
                     "DELETE FROM episodic_memories WHERE timestamp < ?",
@@ -295,7 +295,7 @@ class EpisodicMemory:
         """Return the total number of episodic memory entries."""
 
         def _count() -> int:
-            with sqlite3.connect(self._db_path) as conn:
+            with closing(sqlite3.connect(self._db_path)) as conn, conn:
                 conn.execute("PRAGMA journal_mode=WAL")
                 row = conn.execute("SELECT COUNT(*) FROM episodic_memories").fetchone()
                 return row[0] if row else 0

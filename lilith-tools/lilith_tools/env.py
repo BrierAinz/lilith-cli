@@ -104,7 +104,7 @@ class SysInfoTool(BaseTool):
         """Obtiene información del sistema operativo, Python y espacio en disco."""
         try:
             total, used, free = shutil.disk_usage(".")
-            disk_info = {
+            disk_info: dict[str, Any] = {
                 "total": total,
                 "used": used,
                 "free": free,

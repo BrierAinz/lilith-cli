@@ -123,6 +123,7 @@ def create_server() -> Server:
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
+        payload: dict[str, Any]
         try:
             if name == "policy_check":
                 engine = _get_engine()

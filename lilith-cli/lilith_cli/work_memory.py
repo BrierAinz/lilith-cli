@@ -4,8 +4,9 @@ import asyncio
 import hashlib
 import json
 import os
-from pathlib import Path
 import sqlite3
+from contextlib import closing
+from pathlib import Path
 
 from cyclopts import App
 
@@ -29,7 +30,7 @@ def records(project: str | None = None) -> list[dict]:
     path = memory_path()
     if not path.is_file():
         return []
-    with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as conn:
+    with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as conn, conn:
         conn.row_factory = sqlite3.Row
         try:
             rows = conn.execute("SELECT key,value,source,timestamp FROM user_preferences ORDER BY key").fetchall()

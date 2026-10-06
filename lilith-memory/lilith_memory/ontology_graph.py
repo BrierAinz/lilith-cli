@@ -19,9 +19,10 @@ import sqlite3
 import time
 import uuid
 from collections import deque
+from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, Iterator
 
 
 # ── Enums ────────────────────────────────────────────────────────────────
@@ -163,14 +164,29 @@ class OntologyGraph:
 
     def __init__(self, db_path: str | Any = ":memory:") -> None:
         self._db_path = str(db_path) if not isinstance(db_path, str) else db_path
+        # Every connect(":memory:") is a new, empty database, so the
+        # in-memory graph keeps one connection for its whole lifetime.
+        self._memory_conn: sqlite3.Connection | None = (
+            self._open() if self._db_path == ":memory:" else None
+        )
         self._init_db()
 
-    def _get_conn(self) -> sqlite3.Connection:
+    def _open(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
+
+    @contextmanager
+    def _get_conn(self) -> Iterator[sqlite3.Connection]:
+        """Yield a connection inside a transaction; file connections are closed after."""
+        if self._memory_conn is not None:
+            with self._memory_conn:
+                yield self._memory_conn
+            return
+        with closing(self._open()) as conn, conn:
+            yield conn
 
     def _init_db(self) -> None:
         with self._get_conn() as conn:

@@ -226,8 +226,8 @@ def rule_unique_step_names(
         else:
             seen[step.name] = i
     if report is not None:
-        for i in issues:
-            report.add(i)
+        for issue in issues:
+            report.add(issue)
     return issues
 
 
@@ -272,8 +272,8 @@ def rule_known_agents(
                 )
             )
     if report is not None:
-        for i in issues:
-            report.add(i)
+        for issue in issues:
+            report.add(issue)
     return issues
 
 
@@ -305,8 +305,8 @@ def rule_unique_output_keys(
         else:
             seen[step.output_key] = step.name
     if report is not None:
-        for i in issues:
-            report.add(i)
+        for issue in issues:
+            report.add(issue)
     return issues
 
 
@@ -366,8 +366,8 @@ def rule_input_keys_resolvable(
         cumulative.add(step.output_key)
         seen_steps.add(step.name)
     if report is not None:
-        for i in issues:
-            report.add(i)
+        for issue in issues:
+            report.add(issue)
     return issues
 
 
@@ -437,8 +437,8 @@ def rule_no_cycles_in_input_chain(
             visit(step.name, [])
 
     if report is not None:
-        for i in issues:
-            report.add(i)
+        for issue in issues:
+            report.add(issue)
     return issues
 
 
@@ -483,8 +483,8 @@ def rule_gate_consistency(
                     )
                 )
     if report is not None:
-        for i in issues:
-            report.add(i)
+        for issue in issues:
+            report.add(issue)
     return issues
 
 
@@ -530,8 +530,8 @@ def rule_unused_variables(
             )
         )
     if report is not None:
-        for i in issues:
-            report.add(i)
+        for issue in issues:
+            report.add(issue)
     return issues
 
 
@@ -569,8 +569,8 @@ def rule_orphan_output_keys(
             )
         )
     if report is not None:
-        for i in issues:
-            report.add(i)
+        for issue in issues:
+            report.add(issue)
     return issues
 
 

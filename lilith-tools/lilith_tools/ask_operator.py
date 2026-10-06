@@ -97,7 +97,7 @@ class AskOperatorTool(BaseTool):
         if not (_is_tty(stdin) and _is_tty(stdout)):
             return ToolResult(False, None, "No hay un operador delante de una terminal interactiva. No puedo esperar una selección: formula la pregunta en prosa y continúa.")
 
-        choices = [dict(option) for option in options] + [_OTHER]
+        choices = [dict(option) for option in options or []] + [_OTHER]
         theme = None
         try:
             from lilith_cli.render import console, get_theme

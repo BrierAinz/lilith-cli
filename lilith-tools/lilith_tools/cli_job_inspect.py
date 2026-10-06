@@ -77,7 +77,7 @@ class CliJobReferenceTool(BaseTool):
         from .cli_job_journal import CliJobJournal
 
         try:
-            saved = CliJobJournal().lookup(kwargs.get("reference"))
+            saved = CliJobJournal().lookup(kwargs.get("reference", ""))
         except (OSError, ValueError, sqlite3.Error):
             return ToolResult(
                 False,
@@ -163,7 +163,7 @@ class CliJobInspectTool(BaseTool):
                 data={"status": "invalid_input"},
                 error="Provide agent Vor/Huginn and job_id YYYYMMDD-HHMMSS-NNNN",
             )
-        data = {
+        data: dict[str, Any] = {
             "agent": agent,
             "job_id": job_id,
             "status": "unknown",

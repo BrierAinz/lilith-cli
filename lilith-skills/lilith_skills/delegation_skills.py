@@ -8,6 +8,8 @@ while this registry has a strict runtime schema and user-level lifecycle under
 
 from __future__ import annotations
 
+import builtins
+
 import hashlib
 import json
 import os
@@ -175,7 +177,7 @@ class DelegationSkillRegistry:
                 continue
         return sorted(skills, key=lambda item: item.name)
 
-    def names(self) -> list[str]:
+    def names(self) -> builtins.list[str]:
         return [skill.name for skill in self.list()]
 
     def get(self, name: str) -> DelegationSkill | None:
@@ -211,7 +213,7 @@ class DelegationSkillRegistry:
         self.save(skill)
         return SkillVersionRecord(**record, active=True)
 
-    def versions(self, name: str) -> list[SkillVersionRecord]:
+    def versions(self, name: str) -> builtins.list[SkillVersionRecord]:
         active_hash = self._active_hash(name)
         root = self._versions_dir(name, create=False)
         if not root.is_dir():

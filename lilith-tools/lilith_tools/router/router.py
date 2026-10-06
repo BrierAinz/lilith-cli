@@ -341,9 +341,8 @@ class SmartToolRouter:
         if key in self._active_sandboxes:
             return self._active_sandboxes[key]
 
-        policy = self._sandbox_registry.get(agent_name)
-        if policy is None:
-            policy = SandboxPolicy(name="default", rules=[])
+        registered = self._sandbox_registry.get(agent_name)
+        policy = registered if registered is not None else SandboxPolicy(name="default", rules=[])
 
         sandbox = AgentSandbox(policy)
         self._active_sandboxes[key] = sandbox

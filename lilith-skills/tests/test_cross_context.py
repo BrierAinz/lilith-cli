@@ -734,6 +734,14 @@ class TestAuditLog:
         evs = log.filter(until="2024-01-02T23:59:59")
         assert len(evs) == 2
 
+    def test_filter_by_datetime(self, populated_ygg: Path):
+        """Regression: datetime bounds were parsed as None and ignored."""
+        from datetime import datetime
+
+        log = AuditLog(populated_ygg)
+        assert len(log.filter(since=datetime(2024, 1, 2))) == len(log.filter(since="2024-01-02"))
+        assert len(log.filter(since=datetime(2024, 1, 2))) < len(log.filter())
+
     def test_filter_with_limit(self, populated_ygg: Path):
         log = AuditLog(populated_ygg)
         evs = log.filter(limit=2)

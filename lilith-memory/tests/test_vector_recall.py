@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import math
 import os
-import tempfile
 
 import pytest
 
@@ -211,21 +210,9 @@ class TestHashEmbedderSimilarity:
 
 
 @pytest.fixture
-def tmp_db():
-    """File-based DB in a temp dir, cleaned up after the test."""
-    td = tempfile.mkdtemp()
-    p = os.path.join(td, "recall.db")
-    yield p
-    # Best-effort cleanup
-    for f in os.listdir(td):
-        try:
-            os.remove(os.path.join(td, f))
-        except OSError:
-            pass
-    try:
-        os.rmdir(td)
-    except OSError:
-        pass
+def tmp_db(tmp_path):
+    """File-based DB in a temp dir that pytest removes afterwards."""
+    return str(tmp_path / "recall.db")
 
 
 @pytest.fixture
@@ -275,16 +262,8 @@ class TestVectorRecallBasics:
 
     def test_db_path_creates_parents(self, tmp_db):
         nested = os.path.join(os.path.dirname(tmp_db), "sub", "deep", "x.db")
-        e = HashEmbedder(dim=64)
-        try:
-            VectorRecall(nested, embedder=e)
-            assert os.path.exists(nested)
-        finally:
-            try:
-                os.remove(nested)
-                os.removedirs(os.path.dirname(nested))
-            except OSError:
-                pass
+        VectorRecall(nested, embedder=HashEmbedder(dim=64))
+        assert os.path.exists(nested)
 
     def test_default_embedder_and_chunker(self, tmp_db):
         r = VectorRecall(tmp_db)

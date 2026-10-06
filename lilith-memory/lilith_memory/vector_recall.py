@@ -59,9 +59,10 @@ import math
 import re
 import sqlite3
 from collections import Counter
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 from lilith_memory.chunker import Chunk, SemanticChunker
 from lilith_memory.read_guard import ReadPolicy, guard
@@ -305,17 +306,25 @@ class VectorRecall:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.embedder = embedder or HashEmbedder(dim=1024)
         self.chunker = chunker or SemanticChunker(target_size=512, overlap=64)
-        if self._in_memory:
-            self._conn = sqlite3.connect(":memory:")
-        else:
-            self._conn = None
+        self._conn: sqlite3.Connection | None = (
+            sqlite3.connect(":memory:") if self._in_memory else None
+        )
         self._init_db()
 
-    def _connect(self):
-        """Return a connection. For :memory:, reuses the long-lived one."""
-        if self._in_memory:
-            return self._conn
-        return sqlite3.connect(self.db_path)
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        """Yield a connection inside a transaction.
+
+        ``:memory:`` reuses the long-lived connection; file databases get a
+        fresh connection that is closed afterwards (``with connect(...)``
+        alone only commits, it never closes).
+        """
+        if self._conn is not None:
+            with self._conn:
+                yield self._conn
+            return
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
+            yield conn
 
     def _init_db(self) -> None:
         with self._connect() as conn:

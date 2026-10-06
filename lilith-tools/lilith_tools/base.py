@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 
 @dataclass
@@ -30,10 +30,10 @@ class BaseTool(ABC):
 
     name: str = ""
     description: str = ""
-    parameters: dict[str, Any] | None = None
+    parameters: ClassVar[dict[str, Any] | None] = None
 
     @abstractmethod
-    def execute(self, **kwargs: Any) -> ToolResult:
+    def execute(self, *args: Any, **kwargs: Any) -> ToolResult:
         """Ejecutar la herramienta con los argumentos dados."""
 
     def validate(self, params: dict[str, Any]) -> bool:

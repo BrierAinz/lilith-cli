@@ -7,10 +7,10 @@ import json
 import sqlite3
 import time
 import uuid
+from contextlib import closing
 from typing import TYPE_CHECKING, Any
 
 from .base import MemoryBackend
-
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -77,7 +77,7 @@ class ChromaBackend(MemoryBackend):
 
     def _init_meta_db(self) -> None:
         """Create the metadata SQLite table."""
-        with sqlite3.connect(self._meta_db_path) as conn:
+        with closing(sqlite3.connect(self._meta_db_path)) as conn, conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute(
                 """
@@ -131,7 +131,7 @@ class ChromaBackend(MemoryBackend):
                 metadatas=[metadata or {}],
                 embeddings=embed_fn([content]),
             )
-            with sqlite3.connect(self._meta_db_path) as conn:
+            with closing(sqlite3.connect(self._meta_db_path)) as conn, conn:
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute(
                     "INSERT INTO chroma_meta (id, content, metadata, timestamp) "
@@ -174,7 +174,7 @@ class ChromaBackend(MemoryBackend):
         """Return recent entries from the metadata database."""
 
         def _recent() -> list[dict[str, Any]]:
-            with sqlite3.connect(self._meta_db_path) as conn:
+            with closing(sqlite3.connect(self._meta_db_path)) as conn, conn:
                 conn.row_factory = sqlite3.Row
                 conn.execute("PRAGMA journal_mode=WAL")
                 rows = conn.execute(
@@ -199,7 +199,7 @@ class ChromaBackend(MemoryBackend):
 
         def _delete() -> bool:
             self._collection.delete(ids=[entry_id])
-            with sqlite3.connect(self._meta_db_path) as conn:
+            with closing(sqlite3.connect(self._meta_db_path)) as conn, conn:
                 conn.execute("PRAGMA journal_mode=WAL")
                 cursor = conn.execute(
                     "DELETE FROM chroma_meta WHERE id = ?",
@@ -218,7 +218,7 @@ class ChromaBackend(MemoryBackend):
             all_ids = self._collection.get()["ids"]
             if all_ids:
                 self._collection.delete(ids=all_ids)
-            with sqlite3.connect(self._meta_db_path) as conn:
+            with closing(sqlite3.connect(self._meta_db_path)) as conn, conn:
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("DELETE FROM chroma_meta")
                 conn.commit()
@@ -228,7 +228,7 @@ class ChromaBackend(MemoryBackend):
 
     def count(self) -> int:
         """Return the total number of entries in the metadata database."""
-        with sqlite3.connect(self._meta_db_path) as conn:
+        with closing(sqlite3.connect(self._meta_db_path)) as conn, conn:
             conn.execute("PRAGMA journal_mode=WAL")
             row = conn.execute("SELECT COUNT(*) FROM chroma_meta").fetchone()
             return row[0] if row else 0

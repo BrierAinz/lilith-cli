@@ -37,7 +37,7 @@ try:
     _HEIMDALL_AVAILABLE = True
 except ImportError:
     _HEIMDALL_AVAILABLE = False
-    HeimdallAuditor = None
+    HeimdallAuditor = None  # type: ignore[assignment,misc]
 
 
 if TYPE_CHECKING:
@@ -926,13 +926,6 @@ class LilithEngine:
 
     def _get_system_prompt(self) -> str:
         """Obtiene el system prompt por defecto."""
-        try:
-            from lilith_core.config import SYSTEM_PROMPT
-
-            return SYSTEM_PROMPT
-        except ImportError:
-            pass
-
         return (
             "Eres Lilith, una asistente inteligente y versátil. "
             "Respondes en el idioma del usuario con claridad y precisión."

@@ -77,7 +77,7 @@ except ImportError:  # pragma: no cover - lilith-core is a hard dep
     HookRegistry = None  # type: ignore[assignment,misc]
     HookType = None  # type: ignore[assignment,misc]
 
-    def get_hook_registry():  # type: ignore[no-redef]
+    def get_hook_registry():  # type: ignore[no-redef,misc]
         raise RuntimeError(
             "lilith_core.hooks unavailable; install lilith-core to enable hooks"
         )

@@ -455,7 +455,7 @@ class BatchEditTool(BaseTool):
                 # every backup created by this batch, not only successful
                 # writes. Otherwise the top pop restores the failed file and
                 # leaves the preceding file modified.
-                for _ in range(backup_count):
+                for _attempt in range(backup_count):
                     try:
                         UndoManager().pop()
                     except Exception:

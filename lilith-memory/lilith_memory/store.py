@@ -2,11 +2,11 @@
 
 import json
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
 from lilith_memory.read_guard import ReadPolicy, guard
-
 
 Scope = str | dict[str, Any]
 
@@ -60,7 +60,7 @@ class MemoryStore:
         self._init_db()
 
     def _init_db(self):
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS memories (
@@ -81,12 +81,13 @@ class MemoryStore:
 
     def store(self, session_id: str, role: str, content: str, metadata: dict | None = None) -> int:
         """Store a memory entry."""
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             cur = conn.execute(
                 "INSERT INTO memories (session_id, role, content, metadata) VALUES (?, ?, ?, ?)",
                 (session_id, role, content, json.dumps(metadata or {})),
             )
             conn.commit()
+            assert cur.lastrowid is not None  # set by a successful INSERT
             return cur.lastrowid
 
     def recall(
@@ -98,7 +99,7 @@ class MemoryStore:
         scope: Scope | None = None,
     ) -> list[dict[str, Any]]:
         """Recall memories for a session."""
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT * FROM memories WHERE session_id = ? ORDER BY id DESC LIMIT ?",
@@ -117,7 +118,7 @@ class MemoryStore:
         scope: Scope | None = None,
     ) -> list[dict[str, Any]]:
         """Simple text search across memories."""
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT * FROM memories WHERE content LIKE ? ORDER BY created_at DESC LIMIT ?",
@@ -128,11 +129,11 @@ class MemoryStore:
         return guard(scoped, requester=requester, policy=policy)
 
     def count(self) -> int:
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             return conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
 
     def sessions(self) -> list[str]:
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             rows = conn.execute("SELECT DISTINCT session_id FROM memories").fetchall()
             return [r[0] for r in rows]
 
@@ -164,14 +165,14 @@ class MemoryStore:
 
     def delete(self, entry_id: int) -> bool:
         """Delete an entry by id. Returns True if deleted."""
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             cur = conn.execute("DELETE FROM memories WHERE id = ?", (entry_id,))
             conn.commit()
             return cur.rowcount > 0
 
     def clear(self) -> int:
         """Remove all entries. Returns count removed."""
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             count = conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
             conn.execute("DELETE FROM memories")
             conn.commit()

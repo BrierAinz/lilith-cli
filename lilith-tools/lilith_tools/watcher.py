@@ -80,6 +80,8 @@ class _WatchManager:
     """In-memory manager for active file watches."""
 
     _instance: _WatchManager | None = None
+    _watches: dict[str, _WatchEntry]
+    _counter: int
     _lock = threading.Lock()
 
     def __new__(cls) -> _WatchManager:
@@ -87,7 +89,7 @@ class _WatchManager:
             with cls._lock:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
-                    cls._instance._watches: dict[str, _WatchEntry] = {}
+                    cls._instance._watches = {}
                     cls._instance._counter = 0
         return cls._instance
 

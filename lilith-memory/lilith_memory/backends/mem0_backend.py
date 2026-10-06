@@ -7,6 +7,7 @@ import contextlib
 import json
 import os
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -98,7 +99,7 @@ class Mem0Backend(MemoryBackend):
     def _init_meta_db(self) -> None:
         """Create a lightweight SQLite db to track entry count & id mapping."""
         self._local_db_path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self._local_db_path) as conn:
+        with closing(sqlite3.connect(self._local_db_path)) as conn, conn:
             conn.execute(
                 """CREATE TABLE IF NOT EXISTS mem0_meta (
                      id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -127,7 +128,7 @@ class Mem0Backend(MemoryBackend):
             # Fallback: use the content hash as identifier
             mem0_id = str(hash(content))
 
-        with sqlite3.connect(self._local_db_path) as conn:
+        with closing(sqlite3.connect(self._local_db_path)) as conn, conn:
             conn.execute(
                 "INSERT INTO mem0_meta (mem0_id, content, metadata) VALUES (?, ?, ?)",
                 (mem0_id, content, json.dumps(metadata) if metadata else None),
@@ -162,7 +163,7 @@ class Mem0Backend(MemoryBackend):
 
     async def _local_search(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
         """Fallback substring search over the local meta db."""
-        with sqlite3.connect(self._local_db_path) as conn:
+        with closing(sqlite3.connect(self._local_db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
             escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             rows = conn.execute(
@@ -173,7 +174,7 @@ class Mem0Backend(MemoryBackend):
 
     async def recent(self, limit: int = 10) -> list[dict[str, Any]]:
         """Return recent entries from the local meta db."""
-        with sqlite3.connect(self._local_db_path) as conn:
+        with closing(sqlite3.connect(self._local_db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT * FROM mem0_meta ORDER BY id DESC LIMIT ?",
@@ -186,7 +187,7 @@ class Mem0Backend(MemoryBackend):
         with contextlib.suppress(Exception):
             await asyncio.to_thread(self._mem.delete, entry_id)
 
-        with sqlite3.connect(self._local_db_path) as conn:
+        with closing(sqlite3.connect(self._local_db_path)) as conn, conn:
             cursor = conn.execute("DELETE FROM mem0_meta WHERE mem0_id = ?", (entry_id,))
             conn.commit()
             return cursor.rowcount > 0
@@ -199,7 +200,7 @@ class Mem0Backend(MemoryBackend):
         with contextlib.suppress(Exception):
             await asyncio.to_thread(self._mem.reset)
 
-        with sqlite3.connect(self._local_db_path) as conn:
+        with closing(sqlite3.connect(self._local_db_path)) as conn, conn:
             conn.execute("DELETE FROM mem0_meta")
             conn.commit()
 
@@ -207,6 +208,6 @@ class Mem0Backend(MemoryBackend):
 
     def count(self) -> int:
         """Return the total number of entries in the local meta db."""
-        with sqlite3.connect(self._local_db_path) as conn:
+        with closing(sqlite3.connect(self._local_db_path)) as conn, conn:
             row = conn.execute("SELECT COUNT(*) FROM mem0_meta").fetchone()
             return row[0] if row else 0

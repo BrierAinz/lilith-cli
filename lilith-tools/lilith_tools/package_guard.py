@@ -83,13 +83,13 @@ class GuardVerdict(str, Enum):
     def __lt__(self, other: "GuardVerdict") -> bool:  # type: ignore[override]
         return self.severity < other.severity
 
-    def __le__(self, other: "GuardVerdict") -> bool:
+    def __le__(self, other: "GuardVerdict") -> bool:  # type: ignore[override]
         return self.severity <= other.severity
 
-    def __gt__(self, other: "GuardVerdict") -> bool:
+    def __gt__(self, other: "GuardVerdict") -> bool:  # type: ignore[override]
         return self.severity > other.severity
 
-    def __ge__(self, other: "GuardVerdict") -> bool:
+    def __ge__(self, other: "GuardVerdict") -> bool:  # type: ignore[override]
         return self.severity >= other.severity
 
 

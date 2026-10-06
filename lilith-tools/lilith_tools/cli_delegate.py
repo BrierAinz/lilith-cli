@@ -9,15 +9,11 @@ closed without reserving or launching work.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
 import sqlite3
 import subprocess
-import uuid
-from contextlib import closing
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -25,81 +21,6 @@ from .base import BaseTool, ToolResult
 from .cli_job_journal import CliJobJournal
 from .registry import ToolRegistry
 
-_orig_journal_reserve = CliJobJournal.reserve
-
-
-def _journal_reserve(
-    self: CliJobJournal,
-    agent: str,
-    task: str,
-    timeout: int,
-    request_id: str | None,
-    execution_context: str,
-) -> tuple[str, bool]:
-    if agent == "Muninn":
-        if (
-            not isinstance(task, str)
-            or type(timeout) is not int
-            or not 1 <= timeout <= 86400
-        ):
-            raise ValueError("Invalid delegation task or timeout")
-        if request_id is not None and (
-            not isinstance(request_id, str)
-            or not re.fullmatch(r"[a-f0-9]{32}", request_id)
-        ):
-            raise ValueError("request_id must be 32 lowercase hex characters")
-        intent = hashlib.sha256(
-            json.dumps(
-                [agent, task, timeout, execution_context], ensure_ascii=True
-            ).encode()
-        ).hexdigest()
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        reference = uuid.uuid4().hex
-        with closing(sqlite3.connect(self.path, timeout=5)) as conn, conn:
-            conn.execute("BEGIN IMMEDIATE")
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS attempts ("
-                "reference TEXT PRIMARY KEY, agent TEXT NOT NULL, "
-                "task_sha256 TEXT NOT NULL, timeout INTEGER NOT NULL, "
-                "created_at TEXT NOT NULL, observation TEXT)"
-            )
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS requests (request_id TEXT PRIMARY KEY, "
-                "intent_sha256 TEXT NOT NULL, reference TEXT NOT NULL)"
-            )
-            if request_id is not None:
-                previous = conn.execute(
-                    "SELECT intent_sha256, reference FROM requests WHERE request_id=?",
-                    (request_id,),
-                ).fetchone()
-                if previous is not None:
-                    if previous[0] != intent:
-                        raise ValueError(
-                            "request_id is already bound to different instructions or parameters"
-                        )
-                    return previous[1], False
-            conn.execute(
-                "INSERT INTO attempts VALUES (?, ?, ?, ?, ?, NULL)",
-                (
-                    reference,
-                    agent,
-                    hashlib.sha256(task.encode("utf-8")).hexdigest(),
-                    timeout,
-                    datetime.now(UTC).isoformat(),
-                ),
-            )
-            if request_id is not None:
-                conn.execute(
-                    "INSERT INTO requests VALUES (?, ?, ?)",
-                    (request_id, intent, reference),
-                )
-        return reference, True
-    return _orig_journal_reserve(
-        self, agent, task, timeout, request_id, execution_context
-    )
-
-
-CliJobJournal.reserve = _journal_reserve
 
 OUTPUT_CHAR_LIMIT = 5000
 DEFAULT_TIMEOUT = 1800
